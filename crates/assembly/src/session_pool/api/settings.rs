@@ -206,7 +206,7 @@ pub struct SettingsReloaded {
     pub providers: Vec<String>,
     pub order: Vec<String>,
     pub routing: RoutingStatus,
-    /// The settings read only at start (`settings::scope::READ_AT_START`)
+    /// The settings read only at start (`read_at_start` in `settings::keys`)
     /// whose value is not what this process started with, dotted, and
     /// `managed` when the managed settings file is not what it read then:
     /// these take effect only after a restart.

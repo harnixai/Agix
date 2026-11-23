@@ -537,16 +537,16 @@ impl Default for Fleet {
 
 impl crate::section::Section for Fleet {
     const KEY: &'static str = "fleet";
-    const PROJECT_TIER: &'static [(&'static str, crate::tier_gate::ProjectKey)] = {
-        use crate::tier_gate::Order::{FalseTighter, Lower, SubsetEmptyIsAll};
-        use crate::tier_gate::ProjectKey::Tighten;
+    const KEYS: &'static [crate::keys::Key] = {
+        use crate::keys::Key;
+        use crate::keys::Order::{FalseTighter, Lower, SubsetEmptyIsAll};
         &[
-            ("enabled", Tighten(FalseTighter)),
-            ("allow", Tighten(SubsetEmptyIsAll)),
-            ("limit", Tighten(Lower)),
+            Key::at("").scope(crate::keys::Scope::Session),
+            Key::at("enabled").tighten(FalseTighter),
+            Key::at("allow").tighten(SubsetEmptyIsAll),
+            Key::at("limit").tighten(Lower),
         ]
     };
-    const SCOPE: crate::scope::Scope = crate::scope::Scope::Session;
 }
 
 fn fleet_sections() -> Sections {

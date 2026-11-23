@@ -4,6 +4,11 @@
 //! without a value left out; the few the docs show on purpose as ignored must
 //! be refused by both. An editor flagging a documented example, or the loader
 //! quietly dropping one the schema accepts, is the same mismatch.
+//!
+//! The README's settings tables (a `Setting | Default` header) must name only
+//! settings keys, and a default written as one literal must be the built-in one.
+//! Every key the schema has is governed by a row of the key table
+//! (`settings::keys`).
 
 #![cfg(feature = "agents")]
 #![allow(clippy::unwrap_used)]
@@ -264,19 +269,10 @@ fn write_settings_schema() {
 }
 
 #[test]
-fn every_settings_key_has_a_project_tier_entry() {
+fn every_settings_key_has_a_row() {
     let schema = settings_json_schema(&settings_sections::all());
     assert_eq!(
-        settings::tier_gate::project_tier_gaps(&schema, &settings_sections::all()),
-        Vec::<String>::new()
-    );
-}
-
-#[test]
-fn every_settings_key_has_a_scope() {
-    let schema = settings_json_schema(&settings_sections::all());
-    assert_eq!(
-        settings::scope::scope_gaps(&schema, &settings_sections::all()),
+        settings::keys::key_gaps(&schema, &settings_sections::all()),
         Vec::<String>::new()
     );
 }
@@ -332,4 +328,157 @@ fn an_untrusted_project_may_narrow_what_modules_own_but_not_widen_it() {
             "team.stage_concurrency"
         ]
     );
+}
+
+struct TableRow {
+    at: String,
+    key: String,
+    default: Option<String>,
+}
+
+/// The rows of each table in `text` whose header starts `| <setting> | <default> |`.
+fn settings_table_rows(name: &str, text: &str, headers: &[(&str, &str)]) -> Vec<TableRow> {
+    let cells = |line: &str| -> Vec<String> {
+        line.trim()
+            .trim_matches('|')
+            .split('|')
+            .map(|cell| cell.trim().to_string())
+            .collect()
+    };
+    let backticked = |cell: &str| {
+        cell.strip_prefix('`')
+            .and_then(|c| c.strip_suffix('`'))
+            .filter(|c| !c.contains('`'))
+            .map(String::from)
+    };
+    let mut rows = Vec::new();
+    let mut in_table = false;
+    for (number, line) in text.lines().enumerate() {
+        if !line.starts_with('|') {
+            in_table = false;
+            continue;
+        }
+        let cells = cells(line);
+        if cells.len() >= 2 && headers.contains(&(cells[0].as_str(), cells[1].as_str())) {
+            in_table = true;
+            continue;
+        }
+        if !in_table || cells[0].starts_with("---") {
+            continue;
+        }
+        if let Some(key) = backticked(&cells[0]) {
+            rows.push(TableRow {
+                at: format!("{name}:{}", number + 1),
+                key,
+                default: cells.get(1).and_then(|cell| backticked(cell)),
+            });
+        }
+    }
+    rows
+}
+
+/// The schema of the dotted `key`, where `name[]` is one item of the list `name`.
+fn schema_at<'a>(root: &'a Value, key: &str) -> Option<&'a Value> {
+    fn resolve<'a>(root: &'a Value, mut node: &'a Value) -> &'a Value {
+        while let Some(target) = node.get("$ref").and_then(Value::as_str) {
+            match root.pointer(target.trim_start_matches('#')) {
+                Some(next) => node = next,
+                None => break,
+            }
+        }
+        node
+    }
+    fn alternatives<'a>(root: &'a Value, node: &'a Value) -> Vec<&'a Value> {
+        let node = resolve(root, node);
+        let mut all = vec![node];
+        for branch in ["anyOf", "oneOf", "allOf"] {
+            for inner in node
+                .get(branch)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                all.push(resolve(root, inner));
+            }
+        }
+        all
+    }
+    let mut node = root;
+    for segment in key.split('.') {
+        let (name, item) = match segment.strip_suffix("[]") {
+            Some(name) => (name, true),
+            None => (segment, false),
+        };
+        node = alternatives(root, node)
+            .into_iter()
+            .find_map(|n| n.get("properties").and_then(|p| p.get(name)))?;
+        if item {
+            node = alternatives(root, node)
+                .into_iter()
+                .find_map(|n| n.get("items"))?;
+        }
+    }
+    Some(node)
+}
+
+#[test]
+fn the_readme_settings_tables_name_real_keys_and_their_defaults() {
+    let schema = settings_json_schema(&settings_sections::all());
+    let source = InMemoryLayers::new();
+    let dir = PathBuf::from("/nonexistent");
+    let defaults = serde_json::to_value(
+        LoadedSettings::load_from(LoadRequest {
+            source: &source,
+            global_dir: dir.join("global"),
+            scene_dir: dir.join("scene"),
+            local_dir: dir.join("project/.agix"),
+            scope: "code",
+            default_model: "model",
+            sections: &settings_sections::all(),
+            layout: Default::default(),
+        })
+        .values,
+    )
+    .unwrap();
+    let headers = [("Setting", "Default"), ("设置", "缺省")];
+    let mut rows = Vec::new();
+    for file in ["README.md", "docs/README.zh-CN.md"] {
+        let text = std::fs::read_to_string(repo().join(file)).unwrap();
+        let found = settings_table_rows(file, &text, &headers);
+        assert!(
+            found.len() > 10,
+            "{file}: no settings table found; the extraction is broken"
+        );
+        rows.extend(found);
+    }
+    let mut wrong = Vec::new();
+    for row in &rows {
+        if schema_at(&schema, &row.key).is_none() {
+            wrong.push(format!("{}: `{}` is no settings key", row.at, row.key));
+            continue;
+        }
+        let (Some(literal), false) = (&row.default, row.key.contains("[]")) else {
+            continue;
+        };
+        let stated = serde_json::from_str::<Value>(literal)
+            .unwrap_or_else(|_| Value::String(literal.clone()));
+        // An unset setting (`app.worktree_dir`) has its default where it is
+        // read; the table states that one, and there is nothing here to hold
+        // it to.
+        let Some(built_in) = row
+            .key
+            .split('.')
+            .try_fold(&defaults, |node, segment| node.get(segment))
+            .filter(|value| !value.is_null())
+        else {
+            continue;
+        };
+        if *built_in != stated {
+            wrong.push(format!(
+                "{}: `{}` defaults to {built_in}, the table says {stated}",
+                row.at, row.key
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }

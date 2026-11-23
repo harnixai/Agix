@@ -481,7 +481,9 @@ impl LayerFold<'_> {
         let mut layer_json = layer.value;
         if let Some(obj) = layer_json.as_object_mut() {
             obj.remove("paths");
-            drop_keys_not_read_from(layer.tier, is_global, &layer.origin, obj);
+            if !is_global {
+                drop_global_only(layer.tier, &layer.origin, obj, self.sections);
+            }
             self.refuse_a_worktrees_dir_not_allowed(&layer.origin, layer.tier, obj);
             if is_own_project {
                 for (name, server) in mcp_servers_declared(obj) {
@@ -702,23 +704,21 @@ pub(crate) fn mcp_servers_declared(
         .collect()
 }
 
-/// `obj`, a layer of `tier`, without the keys that tier is not read for:
-/// [`crate::GLOBAL_ONLY_KEYS`] unless it is read as the global tier.
-fn drop_keys_not_read_from(
+/// `obj`, a layer of `tier` not read as the global tier, without the keys
+/// only the global tier's files may set.
+fn drop_global_only(
     tier: Tier,
-    is_global: bool,
     origin: &str,
     obj: &mut serde_json::Map<String, serde_json::Value>,
+    sections: &Sections,
 ) {
-    for key in crate::GLOBAL_ONLY_KEYS {
-        if !is_global && obj.remove(*key).is_some() {
-            tracing::warn!(
-                layer = tier.name(),
-                origin,
-                key,
-                "this key is read from the global tier only, ignoring it here"
-            );
-        }
+    for key in crate::keys::remove_global_only(obj, sections) {
+        tracing::warn!(
+            layer = tier.name(),
+            origin,
+            key,
+            "this key is read from the global tier only, ignoring it here"
+        );
     }
 }
 

@@ -1,6 +1,6 @@
 //! Settings keys owned by a module rather than by the settings crate: a
-//! [`Section`] names its key, its type, and what a project that is not
-//! trusted may do with it, and [`Sections`] is the list a build registers
+//! [`Section`] names its key, its type, and its rows of the key table
+//! ([`crate::keys`]), and [`Sections`] is the list a build registers
 //! once so that loading, trust gating, unknown-key reporting and the schema
 //! all know the same keys.
 
@@ -8,22 +8,19 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::scope::Scope;
-use crate::tier_gate::ProjectKey;
+use crate::keys::{Key, Scope};
 
 pub trait Section: Serialize + DeserializeOwned + schemars::JsonSchema + Default + 'static {
     const KEY: &'static str;
-    /// Relative to `KEY` (`""` is the key itself); the grammar of `tier_gate::PROJECT_TIER`.
-    const PROJECT_TIER: &'static [(&'static str, ProjectKey)];
-    /// Where the section is read — see `scope::SCOPES`.
-    const SCOPE: Scope;
+    /// Its rows of the key table, each path relative to `KEY` (`""` is the
+    /// key itself).
+    const KEYS: &'static [Key];
 }
 
 #[derive(Clone, Copy)]
 pub struct SectionSpec {
     pub key: &'static str,
-    pub project_tier: &'static [(&'static str, ProjectKey)],
-    pub scope: Scope,
+    pub keys: &'static [Key],
     check: fn(&Value) -> Result<(), String>,
     schema: fn(&mut schemars::SchemaGenerator) -> schemars::Schema,
     default: fn() -> Value,
@@ -33,8 +30,7 @@ impl SectionSpec {
     pub fn of<S: Section>() -> Self {
         Self {
             key: S::KEY,
-            project_tier: S::PROJECT_TIER,
-            scope: S::SCOPE,
+            keys: S::KEYS,
             check: |value| {
                 serde_json::from_value::<S>(value.clone())
                     .map(drop)
@@ -49,10 +45,10 @@ impl SectionSpec {
     /// key is known and takes any value, and neither a project that is not
     /// trusted nor a session can set it.
     pub fn inert(key: &'static str) -> Self {
+        const INERT: &[Key] = &[Key::at("").scope(Scope::Pair).withheld()];
         Self {
             key,
-            project_tier: &[],
-            scope: Scope::Pair,
+            keys: INERT,
             check: |_| Ok(()),
             schema: |_| schemars::Schema::from(true),
             default: || Value::Null,
@@ -119,8 +115,7 @@ mod tests {
 
     impl Section for Probe {
         const KEY: &'static str = "probe";
-        const PROJECT_TIER: &'static [(&'static str, ProjectKey)] = &[("flag", ProjectKey::Free)];
-        const SCOPE: Scope = Scope::Session;
+        const KEYS: &'static [Key] = &[Key::at("").scope(Scope::Session), Key::at("flag").free()];
     }
 
     #[test]

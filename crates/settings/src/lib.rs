@@ -30,6 +30,7 @@ mod engine;
 pub use engine::sandbox_settings;
 pub mod file;
 pub mod import;
+pub mod keys;
 mod loaded;
 pub mod managed;
 mod merge;
@@ -38,7 +39,6 @@ pub mod permissions;
 pub mod quota;
 pub mod renamed;
 mod schema;
-pub mod scope;
 pub mod section;
 mod source;
 pub mod tier_gate;
@@ -52,10 +52,6 @@ pub use merge::merge_json_values;
 pub use permissions::PermissionsSettings;
 pub use schema::{settings_json_schema, unknown_settings_keys, KeyKind, SchemaKeys};
 pub use source::{read_settings_file, FileTiers};
-
-/// The keys only the global tier's files (and the `cli` layer) may set; the
-/// loader drops them from every other tier.
-pub const GLOBAL_ONLY_KEYS: &[&str] = &["app"];
 
 /// One settings.json file, and what the settings tiers say once merged. Every
 /// field is one a settings file can set; what loading them produced besides is

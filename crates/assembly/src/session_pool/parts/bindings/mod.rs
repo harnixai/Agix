@@ -151,8 +151,9 @@ pub(in crate::session_pool) struct BindingCache {
     /// were built with; everything not tied to a session reads this one.
     settings: AsyncRwLock<Arc<LoadedSettings>>,
     layers: Layers,
-    /// What of [`settings::scope::READ_AT_START`] the pool was built with.
-    started_with: Vec<(&'static str, serde_json::Value)>,
+    /// The settings read only at start (`settings::keys::read_at_start`) as the
+    /// pool was built with them.
+    started_with: Vec<(String, serde_json::Value)>,
     cache: Cache,
     watch: Watching,
     /// The host's skill directories of every session in memory.
@@ -263,7 +264,10 @@ impl BindingCache {
         plugins: Arc<crate::plugins::PluginSubsystem>,
     ) -> Self {
         Self {
-            started_with: settings::scope::read_at_start(&settings.values),
+            started_with: settings::keys::read_at_start(
+                &settings.values,
+                &crate::settings_sections::all(),
+            ),
             settings: AsyncRwLock::new(settings),
             layers,
             cache: Cache {
@@ -312,12 +316,13 @@ impl BindingCache {
         &self,
         settings: &settings::Settings,
     ) -> Vec<String> {
-        let mut keys: Vec<String> = settings::scope::read_at_start(settings)
-            .into_iter()
-            .zip(&self.started_with)
-            .filter(|((_, now), (_, then))| now != then)
-            .map(|((key, _), _)| key.to_string())
-            .collect();
+        let mut keys: Vec<String> =
+            settings::keys::read_at_start(settings, &crate::settings_sections::all())
+                .into_iter()
+                .zip(&self.started_with)
+                .filter(|((_, now), (_, then))| now != then)
+                .map(|((key, _), _)| key)
+                .collect();
         let managed = ManagedLayer {
             path: self.layers.managed.path.clone(),
             required: self.layers.managed.required,

@@ -442,7 +442,6 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
     ("PermissionMode", PERMISSION),
     ("PermissionOutcome", PERMISSION),
     ("PluginScope", HOST_INPUT),
-    ("ProjectKey", TRUST),
     ("ProjectTrust", TRUST),
     ("PromptAttachmentKind", HOST_INPUT),
     ("PromptContent", HOST_INPUT),
@@ -504,6 +503,7 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
         "a tool's result (`base::tool`) and its form in the conversation (`base::message`); \
          both are converted variant by variant",
     ),
+    ("Trust", TRUST),
     ("TrustLevel", TRUST),
     ("TrustSource", TRUST),
     ("TurnStep", HOST_ANSWER),
@@ -514,6 +514,7 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
         "Workspace",
         "whether a session has a project tier; decided per variant",
     ),
+    ("Writers", TRUST),
 ];
 
 #[test]

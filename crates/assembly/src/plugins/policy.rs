@@ -43,16 +43,16 @@ impl PluginsConfig {
 
 impl settings::section::Section for PluginsConfig {
     const KEY: &'static str = "plugins";
-    const PROJECT_TIER: &'static [(&'static str, settings::tier_gate::ProjectKey)] = {
-        use settings::tier_gate::Order::{FalseTighter, SubsetEmptyIsAll};
-        use settings::tier_gate::ProjectKey::Tighten;
+    const KEYS: &'static [settings::keys::Key] = {
+        use settings::keys::Order::{FalseTighter, SubsetEmptyIsAll};
+        use settings::keys::{Key, Scope};
         &[
-            ("allow", Tighten(SubsetEmptyIsAll)),
-            ("enable_on_install", Tighten(FalseTighter)),
-            ("enabled", Tighten(FalseTighter)),
+            Key::at("").scope(Scope::Process),
+            Key::at("allow").tighten(SubsetEmptyIsAll),
+            Key::at("enable_on_install").tighten(FalseTighter),
+            Key::at("enabled").tighten(FalseTighter),
         ]
     };
-    const SCOPE: settings::scope::Scope = settings::scope::Scope::Process;
 }
 
 #[cfg(test)]

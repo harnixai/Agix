@@ -2,10 +2,9 @@
 //! how a team and its persistent members are bounded.
 
 use serde::{Deserialize, Serialize};
+use settings::keys::Order::{FalseTighter, Lower};
+use settings::keys::{Key, Scope};
 use settings::section::Section;
-use settings::tier_gate::Order::{FalseTighter, Lower};
-use settings::tier_gate::ProjectKey;
-use settings::tier_gate::ProjectKey::Tighten;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
@@ -47,11 +46,11 @@ impl Default for TeamSettings {
 
 impl Section for TeamSettings {
     const KEY: &'static str = "team";
-    const PROJECT_TIER: &'static [(&'static str, ProjectKey)] = &[
-        ("enabled", Tighten(FalseTighter)),
-        ("max_members", Tighten(Lower)),
-        ("member_idle_secs", Tighten(Lower)),
-        ("stage_concurrency", Tighten(Lower)),
+    const KEYS: &'static [Key] = &[
+        Key::at("").scope(Scope::Session),
+        Key::at("enabled").tighten(FalseTighter),
+        Key::at("max_members").tighten(Lower),
+        Key::at("member_idle_secs").tighten(Lower),
+        Key::at("stage_concurrency").tighten(Lower),
     ];
-    const SCOPE: settings::scope::Scope = settings::scope::Scope::Session;
 }

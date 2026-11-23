@@ -1,9 +1,8 @@
-//! Per-key gating of a settings layer: [`PROJECT_TIER`] and each section's
-//! entries say, for every settings key, whether a layer may set it freely,
-//! only as tight as what is beneath it, or not at all. An untrusted project
-//! tier is held to it by [`gate_layer`]; the session overlay and the managed
-//! layer take only the tightening half through [`tighten_layer`]. A key with
-//! no entry is withheld, and [`project_tier_gaps`] finds the keys that have none.
+//! Per-key gating of a settings layer by the trust column of the key table
+//! ([`crate::keys`]): whether a layer may set a key freely, only as tight as
+//! what is beneath it, or not at all. An untrusted project tier is held to it
+//! by [`gate_layer`]; the session overlay and the managed layer take only the
+//! tightening half through [`tighten_layer`].
 
 use serde_json::{Map, Value};
 
@@ -11,177 +10,15 @@ use base::interface::exec::env::SubprocessEnvMode;
 use base::interface::exec::NetworkMode;
 use base::permission::PermissionMode;
 
-use crate::schema::schema_keys;
+use crate::keys::{Order, Table, Trust};
 use crate::section::Sections;
 
-/// What an untrusted project tier may do with one settings key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectKey {
-    Free,
-    /// Kept when the value is at least as tight as what is merged beneath it.
-    Tighten(Order),
-    Withheld,
-}
-
-/// How to tell whether a value is at least as tight as the one beneath it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Order {
-    TrueTighter,
-    FalseTighter,
-    /// `PermissionMode::permissiveness`.
-    Mode,
-    /// `deny_all` < `allowlist`, `proxy` < `unrestricted`; `allowlist` and
-    /// `proxy` cannot replace each other.
-    NetworkMode,
-    /// `allowlist` < `inherit`.
-    EnvMode,
-    Subset,
-    /// A subset, where an empty list admits everything.
-    SubsetEmptyIsAll,
-    Superset,
-    /// A number, where `null` is no limit.
-    Lower,
-    /// A number at least the one beneath: a minimum, where `null` is none.
-    Higher,
-    /// A number, where `0` is no limit.
-    LowerZeroIsWidest,
-    /// A list of providers the tiers beneath already define.
-    ProviderDefinedBelow,
-}
-
-/// Every key a project-tier settings file may hold, dotted, with `*` for one
-/// map key. A key is governed by the longest entry it starts with; a key with
-/// no entry is withheld. An entry shorter than the keys it governs is always
-/// `Withheld`, so a field added beneath it later cannot pass unclassified.
-///
-/// The `permissions` rule lists are `Free` here because the loader drops the
-/// allow rules (`allow`, `allow_exact`) itself.
-pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
-    use Order::*;
-    use ProjectKey::{Free, Tighten, Withheld};
-    &[
-        ("$schema", Free),
-        ("agents.max_concurrent", Tighten(Lower)),
-        ("agents.max_depth", Tighten(Lower)),
-        ("app", Withheld),
-        ("compaction.clear_on_cache_expiry", Free),
-        ("compaction.inline_result_chars", Withheld),
-        ("compaction.keep_recent", Free),
-        ("compaction.reactive", Free),
-        ("compaction.threshold_tokens", Free),
-        ("files.allow_write", Tighten(Subset)),
-        ("files.deny_write", Tighten(Superset)),
-        ("files.extra_dirs", Tighten(Subset)),
-        ("files.read_dirs", Tighten(Subset)),
-        ("goal.max_rounds", Tighten(Lower)),
-        ("hooks", Withheld),
-        ("mcp.servers.*", Withheld),
-        ("mcp.servers.*.enabled", Tighten(FalseTighter)),
-        ("memory.enabled", Free),
-        ("model.effort", Free),
-        ("model.max_tokens", Free),
-        ("model.order", Tighten(ProviderDefinedBelow)),
-        ("model.tasks.compact", Free),
-        ("model.tasks.main", Free),
-        ("model.tasks.memory", Free),
-        ("model.tasks.subagent", Free),
-        ("model.tasks.title", Free),
-        ("model.tasks.web_fetch", Free),
-        ("model.tasks.web_search", Free),
-        ("model.thinking", Free),
-        ("permissions.allow", Free),
-        ("permissions.allow_exact", Free),
-        ("permissions.ask", Free),
-        ("permissions.client_may_loosen", Tighten(FalseTighter)),
-        ("permissions.deny", Free),
-        ("permissions.mode", Tighten(Mode)),
-        (
-            "permissions.prompt_timeout_secs",
-            Tighten(LowerZeroIsWidest),
-        ),
-        ("prompt.append", Free),
-        ("prompt.instruction_files", Withheld),
-        ("prompt.language", Free),
-        ("prompt.override", Withheld),
-        ("prompt.path_style", Free),
-        ("providers", Withheld),
-        ("recorder", Withheld),
-        ("sandbox.allow_read", Tighten(Subset)),
-        ("sandbox.cache_dirs.*", Tighten(Subset)),
-        ("sandbox.deny_read", Tighten(Superset)),
-        ("sandbox.enabled", Tighten(TrueTighter)),
-        ("sandbox.env.allow", Tighten(Subset)),
-        ("sandbox.env.mode", Tighten(EnvMode)),
-        ("sandbox.network.mode", Tighten(NetworkMode)),
-        ("sandbox.network.proxy", Withheld),
-        ("sandbox.reap_on_close", Tighten(TrueTighter)),
-        ("sandbox.require", Tighten(TrueTighter)),
-        (
-            "sandbox.unattended_needs_network_policy",
-            Tighten(TrueTighter),
-        ),
-        ("schedule.max_model_jobs", Tighten(Lower)),
-        ("schedule.min_model_interval_minutes", Tighten(Higher)),
-        ("session.token_budget", Tighten(Lower)),
-        ("skills.allow_shell", Tighten(FalseTighter)),
-        ("telemetry.enabled", Tighten(TrueTighter)),
-        ("telemetry.otlp_endpoint", Withheld),
-        ("turn.max_model_calls", Tighten(Lower)),
-        ("turn.parallel_tools", Tighten(Lower)),
-        ("turn.token_budget", Tighten(Lower)),
-        ("web.allowed_domains", Tighten(Subset)),
-    ]
-};
-
-/// The table every key is judged by: [`PROJECT_TIER`] plus each registered
-/// section's entries under its key. A section nothing registered has no entry
-/// and is withheld.
-type Entries = Vec<(Vec<String>, ProjectKey)>;
-
-fn entries(sections: &Sections) -> Entries {
-    let own = PROJECT_TIER
-        .iter()
-        .map(|(pattern, key)| (pattern.to_string(), *key));
-    let sectioned = sections.iter().flat_map(|spec| {
-        spec.project_tier.iter().map(|(relative, key)| {
-            let pattern = if relative.is_empty() {
-                spec.key.to_string()
-            } else {
-                format!("{}.{relative}", spec.key)
-            };
-            (pattern, *key)
-        })
-    });
-    own.chain(sectioned)
-        .map(|(pattern, key)| (pattern.split('.').map(String::from).collect(), key))
-        .collect()
-}
-
-fn agrees(pattern: &[String], path: &[&str]) -> bool {
-    pattern.iter().zip(path).all(|(p, k)| p == "*" || p == k)
-}
-
-/// The entry governing `path`: the longest one `path` starts with.
-fn governing_entry<'a>(
-    entries: &'a Entries,
-    path: &[&str],
-) -> Option<&'a (Vec<String>, ProjectKey)> {
-    entries
-        .iter()
-        .filter(|(pattern, _)| pattern.len() <= path.len() && agrees(pattern, path))
-        .max_by_key(|(pattern, _)| pattern.len())
-}
-
-/// Whether some entry names a key beneath `path`, so `path` is a section to
-/// look into rather than a value to judge whole.
-fn has_entries_beneath(entries: &Entries, path: &[&str]) -> bool {
-    entries
-        .iter()
-        .any(|(pattern, _)| pattern.len() > path.len() && agrees(pattern, path))
+fn trust_at<'a>(table: &'a Table, path: &[&str]) -> Option<(&'a [String], Trust)> {
+    table.governing(path, |k| k.trust)
 }
 
 /// Inspect one project-tier settings file for what only a trusted project
-/// may set, judged key by key against [`PROJECT_TIER`], the registered
+/// may set, judged key by key against the key table of the registered
 /// `sections` and `lower` — everything merged beneath it. Returns what it
 /// found as dotted keys; with `withhold` set, also removes it from `layer`,
 /// so what is left can only add or tighten.
@@ -191,42 +28,34 @@ pub fn gate_layer(
     withhold: bool,
     sections: &Sections,
 ) -> Vec<String> {
-    let entries = entries(sections);
+    let table = Table::of(sections);
     let mut found = Vec::new();
-    let keep = |path: &[&str], value: &Value| keeps(&entries, value, path, lower);
-    gate_section(
-        &entries,
-        layer,
-        &mut Vec::new(),
-        &keep,
-        withhold,
-        &mut found,
-    );
+    let keep = |path: &[&str], value: &Value| keeps(&table, value, path, lower);
+    gate_section(&table, layer, &mut Vec::new(), &keep, withhold, &mut found);
     found
 }
 
-/// Remove from `layer` each value [`PROJECT_TIER`] (or a section) orders as
-/// looser than what is merged beneath it in `lower`, and return it as
-/// [`gate_layer`] reports it. Keys the table only withholds from an untrusted
-/// project, or has no entry for, are left as they are: their scope is not
-/// this table's to judge.
+/// Remove from `layer` each value the key table orders as looser than what
+/// is merged beneath it in `lower`, and return it as [`gate_layer`] reports
+/// it. Keys the table only withholds from an untrusted project, or gives no
+/// trust, are left as they are: their scope is not this gate's to judge.
 pub fn tighten_layer(
     layer: &mut Map<String, Value>,
     lower: &Value,
     sections: &Sections,
 ) -> Vec<String> {
-    let entries = entries(sections);
+    let table = Table::of(sections);
     let mut found = Vec::new();
-    let keep = |path: &[&str], value: &Value| match governing_entry(&entries, path) {
-        Some((_, ProjectKey::Tighten(_))) => keeps(&entries, value, path, lower),
+    let keep = |path: &[&str], value: &Value| match trust_at(&table, path) {
+        Some((_, Trust::Tighten(_))) => keeps(&table, value, path, lower),
         _ => true,
     };
-    gate_section(&entries, layer, &mut Vec::new(), &keep, true, &mut found);
+    gate_section(&table, layer, &mut Vec::new(), &keep, true, &mut found);
     found
 }
 
 fn gate_section(
-    entries: &Entries,
+    table: &Table,
     section: &mut Map<String, Value>,
     path: &mut Vec<String>,
     keep: &dyn Fn(&[&str], &Value) -> bool,
@@ -238,12 +67,12 @@ fn gate_section(
         path.push(key.clone());
         let segments: Vec<&str> = path.iter().map(String::as_str).collect();
         let value = &section[&key];
-        if value.is_object() && has_entries_beneath(entries, &segments) {
+        if value.is_object() && table.sets_beneath(&segments, |k| k.trust.is_some()) {
             if let Some(Value::Object(inner)) = section.get_mut(&key) {
-                gate_section(entries, inner, path, keep, withhold, found);
+                gate_section(table, inner, path, keep, withhold, found);
             }
         } else if !keep(&segments, value) {
-            let reported = withheld_as(entries, &segments);
+            let reported = withheld_as(table, &segments);
             if !found.contains(&reported) {
                 found.push(reported);
             }
@@ -255,63 +84,26 @@ fn gate_section(
     }
 }
 
-/// How a key held back is reported: as the entry that withholds it whole
+/// How a key held back is reported: as the row that withholds it whole
 /// (`mcp.servers.github`, not each of that server's fields), or as itself.
-fn withheld_as(entries: &Entries, path: &[&str]) -> String {
-    match governing_entry(entries, path) {
-        Some((pattern, ProjectKey::Withheld)) if pattern.len() < path.len() => {
-            path[..pattern.len()].join(".")
-        }
+fn withheld_as(table: &Table, path: &[&str]) -> String {
+    match trust_at(table, path) {
+        Some((row, Trust::Withheld)) if row.len() < path.len() => path[..row.len()].join("."),
         _ => path.join("."),
     }
 }
 
-/// What the project-tier table fails to cover in `schema`, as messages: a
-/// settings key with no entry, one governed by a shorter entry that is not
-/// `Withheld`, and an entry that names no key. A settings field added without
-/// a line in the table fails the test that calls this, rather than passing
-/// through an untrusted project unexamined.
-pub fn project_tier_gaps(schema: &Value, sections: &Sections) -> Vec<String> {
-    let entries = entries(sections);
-    let mut gaps = Vec::new();
-    let mut used = std::collections::HashSet::new();
-    for key in schema_keys(schema) {
-        let segments: Vec<&str> = key.iter().map(String::as_str).collect();
-        let dotted = key.join(".");
-        let Some((pattern, tier)) = governing_entry(&entries, &segments) else {
-            gaps.push(format!("`{dotted}` has no entry in the project tier"));
-            continue;
-        };
-        if pattern.len() != key.len() && *tier != ProjectKey::Withheld {
-            gaps.push(format!(
-                "`{dotted}` is governed by the shorter `{}`, which is not Withheld",
-                pattern.join(".")
-            ));
-        }
-        used.insert(pattern.join("."));
-    }
-    for (pattern, _) in &entries {
-        let pattern = pattern.join(".");
-        if !pattern.starts_with('$') && !used.contains(&pattern) {
-            gaps.push(format!(
-                "the project tier entry `{pattern}` names no settings key"
-            ));
-        }
-    }
-    gaps
-}
-
-fn keeps(entries: &Entries, value: &Value, path: &[&str], lower: &Value) -> bool {
-    match governing_entry(entries, path).map(|(_, key)| *key) {
-        Some(ProjectKey::Free) => true,
-        Some(ProjectKey::Tighten(order)) => {
+fn keeps(table: &Table, value: &Value, path: &[&str], lower: &Value) -> bool {
+    match trust_at(table, path).map(|(_, trust)| trust) {
+        Some(Trust::Free) => true,
+        Some(Trust::Tighten(order)) => {
             let below = path
                 .iter()
                 .try_fold(lower, |node, segment| node.get(segment))
                 .unwrap_or(&Value::Null);
             order.keeps(value, below, lower)
         }
-        Some(ProjectKey::Withheld) | None => false,
+        Some(Trust::Withheld) | None => false,
     }
 }
 
@@ -422,6 +214,7 @@ fn is_empty_list(v: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keys::{Key, Scope};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
@@ -434,15 +227,12 @@ mod tests {
 
     impl crate::section::Section for Plugins {
         const KEY: &'static str = "plugins";
-        const PROJECT_TIER: &'static [(&'static str, ProjectKey)] = &[
-            ("allow", ProjectKey::Tighten(Order::SubsetEmptyIsAll)),
-            (
-                "enable_on_install",
-                ProjectKey::Tighten(Order::FalseTighter),
-            ),
-            ("enabled", ProjectKey::Tighten(Order::FalseTighter)),
+        const KEYS: &'static [Key] = &[
+            Key::at("").scope(Scope::Process),
+            Key::at("allow").tighten(Order::SubsetEmptyIsAll),
+            Key::at("enable_on_install").tighten(Order::FalseTighter),
+            Key::at("enabled").tighten(Order::FalseTighter),
         ];
-        const SCOPE: crate::scope::Scope = crate::scope::Scope::Process;
     }
 
     fn sections() -> Sections {
@@ -864,15 +654,5 @@ mod tests {
             .map(String::from)
         );
         assert_eq!(layer["model"], json!({"max_tokens": "many"}));
-    }
-
-    #[test]
-    fn every_settings_key_has_an_entry() {
-        let schema = crate::settings_json_schema(&sections());
-        assert!(schema_keys(&schema).len() > 40);
-        assert_eq!(
-            project_tier_gaps(&schema, &sections()),
-            Vec::<String>::new()
-        );
     }
 }

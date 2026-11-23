@@ -2,9 +2,9 @@
 //! 收紧——关掉、调小；调大或放开要用户层。
 
 use serde::{Deserialize, Serialize};
+use settings::keys::Order::{FalseTighter, Lower};
+use settings::keys::{Key, Scope};
 use settings::section::Section;
-use settings::tier_gate::Order::{FalseTighter, Lower};
-use settings::tier_gate::ProjectKey::{self, Tighten};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
@@ -31,12 +31,12 @@ impl Default for CheckpointSettings {
 
 impl Section for CheckpointSettings {
     const KEY: &'static str = "checkpoints";
-    const PROJECT_TIER: &'static [(&'static str, ProjectKey)] = &[
-        ("enabled", Tighten(FalseTighter)),
-        ("max_bytes_per_file", Tighten(Lower)),
-        ("max_total_bytes", Tighten(Lower)),
+    const KEYS: &'static [Key] = &[
+        Key::at("").scope(Scope::Session),
+        Key::at("enabled").tighten(FalseTighter),
+        Key::at("max_bytes_per_file").tighten(Lower),
+        Key::at("max_total_bytes").tighten(Lower),
     ];
-    const SCOPE: settings::scope::Scope = settings::scope::Scope::Session;
 }
 
 #[cfg(test)]

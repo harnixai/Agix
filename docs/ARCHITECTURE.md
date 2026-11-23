@@ -515,13 +515,13 @@ managed 为准。启动时对守护进程自己那一对
 读好设置的地方;`tests/guards/tests/sources.rs` 的 SRC-6(`SETTINGS_OVERLAY_SITES`)守着,新加一处不在表里就失败。宿主的改动对守护进程自己那一对照原样叠,只有列表跟着盘:宿主没加的元素盘上没了(撤销信任后项目自己的 provider、改掉的项目设置)就不再有,盘上后加的、宿主没去掉的照样有;对别的对只带它新加的——列表只带宿主新加的元素,接在那一对
 自己的列表后面,守护进程自己项目层来的 provider(宿主改过的也是)、`files.extra_dirs` 之类不跨对。
 
-**会话覆盖层:按作用域收键,按未受信项目层的方向判。** 每个设置键有一个作用域(`settings::scope::SCOPES`,
-模块的段落在 `Section::SCOPE` 里登记,完备性由 `scope_gaps` 的测试守着):进程(`app`、`plugins`、
+**会话覆盖层:按作用域收键,按未受信项目层的方向判。** 每个设置键在键表(`settings::keys`,见 §6.6)里有一个
+作用域:进程(`app`、`plugins`、
 `telemetry.otlp_endpoint`)、`(项目, 场景)` 对(`providers`、`model.order`、`model.tasks`、`mcp`、`hooks`、`recorder`、
 `scripts`、`permissions.client_may_loosen`——路由、MCP 连接、hook 来源都按绑定建),其余是会话。`options.settings`
-只收会话作用域的键,别的进 `invalid_options`。收下的键缺省按未受信项目层那张表(`tier_gate::PROJECT_TIER`)的比较
-方向判:只许更严的键给宽了就留设置的值、报在 `clamped_options`,allow 规则扣下;设置开了
-`permissions.client_may_loosen` 时照样放宽。表里的 Withheld 名单不用——会话能给什么由作用域定。这是安全缺省,不是
+只收会话作用域的键,别的进 `invalid_options`。收下的键缺省按同一张表的信任列给的比较方向判:只许更严的键给宽了
+就留设置的值、报在 `clamped_options`,allow 规则扣下;设置开了 `permissions.client_may_loosen` 时照样放宽。信任列
+里的 `Withheld` 不用——会话能给什么由作用域定。这是安全缺省,不是
 边界:连得上 socket 的客户端能 `config.set`,本来就是设置的所有者。会话层之后权限模式再过一遍
 `effective_permission_mode`,managed 层的 `disable_bypass` 与规则压得住它。每次建引擎都对这时的设置重新判。
 
@@ -1560,7 +1560,7 @@ bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值�
   与编辑器的 `$schema`。
 - **最高的一层。** 除规则列表外,它写的每个键都是会话拿到的值:压过三层文件、`cli` 层(`agixd --set`)、
   宿主在内存里改的值(`HostOverrides`)和会话自带的 `options.settings`——即使设置开了
-  `permissions.client_may_loosen`;会话要的值被它压住时报在 `clamped_options`。唯一的例外是信任表(`PROJECT_TIER`)
+  `permissions.client_may_loosen`;会话要的值被它压住时报在 `clamped_options`。唯一的例外是键表信任列
   给了松紧次序的键:下层写得比它更严时下层的值留下(会话要更小的预算、项目要更严的沙箱),managed 定的是最宽能到哪。`LoadedSettings::with_managed`
   是唯一套它的地方:读盘(`settings_source::read_pair`,它也作为 `Tier::Managed` 一层进加载器)、宿主覆盖与
   会话覆盖层(`LoadedSettings::overlay`)之后都重新套一遍。`app` 也照收:它的 `app.trust_all_projects`
@@ -2186,16 +2186,19 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 **未信任的项目层按插件级信任处理**——复用插件包已有的那条"网上来的东西只能新增、只能收紧"
 的规则(`plugin_packages.md` §信任),不另造一套权限体系。
 
-**这是白名单,不是扣一份名单。** `settings::tier_gate::PROJECT_TIER` 登记项目层设置文件里的每一个键,
-每条是三种之一:`Free`(照常)、`Tighten(次序)`(只在比下面几层合出来的值一样紧或更紧时保留,次序
-按键的类型:布尔取真或取假为紧、数值取小为紧、列表取子集或超集为紧、模式与网络模式按宽松度排……)、
-`Withheld`(整个扣下)。项目层的每个叶子路径取最长匹配的条目;**没有条目的键一律扣下**,并记入
-`requires_trust`;比它管的键还短的条目只能是 `Withheld`。模块自己的设置段(`team`、`plugins`、
-`scripts`)由定义它的 crate 在 `Section::PROJECT_TIER` 里声明条目,加载时并进同一张表;没有登记的段
-没有条目,按 `Withheld` 处理。新加一个设置字段忘了归类,`settings` 与 `assembly` 里从
-`settings_json_schema()` 枚举叶子路径的测试(`every_settings_key_has_an_entry`、
-`every_settings_key_has_a_project_tier_entry`)就过不了——白名单因此由构造保证,而不是靠人记得。作用域表
-(§3.2.1 会话覆盖层)同理:`Section::SCOPE` 必填,`every_settings_key_has_a_scope` 守着核心键。`permissions` 的规则列表在表里是 `Free`,因为 `allow` 与 `allow_exact` 由加载器自己丢弃。
+**这是白名单,不是扣一份名单。** 设置键的性质都在一张键表里:`settings::keys::KEYS` 每行一个点分路径
+(`*` 代一个 map 键),列是作用域(`Scope`:进程、`(项目, 场景)` 对、会话,§3.2.1)、信任(`Trust`)、
+是否只在启动时读(`read_at_start`,`restart_required` 按它报)、哪些层能写(`Writers`:`app` 是
+`GlobalOnly`,加载器把它从场景层、项目层的文件里丢掉,`config.set` 也只许写全局层)。每一列各自按最长前缀取:
+一个键取它开头的、设了这一列的最长那行。信任是三种之一:`Free`(照常)、`Tighten(次序)`(只在比下面几层合
+出来的值一样紧或更紧时保留,次序按键的类型:布尔取真或取假为紧、数值取小为紧、列表取子集或超集为紧、模式与
+网络模式按宽松度排……)、`Withheld`(整个扣下)。**没有信任的键一律扣下**,并记入 `requires_trust`;比它管的
+键还短的行,信任只能是 `Withheld`。模块自己的设置段(`team`、`plugins`、`scripts`、`checkpoints`)由定义它的
+crate 在 `Section::KEYS` 里声明自己的行(路径相对段名,`""` 是段本身),加载时并进同一张表;编译掉的模块
+(`SectionSpec::inert`)整段 `Withheld`。新加一个设置字段忘了归类,`settings` 与 `assembly` 里从
+`settings_json_schema()` 枚举叶子路径的测试(`every_settings_key_has_a_row`,调 `keys::key_gaps`)就过不了:
+每个叶子都要有作用域与信任,每行都要对上一个键——白名单因此由构造保证,而不是靠人记得。`permissions` 的规则
+列表在表里是 `Free`,因为 `allow` 与 `allow_exact` 由加载器自己丢弃。
 
 | 项目层内容 | 未信任时 |
 |---|---|

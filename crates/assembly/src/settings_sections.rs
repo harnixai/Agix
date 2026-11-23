@@ -3,8 +3,8 @@
 //! unknown-key report and the published schema alike.
 
 use base::interface::script::ScriptBinding;
+use settings::keys::{Key, Scope};
 use settings::section::{Section, Sections};
-use settings::tier_gate::ProjectKey;
 
 /// Scripts bound to extension points — see [`ScriptBinding`]. Empty by
 /// default, and inert in a build without a script engine.
@@ -17,8 +17,7 @@ pub struct ScriptBindings(pub Vec<ScriptBinding>);
 
 impl Section for ScriptBindings {
     const KEY: &'static str = "scripts";
-    const PROJECT_TIER: &'static [(&'static str, ProjectKey)] = &[("", ProjectKey::Withheld)];
-    const SCOPE: settings::scope::Scope = settings::scope::Scope::Pair;
+    const KEYS: &'static [Key] = &[Key::at("").scope(Scope::Pair).withheld()];
 }
 
 impl ScriptBindings {

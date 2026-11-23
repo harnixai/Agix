@@ -80,7 +80,8 @@ fn changes_to_ops(
     tier: api::SettingsTier,
     changes: serde_json::Map<String, serde_json::Value>,
 ) -> (Vec<EditOp>, Vec<api::SettingRejected>) {
-    let keys = settings::SchemaKeys::of(&crate::settings_sections::all());
+    let sections = crate::settings_sections::all();
+    let keys = settings::SchemaKeys::of(&sections);
     let mut rejected = Vec::new();
     let mut parsed = Vec::new();
     for (dotted, value) in changes {
@@ -114,7 +115,7 @@ fn changes_to_ops(
             continue;
         }
         let value = (!value.is_null()).then_some(value);
-        if let Some(refused) = refusal(path, value, tier, &keys) {
+        if let Some(refused) = refusal(path, value, tier, &keys, &sections) {
             rejected.push(refused);
             continue;
         }

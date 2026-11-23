@@ -5647,7 +5647,7 @@
           "type": "array"
         },
         "restart_required": {
-          "description": "The settings read only at start (`settings::scope::READ_AT_START`)\nwhose value is not what this process started with, dotted, and\n`managed` when the managed settings file is not what it read then:\nthese take effect only after a restart.",
+          "description": "The settings read only at start (`read_at_start` in `settings::keys`)\nwhose value is not what this process started with, dotted, and\n`managed` when the managed settings file is not what it read then:\nthese take effect only after a restart.",
           "items": {
             "type": "string"
           },
@@ -8278,7 +8278,7 @@
           "type": "array"
         },
         "restart_required": {
-          "description": "The settings read only at start (`settings::scope::READ_AT_START`)\nwhose value is not what this process started with, dotted, and\n`managed` when the managed settings file is not what it read then:\nthese take effect only after a restart.",
+          "description": "The settings read only at start (`read_at_start` in `settings::keys`)\nwhose value is not what this process started with, dotted, and\n`managed` when the managed settings file is not what it read then:\nthese take effect only after a restart.",
           "items": {
             "type": "string"
           },
@@ -8362,7 +8362,7 @@
           "type": "array"
         },
         "restart_required": {
-          "description": "The settings read only at start (`settings::scope::READ_AT_START`)\nwhose value is not what this process started with, dotted, and\n`managed` when the managed settings file is not what it read then:\nthese take effect only after a restart.",
+          "description": "The settings read only at start (`read_at_start` in `settings::keys`)\nwhose value is not what this process started with, dotted, and\n`managed` when the managed settings file is not what it read then:\nthese take effect only after a restart.",
           "items": {
             "type": "string"
           },

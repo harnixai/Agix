@@ -73,6 +73,7 @@ pub(in crate::session_pool) fn refusal(
     value: Option<&serde_json::Value>,
     tier: SettingsTier,
     keys: &SchemaKeys,
+    sections: &settings::section::Sections,
 ) -> Option<SettingRejected> {
     let segments = path.segments();
     let dotted = path.dotted();
@@ -120,14 +121,15 @@ pub(in crate::session_pool) fn refusal(
         }
         return Some(SettingRejected::new(dotted, RejectKind::UnknownKey, reason));
     }
-    if tier != SettingsTier::Global && settings::GLOBAL_ONLY_KEYS.contains(&segments[0]) {
-        return Some(SettingRejected::new(
-            dotted,
-            RejectKind::NotAtTier,
-            format!("`{}` is read from the global tier only", segments[0]),
-        ));
+    if tier == SettingsTier::Global {
+        return None;
     }
-    None
+    let only = settings::keys::global_only_at(&segments, sections)?;
+    Some(SettingRejected::new(
+        dotted,
+        RejectKind::NotAtTier,
+        format!("`{only}` is read from the global tier only"),
+    ))
 }
 
 fn quoted(keys: &[String]) -> String {

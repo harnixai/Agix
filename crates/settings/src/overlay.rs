@@ -7,10 +7,10 @@
 //! top, the providers are settled, and a value that does not fit is reported
 //! in `ignored`.
 //!
-//! A session's layer holds only keys decided per session ([`crate::scope`]);
+//! A session's layer holds only keys decided per session ([`crate::keys`]);
 //! [`session_layer_problems`] names the rest. By default it may only tighten:
-//! a value the project tier's table ([`crate::tier_gate::PROJECT_TIER`]) orders as
-//! looser than the settings' is held to the settings', and its allow rules are
+//! a value the key table's trust column orders as looser than the settings'
+//! is held to the settings', and its allow rules are
 //! held back — unless the settings set `permissions.client_may_loosen`. That
 //! is a safe default, not a boundary: whoever reaches the socket may change
 //! the settings themselves.
@@ -19,10 +19,10 @@ use base::interface::config_source::Tier;
 use base::permission::{LoadedRule, PermissionMode, RuleBehavior};
 use serde_json::{Map, Value};
 
+use crate::keys::{keys_outside, Scope};
 use crate::loaded::seed_section_defaults;
 use crate::merge::merge_fitting;
 use crate::permissions::{self, read_rule_list, take_rule_lists, RULE_LISTS};
-use crate::scope::{keys_outside, Scope};
 use crate::section::Sections;
 use crate::{renamed, tier_gate, IgnoredValue, LoadedSettings, SchemaKeys, Settings};
 
@@ -545,11 +545,10 @@ mod tests {
 
     impl crate::section::Section for Members {
         const KEY: &'static str = "members";
-        const PROJECT_TIER: &'static [(&'static str, crate::tier_gate::ProjectKey)] = &[(
-            "max",
-            crate::tier_gate::ProjectKey::Tighten(crate::tier_gate::Order::Lower),
-        )];
-        const SCOPE: Scope = Scope::Session;
+        const KEYS: &'static [crate::keys::Key] = &[
+            crate::keys::Key::at("").scope(Scope::Session),
+            crate::keys::Key::at("max").tighten(crate::keys::Order::Lower),
+        ];
     }
 
     #[test]
