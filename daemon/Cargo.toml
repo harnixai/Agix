@@ -67,7 +67,7 @@ schemars = { workspace = true }
 #     cargo build -p daemon --no-default-features --features coding,scripts
 #     cargo build -p daemon --no-default-features                      # minimal: the kernel
 default = ["full", "scripts", "plugin-packages", "sandbox"]
-coding = ["mcp", "mcp-oauth-jwt", "agents", "skills", "web", "structured-output", "ptc"]
+coding = ["mcp", "agents", "skills", "web", "structured-output", "ptc"]
 full = ["coding", "ws"]
 mcp = ["assembly/mcp"]
 mcp-oauth-jwt = ["assembly/mcp-oauth-jwt"]
