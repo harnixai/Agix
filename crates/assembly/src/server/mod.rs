@@ -65,6 +65,7 @@ mod errors;
 mod listen;
 mod methods;
 mod methods_config;
+#[cfg(any(test, feature = "rpc-schema"))]
 pub mod schema;
 mod transport;
 mod watch;

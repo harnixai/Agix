@@ -55,6 +55,7 @@ mcp-oauth-mock = { workspace = true }
 guards = { workspace = true }
 rpc-client = { workspace = true }
 schemars = { workspace = true }
+assembly = { workspace = true, features = ["rpc-schema"] }
 
 [features]
 # The same switches as `assembly`'s, where they are documented; the binary

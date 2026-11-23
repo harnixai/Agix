@@ -365,6 +365,9 @@ fn the_capability_table_lists_what_the_daemon_reports() {
         .into_iter()
         .map(str::to_string)
         .collect();
+    if !cfg!(feature = "mcp-oauth-jwt") {
+        documented.retain(|c| c != "mcp_oauth_jwt");
+    }
     documented.sort();
     reported.sort();
     assert_eq!(documented, reported);

@@ -30,7 +30,9 @@ macro_rules! rpc_methods {
                 name: $name,
                 module: rpc_methods!(@module $($module)?),
                 compiled: rpc_methods!(@compiled $($compiled)?),
+                #[cfg(any(test, feature = "rpc-schema"))]
                 params: crate::rpc::schema_of::<$params>,
+                #[cfg(any(test, feature = "rpc-schema"))]
                 result: crate::rpc::schema_of::<$result>,
             },
         )*];

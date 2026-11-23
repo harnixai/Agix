@@ -11,10 +11,13 @@ pub struct MethodInfo {
     /// Whether that module is in this build. A method that is not answers
     /// `METHOD_NOT_FOUND` with `data.module`.
     pub compiled: bool,
+    #[cfg(any(test, feature = "rpc-schema"))]
     pub params: fn(&mut SchemaGenerator) -> Schema,
+    #[cfg(any(test, feature = "rpc-schema"))]
     pub result: fn(&mut SchemaGenerator) -> Schema,
 }
 
+#[cfg(any(test, feature = "rpc-schema"))]
 pub fn schema_of<T: JsonSchema>(generator: &mut SchemaGenerator) -> Schema {
     generator.subschema_for::<T>()
 }

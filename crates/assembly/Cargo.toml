@@ -71,6 +71,10 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 
 [features]
+# The machine-readable RPC description (`server::schema`). The method table's
+# schema function pointers link every RPC type's schema code into the binary,
+# so only tests and doc tooling ask for it.
+rpc-schema = []
 # ── The script carrier and the package layer ────────────────────────────
 #
 #     cargo build -p daemon                                          # QuickJS + packages

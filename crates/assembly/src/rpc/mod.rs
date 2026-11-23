@@ -16,7 +16,9 @@ mod options;
 
 pub use client::{send_frame, Client, ConnectionId, FrameSink, Sink};
 pub use codes::ErrorCode;
-pub use method::{schema_of, MethodInfo, NoParams, StartAgentParams};
+#[cfg(any(test, feature = "rpc-schema"))]
+pub use method::schema_of;
+pub use method::{MethodInfo, NoParams, StartAgentParams};
 pub use options::{read_options, IgnoredOption, RawOptions};
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
