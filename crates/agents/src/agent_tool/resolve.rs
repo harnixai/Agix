@@ -91,6 +91,20 @@ impl Delegator {
         self.catalog.get(name)
     }
 
+    /// The type a request names; `None` when it names none. A name that is
+    /// not in this session's catalog is an error, not a general-purpose run.
+    pub(crate) fn named_type(
+        &self,
+        name: Option<&str>,
+    ) -> Result<Option<AgentTypeDefinition>, DelegateError> {
+        let Some(name) = name else {
+            return Ok(None);
+        };
+        self.agent_type_def(name)
+            .map(Some)
+            .ok_or_else(|| DelegateError::Invalid(self.catalog.unknown(name)))
+    }
+
     /// The MCP servers a delegate of type `def` is granted: the parent's named
     /// in the type's `mcp_servers`. Which of their tools it is offered is its
     /// tool policy's to decide, as for every other tool.

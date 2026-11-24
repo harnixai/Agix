@@ -77,19 +77,19 @@ impl Delegator {
         DelegateError,
     > {
         let worktree = Self::taken_along(&req.mode, worktree).await?;
-        let def = req
-            .agent_type
-            .as_deref()
-            .and_then(|t| self.agent_type_def(t));
         let by_host = matches!(req.mode, DelegateMode::Host { .. });
-        let provider = req.provider.as_deref();
-        match self.own_route(provider, by_host, req.model.as_deref(), def.as_ref()) {
+        let route = self.named_type(req.agent_type.as_deref()).and_then(|def| {
+            let provider = req.provider.as_deref();
+            self.own_route(provider, by_host, req.model.as_deref(), def.as_ref())
+                .map_err(DelegateError::Invalid)
+        });
+        match route {
             Ok(route) => Ok((worktree, route)),
             Err(e) => {
                 if let Some(worktree) = worktree {
                     worktree.remove_if_untouched().await;
                 }
-                Err(DelegateError::Invalid(e))
+                Err(e)
             }
         }
     }
@@ -138,6 +138,10 @@ impl base::interface::delegate::Delegator for Delegator {
 
     fn live_members(&self) -> Vec<LiveMember> {
         self.live_persistent_members()
+    }
+
+    fn check_agent_type(&self, name: &str) -> Result<(), DelegateError> {
+        self.named_type(Some(name)).map(|_| ())
     }
 }
 

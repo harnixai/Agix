@@ -537,8 +537,9 @@ async fn delegate(
 }
 
 /// b's `explore` takes the built-in's name pool-wide, and b has a type of its
-/// own. A session leaving b out lists neither of b's, and its sub-agent of
-/// type `explore` runs on the built-in definition again.
+/// own. A session leaving b out lists neither of b's, its sub-agent of type
+/// `explore` runs on the built-in definition again, and one of b's own type
+/// is refused.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_left_out_packages_agent_types_are_gone_and_the_built_in_comes_back() -> anyhow::Result<()>
 {
@@ -576,9 +577,18 @@ async fn a_left_out_packages_agent_types_are_gone_and_the_built_in_comes_back() 
     );
     assert!(!kid.messages_contain("PROMPT-OF-b-explore"));
     let turn = delegate(&stub, &mut client, &narrowed, "N-HELPER", "b-helper").await?;
-    if let Some(kid) = turn.kid {
-        assert!(!kid.messages_contain("PROMPT-OF-b-helper"));
-    }
+    assert!(turn.kid.is_none(), "a sub-agent ran for b's type");
+    let (_, answer, is_error) = turn
+        .events
+        .tool_results
+        .iter()
+        .find(|(name, _, _)| name == "Agent")
+        .cloned()
+        .expect("the Agent call answered");
+    assert!(
+        is_error && answer.contains("`b-helper`") && answer.contains("explore"),
+        "{answer}"
+    );
 
     let whole = id(&create(&mut client, None).await?);
     let turn = delegate(&stub, &mut client, &whole, "W-EXPLORE", "explore").await?;

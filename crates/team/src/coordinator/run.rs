@@ -62,6 +62,7 @@ impl<'a> Run<'a> {
             permission_mode,
         } = req;
         let permission_mode = permission_mode.unwrap_or(base::permission::PermissionMode::Plan);
+        known_types(coord, &stages)?;
 
         let all_labels: Vec<String> = stages
             .iter()
@@ -446,6 +447,18 @@ async fn append_event(
     {
         tracing::warn!(team_id = %team_id, event = kind, error = %e, "failed to append team event");
     }
+}
+
+/// Every member's agent type is one the delegator would start.
+fn known_types(coord: &DefaultCoordinator, stages: &[TeamStage]) -> Result<(), ToolError> {
+    let Some(delegator) = &coord.delegator else {
+        return Ok(());
+    };
+    stages
+        .iter()
+        .flat_map(|s| s.agents.iter().filter_map(|a| a.agent_type.as_deref()))
+        .try_for_each(|name| delegator.check_agent_type(name))
+        .map_err(|e| ToolError::Validation(e.to_string()))
 }
 
 fn initial_scratch(

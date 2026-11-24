@@ -1,7 +1,7 @@
 # 升级到 0.4
 
 给建在 Agix 上的应用(经 JSON-RPC 连 `agixd` 的,或经 `agix` crate 嵌入的)看的:从 0.3.20 及更早升到 0.4.0
-要改什么,末尾有 0.4.2 的新增。0.3.21 重排了设置文件,0.4.0 改了会话选项、协议与预算;两版都不做兼容,旧写法不再生效。
+要改什么,末尾有 0.4.2、0.4.3 的新增。0.3.21 重排了设置文件,0.4.0 改了会话选项、协议与预算;两版都不做兼容,旧写法不再生效。
 
 逐个类型、逐个函数的变化在 [`agix-sdk.md`](agix-sdk.md)「迁移说明」的 0.3.21、0.4.0 两条;协议的完整说明
 在 [`daemon_rpc_protocol.md`](daemon_rpc_protocol.md)。
@@ -306,3 +306,20 @@
   照用。
 - `HostToolOption.permit: HostToolPermit`(`Ask` 缺省 / `Allow`),`agix::host_tools::HostToolPermit` 导出;构造
   `HostToolOption` 的补 `permit`。
+
+## 0.4.3
+
+### 不认识的 agent 类型报错
+
+以前点名一个会话没有的 agent 类型,会悄悄起一个通用子 Agent;现在是错误,不起子 Agent。「会话有的」是内置、用户目录、
+项目与插件的类型,按会话的 `plugins.allow` / `enabled` 收窄之后 —— 所以被会话排除的包带来的类型同样报错(0.4.2 里是
+悄悄起通用的)。错误写明这个名字并列出会话有的类型名(按名字排序,最多 30 个)。
+
+- `session.startAgent` 的 `subagent_type`:`INVALID_PARAMS`,不登记任务。
+- 模型的 `Agent` 工具(含给团队常驻成员发消息)的 `subagent_type`、`TeamCreate` 成员的 `agent_type`:这次工具调用的错误,
+  模型可以换个名字重试;`TeamCreate` 在任何成员起来之前就失败。`context: fork` 的 skill 的 `agent` 同样。
+- 不写类型(或 `null`)仍是通用子 Agent;`general-purpose` 是内置类型,照常可写。名字区分大小写:Claude Code 的
+  `Explore` / `Plan` 在这里是 `explore` / `plan`。
+
+嵌入:`base::interface::delegate::Delegator` 多一个有缺省实现的 `check_agent_type(name) -> Result<(), DelegateError>`,
+包装别的 `Delegator` 的要转发它。

@@ -28,7 +28,7 @@ When in doubt about whether a task warrants a team, prefer spawning a team over 
 - `stages` (optional): group `agents` into ordered stages instead of one flat list, when a later group's work genuinely depends on an earlier group finishing (e.g. plan → implement). Agents within a stage run concurrently with each other; stages run one after another.
 - `scratchpad` (optional): extra context written into the team's own working notes before any agent runs.
 - `permission_mode` (optional): the permission mode every agent in this call runs under — one for the whole team, not something you set per agent. Omit for the safe default (`"plan"`: read-only tools only). Teammates follow this session's permission rules, and the mode you give can only make them stricter than this session, never looser: `"bypassPermissions"` in a session that asks before edits still asks. Whatever a teammate needs approved is asked of this session's user. `"bubble"` is rejected.
-- `agent_type` (optional, per agent): one of the agent types the `Agent` tool's `subagent_type` accepts; the teammate then gets that type's instructions, tools and model. Omit it for a general-purpose teammate.
+- `agent_type` (optional, per agent): one of the agent types the `Agent` tool's `subagent_type` accepts; the teammate then gets that type's instructions, tools and model. Omit it for a general-purpose teammate. A type that is not one of them fails the whole call before any teammate starts.
 
 ## Coordinating between teammates while they run
 

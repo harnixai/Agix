@@ -3035,7 +3035,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 { "session_id": "…",                 // 父会话
   "prompt": "…",
   "description": "…",                // 可选,进 task.detail
-  "subagent_type": "reviewer",       // 可选,按 agent 目录取模型、provider、工具、skills、scene、permission_mode(可放宽,插件带来的类型只能更严)
+  "subagent_type": "code-reviewer",  // 可选,按 agent 目录取模型、provider、工具、skills、scene、permission_mode(可放宽,插件带来的类型只能更严)
   "model": "…",                      // 可选,压过 agent 类型与 model.tasks.subagent 的 model(模型 id、档位名,或 opus / sonnet / haiku、inherit)
   "provider": "anthropic",           // 可选,providers 里的 id,压过 agent 类型的 provider:子 Agent 的调用先发给它,其余照 model.order 回退
   "allowed_tools": [ ], "disallowed_tools": [ ],  // 可选,在 agent 类型之上再收窄,只会更少
@@ -3048,6 +3048,11 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 ```
 
 - 父会话空闲、正在一轮里都能起,互不阻塞;不在内存里时先恢复,同 `session.run_turn`。
+- `subagent_type` 必须是这个会话有的 agent 类型(内置、用户目录、项目、插件的,按会话的 `plugins.allow` / `enabled`
+  收窄之后):不是 → `INVALID_PARAMS`,`message` 写明这个名字并列出会话有的类型名(按名字排序,最多 30 个),不登记任务。
+  不写(或 `null`)是通用子 Agent;`general-purpose` 是内置类型,照常可写。模型一侧同一条规则:`Agent` 工具的
+  `subagent_type`、`TeamCreate` 成员的 `agent_type` 不认识时是这次工具调用的错误,内容相同,不起子 Agent;`TeamCreate`
+  在任何成员起来之前就失败。
 - provider:给了 `provider`(或 agent 类型写了)时,子 Agent 有自己的一条路由:这个 provider 在前,其余照
   父会话的路由(这一对(项目、场景)的 `model.order`,父会话指名了 provider 的连同它),健康与配额和父会话共用;
   档位名、`inherit` 按它解析,模型 id 不在它那里时取它同一档的模型。这里的 `provider` 可以是这一对定义了的任何

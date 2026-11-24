@@ -203,6 +203,13 @@ impl AgentTool {
         .map_err(|e| base::error::ToolError::Execution(anyhow!("worktree: {e}")))
     }
 
+    fn known_type(&self, inp: &AgentInput) -> Result<(), base::error::ToolError> {
+        self.delegator
+            .named_type(inp.subagent_type.as_deref())
+            .map(|_| ())
+            .map_err(|e| base::error::ToolError::Validation(e.to_string()))
+    }
+
     async fn start_in_background(
         &self,
         mut req: DelegateRequest,
@@ -291,6 +298,7 @@ impl base::tool::Tool for AgentTool {
                 )));
             }
         }
+        self.known_type(&inp)?;
         let mut req = DelegateRequest::new(
             String::new(),
             DelegateMode::Wait,

@@ -234,6 +234,11 @@ pub trait Delegator: Send + Sync {
     /// The persistent members alive, sorted by id. They run under the engine
     /// that holds this delegator and stop with it.
     fn live_members(&self) -> Vec<LiveMember>;
+
+    /// `Err`, naming the types there are, when a request naming `name` would be refused for it.
+    fn check_agent_type(&self, _name: &str) -> Result<(), DelegateError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

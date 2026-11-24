@@ -271,6 +271,13 @@ impl Delegator for LateDelegator {
     fn live_members(&self) -> Vec<LiveMember> {
         self.get().map(|d| d.live_members()).unwrap_or_default()
     }
+
+    fn check_agent_type(&self, name: &str) -> Result<(), DelegateError> {
+        match self.get() {
+            Some(delegator) => delegator.check_agent_type(name),
+            None => Ok(()),
+        }
+    }
 }
 
 /// The modules `scene` lets run, in the order they were assembled.

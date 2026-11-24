@@ -4,7 +4,7 @@ The Agent tool launches specialized agents (subprocesses) that autonomously hand
 
 The agent types available in this session, with what each is for and the tools it has, are listed in this tool's description — including any the project or user defined.
 
-When using the Agent tool, specify a subagent_type parameter to select which agent type to use. If omitted, the general-purpose agent is used.
+When using the Agent tool, specify a subagent_type parameter to select which agent type to use. If omitted, the general-purpose agent is used. A name that is not one of the listed types is an error; no agent starts.
 
 When NOT to use the Agent tool:
 - If you want to read a specific file path, use the Read tool or Glob instead of the Agent tool, to find the match more quickly

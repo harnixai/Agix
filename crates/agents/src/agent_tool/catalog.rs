@@ -431,7 +431,37 @@ impl AgentCatalog {
             (shared, None) => shared,
         }
     }
+
+    /// Why `name` cannot be started here, with the names that can.
+    pub(crate) fn unknown(&self, name: &str) -> String {
+        let mut names: Vec<String> = self
+            .types
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .keys()
+            .chain(self.session_types.keys())
+            .cloned()
+            .collect();
+        names.sort();
+        names.dedup();
+        let shown = names
+            .iter()
+            .take(LISTED_TYPES)
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let more = match names.len().saturating_sub(LISTED_TYPES) {
+            0 => String::new(),
+            n => format!(" and {n} more"),
+        };
+        format!(
+            "unknown agent type `{name}`; this session has: {shown}{more}. Name one of \
+             these, or leave the type out for a general-purpose agent"
+        )
+    }
 }
+
+const LISTED_TYPES: usize = 30;
 
 /// Render the one-line-per-type catalog injected into `AgentTool::description()`
 /// so the model can see what `subagent_type` values are actually available

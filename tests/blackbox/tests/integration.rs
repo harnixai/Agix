@@ -62,4 +62,5 @@ mod team_lifecycle;
 mod thinking_off_wire;
 mod turn_limits;
 mod turn_throughput;
+mod unknown_agent_types;
 mod worktree_location;
