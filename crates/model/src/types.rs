@@ -260,20 +260,8 @@ impl MessagesRequest {
     /// renders first; the rolling marker (5m) is left out when a kept 1h
     /// marker follows it.
     fn cache_plan(&self) -> Vec<Breakpoint> {
-        let explicit = |spot, one_hour| Breakpoint {
-            spot,
-            one_hour,
-            automatic: false,
-        };
-        let tools: Vec<Breakpoint> = self
-            .tools
-            .iter()
-            .enumerate()
-            .filter_map(|(i, t)| {
-                let cc = t.cache_control.as_ref()?;
-                Some(explicit(Spot::Tool(i), cc.is_one_hour()))
-            })
-            .collect();
+        let tools = self.caller_tool_marks();
+        let messages = self.caller_message_marks();
         let system_cached: Vec<usize> = self
             .system
             .iter()
@@ -283,55 +271,9 @@ impl MessagesRequest {
             })
             .map(|(i, _)| i)
             .collect();
-        let system = |i: usize| match &self.system[i] {
-            SystemBlock::Text { cache_control, .. } => explicit(
-                Spot::System(i),
-                cache_control
-                    .as_ref()
-                    .is_some_and(CacheControl::is_one_hour),
-            ),
-        };
+        let system = |i: usize| self.caller_system_mark(i);
         let run_ends = self.system_run_ends();
-        let messages: Vec<Breakpoint> = self
-            .messages
-            .iter()
-            .enumerate()
-            .flat_map(|(i, m)| {
-                m.content
-                    .iter()
-                    .enumerate()
-                    .filter_map(move |(j, b)| match b {
-                        ContentBlock::Text {
-                            cache_control: Some(cc),
-                            ..
-                        } => Some(explicit(
-                            Spot::Message(i, j),
-                            cc.get("ttl").and_then(Value::as_str) == Some("1h"),
-                        )),
-                        _ => None,
-                    })
-            })
-            .collect();
-
-        // 1-hour TTL for the tool prefix: the tool array is fixed for the
-        // lifetime of a session, so it should outlive the gaps between turns.
-        // 5 minutes for the rolling marker: it is superseded by the next
-        // turn's, so it only has to survive one round trip, and a 5m write
-        // costs 1.25x base against 2x for 1h.
-        let auto_tools = self.wants_auto_tools_breakpoint().then(|| Breakpoint {
-            spot: Spot::Tool(self.tools.len() + self.anthropic_tools.len() - 1),
-            one_hour: true,
-            automatic: true,
-        });
-        let auto_message = self
-            .auto_message_breakpoint_index()
-            .map(|i| Spot::Message(i, self.messages[i].content.len() - 1))
-            .filter(|spot| !messages.iter().any(|b| b.spot == *spot))
-            .map(|spot| Breakpoint {
-                spot,
-                one_hour: false,
-                automatic: true,
-            });
+        let (auto_tools, auto_message) = self.automatic_marks(&messages);
 
         let mut candidates: Vec<Breakpoint> = Vec::new();
         candidates.extend(tools.last().copied());
@@ -344,23 +286,79 @@ impl MessagesRequest {
         candidates.extend(system_cached.iter().rev().map(|&i| system(i)));
         candidates.extend(messages.iter().rev().copied());
         candidates.extend(tools.iter().rev().copied());
+        within_budget(candidates, auto_message)
+    }
 
-        let mut kept: Vec<Breakpoint> = Vec::with_capacity(MAX_CACHE_BREAKPOINTS);
-        for bp in candidates {
-            if kept.len() == MAX_CACHE_BREAKPOINTS {
-                break;
-            }
-            if !kept.iter().any(|k| k.spot == bp.spot) {
-                kept.push(bp);
-            }
+    fn caller_tool_marks(&self) -> Vec<Breakpoint> {
+        self.tools
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| {
+                let cc = t.cache_control.as_ref()?;
+                Some(Breakpoint::explicit(Spot::Tool(i), cc.is_one_hour()))
+            })
+            .collect()
+    }
+
+    fn caller_system_mark(&self, i: usize) -> Breakpoint {
+        match &self.system[i] {
+            SystemBlock::Text { cache_control, .. } => Breakpoint::explicit(
+                Spot::System(i),
+                cache_control
+                    .as_ref()
+                    .is_some_and(CacheControl::is_one_hour),
+            ),
         }
-        if let Some(rolling) = auto_message {
-            if kept.iter().any(|b| b.one_hour && b.spot > rolling.spot) {
-                kept.retain(|b| b.spot != rolling.spot);
-            }
-        }
-        kept.sort_by_key(|b| b.spot);
-        kept
+    }
+
+    fn caller_message_marks(&self) -> Vec<Breakpoint> {
+        self.messages
+            .iter()
+            .enumerate()
+            .flat_map(|(i, m)| {
+                m.content
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(j, b)| match b {
+                        ContentBlock::Text {
+                            cache_control: Some(cc),
+                            ..
+                        } => Some(Breakpoint::explicit(
+                            Spot::Message(i, j),
+                            cc.get("ttl").and_then(Value::as_str) == Some("1h"),
+                        )),
+                        _ => None,
+                    })
+            })
+            .collect()
+    }
+
+    /// The automatic tools-prefix and rolling-message breakpoints, when wanted.
+    ///
+    /// 1-hour TTL for the tool prefix: the tool array is fixed for the
+    /// lifetime of a session, so it should outlive the gaps between turns.
+    /// 5 minutes for the rolling marker: it is superseded by the next
+    /// turn's, so it only has to survive one round trip, and a 5m write
+    /// costs 1.25x base against 2x for 1h.
+    fn automatic_marks(
+        &self,
+        caller_messages: &[Breakpoint],
+    ) -> (Option<Breakpoint>, Option<Breakpoint>) {
+        let auto_tools = self.wants_auto_tools_breakpoint().then(|| Breakpoint {
+            spot: Spot::Tool(self.tools.len() + self.anthropic_tools.len() - 1),
+            one_hour: true,
+            automatic: true,
+        });
+        let auto_message = self
+            .auto_message_breakpoint_index()
+            .map(|i| Spot::Message(i, self.messages[i].content.len() - 1))
+            .filter(|spot| !caller_messages.iter().any(|b| b.spot == *spot))
+            .map(|spot| Breakpoint {
+                spot,
+                one_hour: false,
+                automatic: true,
+            });
+        (auto_tools, auto_message)
     }
 
     /// True when any `cache_control` this request will emit uses the 1-hour
@@ -396,6 +394,16 @@ struct Breakpoint {
     spot: Spot,
     one_hour: bool,
     automatic: bool,
+}
+
+impl Breakpoint {
+    fn explicit(spot: Spot, one_hour: bool) -> Self {
+        Self {
+            spot,
+            one_hour,
+            automatic: false,
+        }
+    }
 }
 
 /// Make the serialized `tools`, `system` and `messages` carry exactly the
@@ -444,6 +452,27 @@ fn apply_cache_plan(
             set_cache_control(target, &cc);
         }
     }
+}
+
+/// The first [`MAX_CACHE_BREAKPOINTS`] distinct `candidates`, in render
+/// order, without the rolling marker when a kept 1h marker renders after it.
+fn within_budget(candidates: Vec<Breakpoint>, rolling: Option<Breakpoint>) -> Vec<Breakpoint> {
+    let mut kept: Vec<Breakpoint> = Vec::with_capacity(MAX_CACHE_BREAKPOINTS);
+    for bp in candidates {
+        if kept.len() == MAX_CACHE_BREAKPOINTS {
+            break;
+        }
+        if !kept.iter().any(|k| k.spot == bp.spot) {
+            kept.push(bp);
+        }
+    }
+    if let Some(rolling) = rolling {
+        if kept.iter().any(|b| b.one_hour && b.spot > rolling.spot) {
+            kept.retain(|b| b.spot != rolling.spot);
+        }
+    }
+    kept.sort_by_key(|b| b.spot);
+    kept
 }
 
 /// Write `cache_control` into an already-serialized content-block / tool
