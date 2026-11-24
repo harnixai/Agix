@@ -76,11 +76,6 @@ async fn start_agent(
     if p.prompt.trim().is_empty() {
         return Err(invalid("session.startAgent needs a prompt"));
     }
-    if p.provider.is_some() {
-        return Err(invalid(
-            "session.startAgent: a sub-agent runs on its parent's provider; give `model` only",
-        ));
-    }
     let session_id = p.session_id.clone();
     Ok(s.pool.start_agent(&session_id, p.into_request()).await?)
 }

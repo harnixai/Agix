@@ -11,6 +11,8 @@ pub(crate) struct Spec {
     pub(crate) agent_type: Option<String>,
     /// Over the agent type's model.
     pub(crate) model: Option<String>,
+    /// Its route of its own, when it does not share the parent's.
+    pub(crate) route: Option<Arc<dyn base::provider::TaskRouting>>,
     pub(crate) tools: ToolSelector,
     pub(crate) output_schema: Option<Value>,
     /// A mode the caller asked for (a team's), held to the parent's.
@@ -78,7 +80,7 @@ impl Delegator {
     /// The parent's settings for a delegate on `model_name`, working in the
     /// directory `spec` names.
     fn delegate_settings(&self, spec: &Spec, model_name: Option<&str>) -> SessionConfig {
-        let config = self.sub_settings(model_name);
+        let config = self.sub_settings(spec.route.as_ref(), model_name);
         if spec.cwd == config.working_dir() {
             return config;
         }
@@ -134,7 +136,7 @@ impl Delegator {
         .lineage(parent_session_id.clone(), agent_type)
         .scene(scene)
         .tool_selector(selector)
-        .model(self.model_for_subagent())
+        .model(self.model_for_subagent(spec.route.as_ref()))
         .tools(tools)
         .session_config((*session_config).clone())
         .agent_depth(depth)
@@ -145,6 +147,9 @@ impl Delegator {
         .tool_results_dir(self.env.tool_results_dir.clone())
         .host_tools(self.env.delegates_host_tools())
         .host_calls(relay.host_calls);
+        if let Some(route) = &spec.route {
+            builder = builder.task_router(route.clone());
+        }
         if let Some(schema) = &spec.output_schema {
             builder = builder.output_schema(schema.clone());
         }

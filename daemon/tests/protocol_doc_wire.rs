@@ -632,6 +632,7 @@ async fn documented_request_examples_are_accepted_by_a_real_daemon() {
                 method.as_str(),
                 "session.create"
                     | "session.setModel"
+                    | "session.startAgent"
                     | "mcp.auth.start"
                     | "config.listModels"
                     | "config.getProvider"

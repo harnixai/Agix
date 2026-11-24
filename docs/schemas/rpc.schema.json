@@ -8953,7 +8953,6 @@
         },
         "provider": {
           "default": null,
-          "description": "Refused when given: a sub-agent runs on its parent's provider.",
           "type": [
             "string",
             "null"

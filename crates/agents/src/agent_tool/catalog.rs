@@ -90,6 +90,7 @@ pub fn builtin_agent_types() -> Vec<AgentTypeDefinition> {
 /// * `description` — required
 /// * `allowed_tools` — optional comma/array list; empty = all tools
 /// * `model` — optional model override
+/// * `provider` — optional provider its calls go to first
 ///
 /// Returns all successfully parsed definitions, tagged with `source`.
 /// Malformed files are skipped with a `tracing::warn!` message.
@@ -468,6 +469,7 @@ pub(super) fn parse_agent_type_file(content: &str, path: &Path) -> Option<AgentT
     let mut allowed_tools: Vec<String> = Vec::new();
     let mut disallowed_tools: Vec<String> = Vec::new();
     let mut model: Option<String> = None;
+    let mut provider: Option<String> = None;
     let mut permission_mode: Option<base::permission::PermissionMode> = None;
     let mut effort: Option<String> = None;
     let mut max_turns: Option<u32> = None;
@@ -503,6 +505,7 @@ pub(super) fn parse_agent_type_file(content: &str, path: &Path) -> Option<AgentT
                     disallowed_tools = parse_yaml_list(value);
                 }
                 "model" => model = Some(value.to_string()),
+                "provider" => provider = Some(value.to_string()),
                 "permission_mode" | "permissionMode" => {
                     permission_mode = parse_permission_mode(value);
                 }
@@ -537,6 +540,7 @@ pub(super) fn parse_agent_type_file(content: &str, path: &Path) -> Option<AgentT
         allowed_tools,
         disallowed_tools,
         model,
+        provider,
         permission_mode,
         effort,
         max_turns,

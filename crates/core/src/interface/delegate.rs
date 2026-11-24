@@ -26,6 +26,8 @@ pub struct DelegateRequest {
     pub agent_type: Option<String>,
     /// Over the agent type's model, or the parent's.
     pub model: Option<String>,
+    /// The provider its calls go to first, over the agent type's.
+    pub provider: Option<String>,
     /// Narrows what the delegate would otherwise have; never widens it.
     pub tools: ToolSelector,
     /// Only their `deny` takes effect: a delegate can be refused more than
@@ -57,6 +59,7 @@ impl DelegateRequest {
             description: None,
             agent_type: None,
             model: None,
+            provider: None,
             tools: ToolSelector::all(),
             deny_rules: Vec::new(),
             grants: Vec::new(),

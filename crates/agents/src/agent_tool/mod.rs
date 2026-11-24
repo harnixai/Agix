@@ -88,6 +88,10 @@ pub struct AgentInput {
     pub background: bool,
     #[serde(default)]
     pub model: Option<String>,
+    /// The provider the sub-agent's calls go to first, over its type's; the
+    /// rest follow `model.order`.
+    #[serde(default)]
+    pub provider: Option<String>,
     /// A JSON Schema the sub-agent's final answer must satisfy; the answer is
     /// then also returned as structured content.
     #[serde(default)]
@@ -294,6 +298,7 @@ impl base::tool::Tool for AgentTool {
         req.description = inp.description.clone();
         req.agent_type = inp.subagent_type.clone();
         req.model = inp.model.clone();
+        req.provider = inp.provider.clone();
         req.output_schema = inp.output_schema.clone();
         req.started_by(&ctx);
         if inp.team_name.is_some() || inp.name.is_some() {

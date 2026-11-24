@@ -849,6 +849,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `task_output_offsets` | 任务输出按字节偏移:`session.taskOutput` 接受 `from_byte`,应答带 `from_byte` / `next_byte` / `dropped` / `final`;`task_progress` 帧带 `from_byte` / `next_byte`;被停掉的任务等工作收尾才发 `task_finished`(§6.3、§7) |
 | `task_messages` | 有 `session.messageTask`,消息进运行中的后台子 Agent(§6.3) |
 | `host_agents` | 有 `session.startAgent`,宿主不经模型在会话下起子 Agent;子 Agent 任务带 `usage`、`structured_output`、`detail.tag`(§6.3) |
+| `subagent_provider` | 子 Agent 可以有自己的 provider:`session.startAgent`、`Agent` 工具与 agent 类型收 `provider`,有确定归属的模型 id 从它的归属起(§6.3) |
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
 | `session_attended` | `options.attended` / `options.auto_name`:会话自己定有没有人值守、起不起名,省略时取场景的;带 `output_schema` 的会话一定有 `StructuredOutput`,场景用 `tools.deny` 拒掉它时 `INVALID_PARAMS`(§6.3) |
@@ -3007,8 +3008,9 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 { "session_id": "…",                 // 父会话
   "prompt": "…",
   "description": "…",                // 可选,进 task.detail
-  "subagent_type": "reviewer",       // 可选,按 agent 目录取模型、工具、skills、scene、permission_mode(可放宽,插件带来的类型只能更严)
-  "model": "…",                      // 可选,压过 agent 类型与 model.tasks.subagent 的 model(模型 id、档位名,或 opus / sonnet / haiku、inherit);不接受 provider,子 Agent 的 provider 按 model.order 路由
+  "subagent_type": "reviewer",       // 可选,按 agent 目录取模型、provider、工具、skills、scene、permission_mode(可放宽,插件带来的类型只能更严)
+  "model": "…",                      // 可选,压过 agent 类型与 model.tasks.subagent 的 model(模型 id、档位名,或 opus / sonnet / haiku、inherit)
+  "provider": "anthropic",           // 可选,providers 里的 id,压过 agent 类型的 provider:子 Agent 的调用先发给它,其余照 model.order 回退
   "allowed_tools": [ ], "disallowed_tools": [ ],  // 可选,在 agent 类型之上再收窄,只会更少
   "permission_rules": [ ],           // 可选,写法见 §4.6;只有 deny 生效
   "output_schema": { },              // 可选,同 session.create;交上来的进任务的 structured_output
@@ -3019,6 +3021,12 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 ```
 
 - 父会话空闲、正在一轮里都能起,互不阻塞;不在内存里时先恢复,同 `session.run_turn`。
+- provider:给了 `provider`(或 agent 类型写了)时,子 Agent 有自己的一条路由:这个 provider 在前,其余照
+  这一对(项目、场景)的 `model.order`,健康与配额和父会话共用;档位名、`inherit` 按它解析,模型 id 不在它那里时
+  取它同一档的模型。不在这一对的 provider 定义里 → `INVALID_PARAMS`(agent 类型写错的只记一条告警、当没写)。
+  没给 provider 而 `model` 是一个有确定归属的模型 id —— 某个 provider 的 `models` 列着它,或把它作档位;只是
+  "什么模型都收"的 provider 不算 —— 且父会话的调用不会先去那里时,路由从它的归属起。都不是时子 Agent 与父会话
+  共用路由,同 `Agent` 工具不带这两项。`Agent` 工具的 `provider` 同此,写错的是这次工具调用的错误。
 - 子 Agent 随父会话的运行体结束:父会话被 `session.close` 或 `daemon.shutdown` 时,它被停下
   (`stopped`)。还有子 Agent 在跑的会话不会被驱逐。
 - 计入 `agents.max_concurrent`,也受委派深度限制;超了 → `TASK_LIMIT`,不排队。

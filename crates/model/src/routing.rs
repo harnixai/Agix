@@ -27,8 +27,8 @@ use base::interface::model::{
 };
 use base::prompt::PromptBlock;
 use base::provider::{
-    ApiType, ProviderConfig, ProviderSwitch, QuotaLedger, ResolvedTiers, RouteObserver,
-    TaskRouting, TaskTiers, Tier,
+    ApiType, Destination, ProviderConfig, ProviderSwitch, QuotaLedger, ResolvedTiers,
+    RouteObserver, TaskRouting, TaskTiers, Tier,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -290,6 +290,23 @@ impl TaskRouting for SessionRouter {
     fn observe(&self, observer: Arc<dyn RouteObserver>) {
         let _ = self.0.observer.set(observer);
     }
+
+    fn starting_at(&self, provider: &str) -> Result<Arc<dyn TaskRouting>, String> {
+        Ok(Arc::new(self.0.set.session(Some(provider))?))
+    }
+
+    fn home_of(&self, model: &str) -> Option<String> {
+        self.0.definite_home(model).map(|p| p.id().to_string())
+    }
+
+    fn destination(&self, task: &str, model: &str) -> Destination {
+        let head = self.head();
+        let tier = self.0.set.tasks.get(task).unwrap_or(Tier::Strong);
+        Destination {
+            provider: head.id().to_string(),
+            model: self.0.model_at(head, model, tier),
+        }
+    }
 }
 
 impl Route {
@@ -301,14 +318,21 @@ impl Route {
         self.order.iter().filter_map(|id| self.set.find(id))
     }
 
-    /// The first provider in the order that serves `model`: lists it, or
-    /// names it as a tier; else the first that accepts any model; else the
-    /// head.
-    fn home_of(&self, model: &str) -> &RoutedProvider {
+    fn definite_home(&self, model: &str) -> Option<&RoutedProvider> {
         self.ordered()
             .find(|p| p.config.lists_model(model) || p.tiers.contains(model))
-            .or_else(|| self.ordered().find(|p| p.config.models.is_empty()))
             .map(Arc::as_ref)
+    }
+
+    /// The first provider in the order that serves `model`: its definite
+    /// home; else the first that accepts any model; else the head.
+    fn home_of(&self, model: &str) -> &RoutedProvider {
+        self.definite_home(model)
+            .or_else(|| {
+                self.ordered()
+                    .find(|p| p.config.models.is_empty())
+                    .map(Arc::as_ref)
+            })
             .unwrap_or_else(|| self.head())
     }
 

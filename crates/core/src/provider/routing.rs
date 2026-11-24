@@ -26,6 +26,28 @@ pub trait TaskRouting: Send + Sync {
     /// Report this session's provider switches to `observer`. The first
     /// observer stays.
     fn observe(&self, observer: Arc<dyn RouteObserver>);
+
+    /// A route of its own over the same providers: `provider` first, the
+    /// rest in the pair's `model.order`, with its own record of where its
+    /// calls went and its own observer. `Err` when `provider` is not defined.
+    fn starting_at(&self, provider: &str) -> Result<Arc<dyn TaskRouting>, String>;
+
+    /// The first provider in the order that lists `model` or names it as a
+    /// tier. One that only accepts any model is no home.
+    fn home_of(&self, model: &str) -> Option<String>;
+
+    /// Where `task`'s call asking for `model` goes while the head can take
+    /// it; an empty `model` asks for the task's tier.
+    fn destination(&self, task: &str, model: &str) -> Destination;
+}
+
+/// A provider and the model a call is sent to it with.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct Destination {
+    pub provider: String,
+    pub model: String,
 }
 
 /// A call that went to a different provider than the call before it.

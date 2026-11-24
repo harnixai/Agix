@@ -595,3 +595,62 @@ async fn two_calls_open_at_once_through_one_model_each_name_their_own_provider()
     assert_eq!(first.unwrap().as_deref(), Some("ds"));
     assert_eq!(second.unwrap().as_deref(), Some("claude"));
 }
+
+#[tokio::test]
+async fn a_route_starting_at_a_provider_sends_there_and_reports_its_own_switches() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let set = ProviderSet::new(
+        vec![
+            routed(ds(), Answer::Ok, &asked),
+            routed(claude(), Answer::Fail(ModelErrorKind::ServerError), &asked),
+        ],
+        vec!["ds".into(), "claude".into()],
+        TaskTiers::default(),
+    )
+    .unwrap();
+    let parent = set.session(None).unwrap();
+    let parent_switches = Arc::new(Switches::default());
+    parent.observe(parent_switches.clone());
+    let child = parent.starting_at("claude").unwrap();
+    let child_switches = Arc::new(Switches::default());
+    child.observe(child_switches.clone());
+
+    assert_eq!(
+        child.destination("subagent", ""),
+        Destination {
+            provider: "claude".into(),
+            model: "sonnet".into()
+        }
+    );
+    let served = call(&child.model_for("subagent"), "").await.unwrap();
+    assert_eq!(served.as_deref(), Some("ds"));
+    assert_eq!(*asked.lock().unwrap(), ["claude:sonnet", "ds:ds-flash"]);
+    assert_eq!(child_switches.0.lock().unwrap().len(), 1);
+    assert!(parent_switches.0.lock().unwrap().is_empty());
+    assert!(parent.starting_at("nobody").is_err());
+}
+
+#[test]
+fn a_model_has_a_home_only_where_it_is_listed_or_a_tier() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let set = ProviderSet::new(
+        vec![
+            routed(ds(), Answer::Ok, &asked),
+            routed(claude(), Answer::Ok, &asked),
+        ],
+        vec!["ds".into(), "claude".into()],
+        TaskTiers::default(),
+    )
+    .unwrap();
+    let router = set.session(None).unwrap();
+    assert_eq!(router.home_of("ds-flash").as_deref(), Some("ds"));
+    assert_eq!(router.home_of("sonnet").as_deref(), Some("claude"));
+    assert_eq!(router.home_of("anything-else"), None);
+    assert_eq!(
+        router.destination("subagent", "sonnet"),
+        Destination {
+            provider: "ds".into(),
+            model: "ds-flash".into()
+        }
+    );
+}

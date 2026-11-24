@@ -63,7 +63,7 @@ fn a_callers_lists_narrow_the_agent_types_tools() {
 #[test]
 fn model_for_subagent_uses_parent_model_when_no_router_configured() {
     let agent_tool = test_agent_tool();
-    let picked = agent_tool.delegator.model_for_subagent();
+    let picked = agent_tool.delegator.model_for_subagent(None);
     assert!(Arc::ptr_eq(&picked, &agent_tool.delegator.env.model));
 }
 
@@ -95,14 +95,17 @@ fn tiered_parent(strong: &str, balanced: &str, fast: &str) -> AgentTool {
 }
 
 fn delegate_model(tool: &AgentTool, named: Option<&str>) -> String {
-    tool.delegator.sub_settings(named).model_name().to_string()
+    tool.delegator
+        .sub_settings(None, named)
+        .model_name()
+        .to_string()
 }
 
 #[test]
 fn a_sub_agent_asks_for_its_tier_or_the_one_it_names() {
     let tool = tiered_parent("s", "b", "f");
     assert!(!Arc::ptr_eq(
-        &tool.delegator.model_for_subagent(),
+        &tool.delegator.model_for_subagent(None),
         &tool.delegator.env.model
     ));
     assert_eq!(delegate_model(&tool, None), "b");

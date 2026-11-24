@@ -3,14 +3,65 @@
 
 use super::*;
 
+type Route = Arc<dyn base::provider::TaskRouting>;
+
 impl Delegator {
+    fn router<'a>(&'a self, own: Option<&'a Route>) -> Option<&'a Route> {
+        own.or(self.env.host.task_router.as_ref())
+    }
+
     /// The model instance a sub-agent spawn should use. Every spawn is the
     /// `subagent` task, whatever its `subagent_type`: `model.tasks` is keyed
     /// by the kind of call, not the kind of agent.
-    pub(crate) fn model_for_subagent(&self) -> Arc<dyn Model> {
-        match &self.env.host.task_router {
-            Some(router) => router.model_for("subagent"),
+    pub(crate) fn model_for_subagent(&self, own: Option<&Route>) -> Arc<dyn Model> {
+        match self.router(own) {
+            Some(router) => router.model_for(SUBAGENT),
             None => self.env.model.clone(),
+        }
+    }
+
+    /// `None` shares the parent's route.
+    pub(crate) fn own_route(
+        &self,
+        provider: Option<&str>,
+        model: Option<&str>,
+        def: Option<&AgentTypeDefinition>,
+    ) -> Result<Option<Route>, String> {
+        let Some(parent) = &self.env.host.task_router else {
+            return match provider {
+                Some(id) => Err(format!(
+                    "provider `{id}` is not configured: this session routes no providers"
+                )),
+                None => Ok(None),
+            };
+        };
+        if let Some(id) = provider {
+            return parent.starting_at(id).map(Some);
+        }
+        if let Some(def) = def {
+            if let Some(id) = &def.provider {
+                match parent.starting_at(id) {
+                    Ok(route) => return Ok(Some(route)),
+                    Err(error) => tracing::warn!(
+                        agent_type = %def.name,
+                        provider = %id,
+                        %error,
+                        "agent type names a provider this session does not define; ignoring it"
+                    ),
+                }
+            }
+        }
+        let Some(model) = model.or_else(|| def.and_then(|d| d.model.as_deref())) else {
+            return Ok(None);
+        };
+        if model == "inherit" || tier_named(model).is_some() {
+            return Ok(None);
+        }
+        match parent.home_of(model) {
+            Some(home) if parent.destination(SUBAGENT, model).provider != home => {
+                parent.starting_at(&home).map(Some)
+            }
+            _ => Ok(None),
         }
     }
 
@@ -105,15 +156,15 @@ impl Delegator {
         }
     }
 
-    /// A sub-agent's configuration: the parent's, with its own model — the
-    /// one `model_name` names ([`Self::named_delegate_model`]), else
-    /// [`Self::unnamed_delegate_model`] — and the mode a host switched the
-    /// parent to since it was built.
-    pub(crate) fn sub_settings(&self, model_name: Option<&str>) -> SessionConfig {
-        let model_name = match model_name {
-            Some(name) => self.named_delegate_model(name),
-            None => self.unnamed_delegate_model(),
-        };
+    /// A sub-agent's configuration: the parent's, with its own model
+    /// ([`Self::delegate_model`]) and the mode a host switched the parent to
+    /// since it was built.
+    pub(crate) fn sub_settings(
+        &self,
+        own: Option<&Route>,
+        model_name: Option<&str>,
+    ) -> SessionConfig {
+        let model_name = self.delegate_model(own, model_name);
         let config = (*self.env.session_config)
             .clone()
             .with_model_name(model_name);
@@ -133,16 +184,30 @@ impl Delegator {
             .unwrap_or_else(|| self.env.config.model.clone())
     }
 
+    /// The model `model_name` names ([`Self::named_delegate_model`]), else
+    /// [`Self::unnamed_delegate_model`]; on a route of its own, that
+    /// model's counterpart at the route's head.
+    pub(crate) fn delegate_model(&self, own: Option<&Route>, model_name: Option<&str>) -> String {
+        let name = match model_name {
+            Some(name) => self.named_delegate_model(own, name),
+            None => self.unnamed_delegate_model(own),
+        };
+        match own {
+            Some(route) => route.destination(SUBAGENT, &name).model,
+            None => name,
+        }
+    }
+
     /// The model of a delegate whose spawn and agent type name none: the
     /// `subagent` task's tier at the first provider — unless that provider
     /// serves it with the conversation's own tier's model, in which case the
     /// delegate follows the parent's model.
-    fn unnamed_delegate_model(&self) -> String {
-        let Some(router) = &self.env.host.task_router else {
+    fn unnamed_delegate_model(&self, own: Option<&Route>) -> String {
+        let Some(router) = self.router(own) else {
             return self.parent_model();
         };
         match (
-            router.model_name_for("subagent"),
+            router.model_name_for(SUBAGENT),
             router.model_name_for("main"),
         ) {
             (Some(subagent), Some(main)) if subagent != main => subagent,
@@ -154,13 +219,11 @@ impl Delegator {
     /// `strong`, `balanced`, `fast`, or Claude Code's `opus`, `sonnet`,
     /// `haiku` — the first provider's model of that tier; anything else a
     /// model id.
-    fn named_delegate_model(&self, name: &str) -> String {
+    fn named_delegate_model(&self, own: Option<&Route>, name: &str) -> String {
         if name == "inherit" {
             return self.parent_model();
         }
-        let tier = base::provider::Tier::from_claude_alias(name)
-            .or_else(|| base::provider::Tier::from_name(name));
-        match (tier, &self.env.host.task_router) {
+        match (tier_named(name), self.router(own)) {
             (Some(tier), Some(router)) => router.resolve_model(tier.as_str()),
             (Some(_), None) => self.parent_model(),
             (None, _) => name.to_string(),
@@ -244,4 +307,10 @@ impl Delegator {
         }
         scene::builtin(id, &self.env.session_config.settings().paths.layout).map(Arc::new)
     }
+}
+
+const SUBAGENT: &str = base::provider::TaskTiers::SUBAGENT;
+
+fn tier_named(name: &str) -> Option<base::provider::Tier> {
+    base::provider::Tier::from_claude_alias(name).or_else(|| base::provider::Tier::from_name(name))
 }

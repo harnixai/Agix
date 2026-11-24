@@ -279,6 +279,7 @@ pub fn capabilities() -> Vec<&'static str> {
     let mut out = CAPABILITIES.to_vec();
     if cfg!(feature = "agents") {
         out.push("host_agents");
+        out.push("subagent_provider");
     }
     if cfg!(feature = "mcp-oauth-jwt") {
         out.push("mcp_oauth_jwt");

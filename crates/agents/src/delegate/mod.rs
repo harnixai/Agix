@@ -64,6 +64,34 @@ impl Delegator {
             .ok_or_else(|| DelegateError::Unsupported("the session is closing".into()))
     }
 
+    /// The worktree a background delegate takes along, and its own route.
+    async fn prepare(
+        &self,
+        req: &DelegateRequest,
+        worktree: Option<::tools::worktree::WorktreeHandle>,
+    ) -> Result<
+        (
+            Option<::tools::worktree::WorktreeHandle>,
+            Option<std::sync::Arc<dyn base::provider::TaskRouting>>,
+        ),
+        DelegateError,
+    > {
+        let worktree = Self::taken_along(&req.mode, worktree).await?;
+        let def = req
+            .agent_type
+            .as_deref()
+            .and_then(|t| self.agent_type_def(t));
+        match self.own_route(req.provider.as_deref(), req.model.as_deref(), def.as_ref()) {
+            Ok(route) => Ok((worktree, route)),
+            Err(e) => {
+                if let Some(worktree) = worktree {
+                    worktree.remove_if_untouched().await;
+                }
+                Err(DelegateError::Invalid(e))
+            }
+        }
+    }
+
     async fn taken_along(
         mode: &DelegateMode,
         worktree: Option<::tools::worktree::WorktreeHandle>,
@@ -129,7 +157,7 @@ impl Delegator {
         req: DelegateRequest,
         worktree: Option<::tools::worktree::WorktreeHandle>,
     ) -> Result<Delegated, DelegateError> {
-        let worktree = Self::taken_along(&req.mode, worktree).await?;
+        let (worktree, route) = self.prepare(&req, worktree).await?;
         let DelegateRequest {
             prompt,
             description,
@@ -153,6 +181,7 @@ impl Delegator {
             session_id: base::id::Id::new().to_string(),
             agent_type,
             model,
+            route,
             tools,
             output_schema,
             permission_mode: None,
@@ -166,12 +195,10 @@ impl Delegator {
             StopsWith::Call(token) => token.child_token(),
             StopsWith::Session => self.env.parent.ended.child_token(),
         };
-        let rules = deny_rules
-            .into_iter()
-            .filter(|r| r.behavior == base::permission::RuleBehavior::Deny)
-            .chain(grants.into_iter().map(crate::agent_tool::grant_rule))
-            .collect();
-        let ask = run::Ask { asks, rules };
+        let ask = run::Ask {
+            asks,
+            rules: delegate_rules(deny_rules, grants),
+        };
         match mode {
             DelegateMode::Wait => self.wait(spec, prompt, description, stop, ask).await,
             DelegateMode::Background { notify_parent } => {
@@ -221,4 +248,16 @@ impl Delegator {
             }
         }
     }
+}
+
+/// Only the request's deny rules hold, with its grants besides.
+fn delegate_rules(
+    deny_rules: Vec<base::permission::PermissionRule>,
+    grants: Vec<base::interface::permission::Grant>,
+) -> Vec<base::permission::PermissionRule> {
+    deny_rules
+        .into_iter()
+        .filter(|r| r.behavior == base::permission::RuleBehavior::Deny)
+        .chain(grants.into_iter().map(crate::agent_tool::grant_rule))
+        .collect()
 }

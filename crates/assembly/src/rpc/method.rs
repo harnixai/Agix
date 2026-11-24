@@ -60,7 +60,6 @@ pub struct StartAgentParams {
     pub subagent_type: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
-    /// Refused when given: a sub-agent runs on its parent's provider.
     #[serde(default)]
     pub provider: Option<String>,
     #[serde(default)]
@@ -93,6 +92,7 @@ impl StartAgentParams {
         req.description = self.description;
         req.agent_type = self.subagent_type;
         req.model = self.model;
+        req.provider = self.provider;
         req.tools = ToolSelector::from_lists(&self.allowed_tools, &self.disallowed_tools);
         req.deny_rules = self.permission_rules;
         req.output_schema = self.output_schema;

@@ -14,7 +14,7 @@ file  crates/skills/src/manager.rs                                  -           
 file  crates/session/src/transcript.rs                           -                                      924
 file  crates/telemetry/src/recorder/mod.rs                       -                                      828
 fn    crates/agents/src/agent_tool/build.rs                      Delegator::build_delegate              96
-fn    crates/agents/src/agent_tool/catalog.rs                    parse_agent_type_file                  93
+fn    crates/agents/src/agent_tool/catalog.rs                    parse_agent_type_file                  96
 fn    crates/agents/src/agent_tool/mod.rs                        AgentTool::call                        81
 fn    crates/agents/src/agent_tool/turn.rs                       run_one_turn                           92
 fn    crates/agents/src/delegate/mod.rs                          Delegator::dispatch_unboxed            97

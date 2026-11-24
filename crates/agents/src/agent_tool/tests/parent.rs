@@ -178,7 +178,7 @@ impl AgentTool {
     }
 
     pub(super) fn sub_settings(&self, model_name: Option<&str>) -> SessionConfig {
-        self.delegator.sub_settings(model_name)
+        self.delegator.sub_settings(None, model_name)
     }
 
     /// What a delegate of `agent_type` is left of what it inherits, once its
@@ -314,6 +314,7 @@ impl AgentTool {
             session_id: base::id::Id::new().to_string(),
             agent_type: agent_type.map(str::to_string),
             model: None,
+            route: None,
             tools: ToolSelector::all(),
             output_schema: None,
             permission_mode: Some(permission_mode),

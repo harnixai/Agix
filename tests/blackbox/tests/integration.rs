@@ -57,6 +57,7 @@ mod session_settings;
 mod settings_take_effect;
 mod skills_and_memory;
 mod stream_recovery;
+mod subagent_providers;
 mod team_lifecycle;
 mod turn_limits;
 mod turn_throughput;

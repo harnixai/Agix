@@ -62,6 +62,9 @@ pub struct AgentTypeDefinition {
     /// `opus`, `sonnet`, `haiku`, as Claude Code writes them), `inherit` for
     /// the parent's, or a model id.
     pub model: Option<String>,
+    /// The provider its sub-agents' calls go to first, the rest following
+    /// `model.order`. One the session's pair does not define is ignored.
+    pub provider: Option<String>,
     /// Optional permission mode for spawned subagents of this type. Whether
     /// it may be looser than the parent session's depends on `source`.
     pub permission_mode: Option<crate::permission::PermissionMode>,

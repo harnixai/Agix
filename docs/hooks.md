@@ -159,7 +159,7 @@ JSON。触发它的那一轮正开着时,这个子 Agent 是那一轮的 delegat
 `block`,`reason` 作 `message`;`ok: true` 缺省什么都不说,写了 `"may_approve": true` 的记为
 `approve`(配在 `PreToolUse` 上就是替人答应权限询问,见"回答";为什么缺省不算见 `prompt`)。
 不是 JSON 的回答只当 `message`,不拦不改。写了 `model` 的,子 Agent 跑在这个模型上,provider
-按 `model.order` 选;`model` 可以写档位(`strong`、`balanced`、`fast`,或 `opus`、`sonnet`、`haiku`)
+按 `model.order` 选(模型 id 有确定归属的从那家起,同 `session.startAgent`);`model` 可以写档位(`strong`、`balanced`、`fast`,或 `opus`、`sonnet`、`haiku`)
 或模型 id;不写,就与没点名模型的子 Agent 一样(`model.tasks.subagent` 那一档的模型,与对话用的是同一个模型时
 跟随会话当前的模型)。
 

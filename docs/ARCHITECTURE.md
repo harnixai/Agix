@@ -744,7 +744,8 @@ provider,一个 provider 也没定义时引擎自己提供 `anthropic`(密钥取
 路由在 `model::routing`:`ProviderSet` 是一个 (项目, 场景) 的 provider、顺序、档位,连同它们的健康(冷却期)
 和配额记账,绑定建一个、它上面的会话共用;`SessionRouter` 是一个会话的视图——它自己的顺序(会话指定的
 provider 排第一)和上一次调用去了哪(只用来判断要不要报 `provider_switched`)。runtime 和模块只认 `base` 里的
-`TaskRouting`(`model_for`、`model_name_for`、`resolve_model`、`observe`),不依赖 `model`。
+`TaskRouting`(`model_for`、`model_name_for`、`resolve_model`、`observe`、`starting_at`、`home_of`、`destination`),
+不依赖 `model`。
 每次模型调用从 `order` 的头开始找可用的 provider,所以前面的恢复了就自动切回去。
 一个 provider 配额用尽、没有凭据、凭据被拒(401 / 403)、连不上或超时、5xx / 529 / 429 在客户端重试用尽后,
 或回 402 时交给下一个;连接类故障记一个冷却期,期间不再试它。400 一类是请求本身的问题,不换别家。只有一个
@@ -754,7 +755,11 @@ provider 时报它自己的错误种类;`order` 里的 provider 都不行时这�
 调用自己的流说(第一个事件 `ModelEvent::Served`),推理内容按它打标;同一个模型上同时在跑的几次调用(主循环和后台
 prompt hook)互不相干。子 Agent、压缩、
 记忆、标题、搜索走同一个路由;会话或 `session.setModel` 指定的模型 id 落到别家时,先查它在原 provider 里是哪一档,
-再取新 provider 里同一档的模型。
+再取新 provider 里同一档的模型。子 Agent 点了 provider(`session.startAgent`、`Agent` 工具、agent 类型的
+`provider`),或点的模型 id 有确定的归属(某家的 `models` 列着它或把它作档位,不算"什么都收"的那家)而父会话的
+调用不会先去那里时,`Delegator::own_route` 经 `TaskRouting::starting_at` 给它一条自己的路由:同一个
+`ProviderSet`、那家在前,自己的"上一次去了哪"与观察者,所以它的 `provider_switched` 在它自己的事件里,不算到父会话
+头上;它的压缩和它再起的子 Agent 也走这条。其余子 Agent 与父会话共用路由。
 
 配额按 provider id 计,口径是未命中缓存的输入加缓存写入加输出,缓存命中不计;用量落在状态根的 `quota/`
 (§8),文件名就是 id 本身。所以 provider id 只能由小写 ASCII 字母、数字、`-`、`_` 组成(不区分大小写的文件系统上 `Ab` 与 `ab` 是同一个文件):别的 id 加载时整项忽略,
