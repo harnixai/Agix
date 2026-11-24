@@ -69,7 +69,8 @@ impl TurnState {
     ///
     /// `charged_to` is what started it from outside the session: a turn,
     /// which this one is a delegate of and shares the ceiling of, or the
-    /// session of the host that started it. Otherwise it is a root turn,
+    /// session of the host that started it, or the task with a budget of its
+    /// own the host started it as. Otherwise it is a root turn,
     /// under its goal for a goal round and under its session.
     pub(crate) fn opening(
         turn_id: &str,

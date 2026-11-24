@@ -74,6 +74,10 @@ pub struct StartAgentParams {
     pub notify_parent: bool,
     #[serde(default)]
     pub tag: Option<String>,
+    /// The sub-agent's own ceiling, counted as `turn.token_budget` is;
+    /// it spends into the session as well. `0` is refused.
+    #[serde(default)]
+    pub token_budget: Option<u64>,
 }
 
 fn notify_parent_by_default() -> bool {

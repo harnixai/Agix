@@ -217,8 +217,9 @@ pub(crate) fn with_stop_note(text: String, stop_reason: &str) -> String {
             "The sub-agent stopped after too many attempts at its structured output"
         }
         "budget_exceeded" => {
-            "The sub-agent stopped when a token budget it shares with the agent that started \
-             it — the turn's, the goal's or the session's — ran out (budget_exceeded)"
+            "The sub-agent stopped when a token budget it is held to — one it shares with the \
+             agent that started it (the turn's, the goal's or the session's), or the task's \
+             own — ran out (budget_exceeded)"
         }
         _ => return text,
     };

@@ -582,7 +582,7 @@ ask 规则问的(含 managed 层的、宿主策略问的)和插件命令子调�
 | `command_executed` | 这一轮是斜杠命令,在本地执行完,不调模型(§6.3 `session.run_turn`、`commands.*`) |
 | `stopped_by_hook` | hook 截停了这一轮(`PostToolUse` / `Stop` hook 要求不再继续),理由在 `turn_complete.message` |
 | `context_exceeded` | 上下文超限且压缩也救不回来 |
-| `budget_exceeded` | 触到一个 token 预算:这一轮的(`turn.token_budget` 或 `options.settings.turn.token_budget`,见下)、会话的或目标的;是谁的在 `turn_complete.message`(如 `this turn's token budget of 2000 is used up`) |
+| `budget_exceeded` | 触到一个 token 预算:这一轮的(`turn.token_budget` 或 `options.settings.turn.token_budget`,见下)、会话的、目标的,或宿主起的子 Agent 自己的(`session.startAgent` 的 `token_budget`,`the task's …`);是谁的在 `turn_complete.message`(如 `this turn's token budget of 2000 is used up`) |
 | `unknown` | 反序列化兜底,遇到未知取值时的落点 |
 
 **一轮的 token 预算含子 Agent。** 预算按未命中缓存的输入、缓存写入与输出计(缓存命中不计,同 provider 配额),算的是这一轮的全部模型调用:
@@ -606,6 +606,10 @@ daemon 重启(累计即 `session.get` 的 `usage`,§6.3)。每次调用同样先
 `this session's token budget of <N> is used up`,到达 90% 时同样提醒收尾。之后每一次 `run_turn` 都在
 第一次调用前以 `budget_exceeded` 结束,不调模型;要接着用,宿主调高设置(或换一个会话)。子 Agent 与
 团队成员判的是根会话的这份累计。
+
+**宿主起的子 Agent 的预算。** `session.startAgent` 给了 `token_budget` 时,这个子 Agent 另有一份上限,口径同上,
+挂在会话的这份下面:它的调用两份都计,判的是剩得最少的那份,用完时只截停它自己(任务结局见 §6.3
+`session.startAgent`)。
 
 ---
 
@@ -851,6 +855,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `task_messages` | 有 `session.messageTask`,消息进运行中的后台子 Agent(§6.3) |
 | `host_agents` | 有 `session.startAgent`,宿主不经模型在会话下起子 Agent;子 Agent 任务带 `usage`、`structured_output`、`detail.tag`(§6.3) |
 | `task_model` | 子 Agent 与团队成员的任务 `detail` 带 `model` / `provider`(登记时是预测,每次调用后按实际改写,经 `task_updated` 推出);`step_end` 带 `served`;侧链的 `session.get` 带 `model` / `provider`(§6.3、§7) |
+| `agent_token_budget` | `session.startAgent` 收 `token_budget`:子 Agent 自己的 token 上限,挂在会话的上限下面;用完时任务以 `failed`、`error: "budget_exceeded: …"` 结束(§4.8、§6.3) |
 | `subagent_provider` | 子 Agent 可以有自己的 provider:`session.startAgent`、`Agent` 工具与 agent 类型收 `provider`,有确定归属的模型 id 从它的归属起(§6.3) |
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
@@ -3044,7 +3049,8 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
   "permission_rules": [ ],           // 可选,写法见 §4.6;只有 deny 生效
   "output_schema": { },              // 可选,同 session.create;交上来的进任务的 structured_output
   "notify_parent": true,             // 可选,默认 true:结束时给父会话投 <task-notification>
-  "tag": "…" }                       // 可选,宿主的关联串,原样出现在 task.detail.tag
+  "tag": "…",                        // 可选,宿主的关联串,原样出现在 task.detail.tag
+  "token_budget": 200000 }           // 可选,正整数:这个子 Agent 自己的 token 上限,口径同 turn.token_budget(§4.8);0 → INVALID_PARAMS
 // ← result
 { "task_id": "…", "agent_session_id": "…" }
 ```
@@ -3074,6 +3080,16 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
   就拒。allow / ask 规则不生效 —— 宿主起的子 Agent 只能比父会话更严。询问怎么答见 §10。
 - `output_schema`:子 Agent 交的不满足 schema 时被退回重交;结束时在 `task_finished.task`
   与 `session.tasks` 的 `structured_output` 上。
+- 预算:子 Agent 的每次调用(连同它的旁路调用与再起的子 Agent)照常计入父会话的 `usage` 与
+  `session.token_budget`。给了 `token_budget` 时它另有一份自己的上限,挂在会话的上限下面:每次调用前取两者
+  (以及它自己这一轮的 `turn.token_budget`)里剩得最少的,所以只会比父会话更紧。用完时子 Agent 这一轮以
+  `budget_exceeded` 结束,父会话与别的子 Agent 照常。`session.messageTask` 发去的消息进它正在跑的这一轮,
+  用的是同一份上限。
+- 宿主起的子 Agent 被任何一份 token 预算截停(它自己的、会话的、它这一轮的)时,任务结局是
+  `status: "failed"`,`error` 为 `budget_exceeded: <谁的预算>`,如
+  `"budget_exceeded: the task's token budget of 200000 is used up"`(会话的是 `this session's`;说不出是哪份时只有
+  `budget_exceeded`);截停前它说的话照样在任务输出里,`notify_parent` 的通知是 `<status>failed</status>` 带
+  `<error>`。模型用 `Agent` 工具起的子 Agent 被预算截停仍是 `done`,结果末尾带说明。
 - `notify_parent: true` 的通知在父会话的下一轮开头读到;父会话空闲时不会因此自己开一轮。
 
 #### `session.respondToPrompt`
@@ -4326,7 +4342,7 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 | `task_started` | `{task}` | 这个会话的一件任务开始了(`task` 同 `session.tasks` 的条目)。Shell 命令与监视器只在跑过 1 秒后才报,短命令不报;MCP 任务在 server 建任务时立即报;不属于任何一轮,`turn_id` 为 `null` |
 | `task_updated` | `{task}` | 一件报过开始、还没结束的任务变了:子 Agent 每调完一次模型(`task.usage`,以及这次调用实际去的 `detail.model` / `detail.provider`),有询问开始或结束等待(`task.status` 在 `waiting` 与 `running` 之间);`turn_id` 为 `null` |
 | `task_progress` | `{task_id,appended,skipped_bytes,from_byte,next_byte}` | 一件报过开始的 Shell 命令、监视器、`RunCode` 程序或 MCP 任务(状态行 `[<mcp_status>] <status_message>`,每次变化一行,不受每秒一帧限制)新打出来的输出,`appended` 是偏移 `from_byte..next_byte` 那段(偏移同 `session.taskOutput`)。每件任务每秒至多一帧,结束时在 `task_finished` 之前补最后一帧;一帧至多 8 KiB,多出的只发结尾,`skipped_bytes` 是跳过的字节数,恒等于本帧 `from_byte` 减上一帧 `next_byte`;漏帧或跳过的用 `session.taskOutput {from_byte}` 补;`turn_id` 为 `null` |
-| `task_finished` | `{task}` | 一件报过开始的任务结束了,`task.status` 是结局;此后没有它的 `task_progress`,输出不再长,`session.taskOutput` 的 `final` 为 `true`。被停掉的任务等工作收尾后才发(§6.3 `session.stopTask`);`turn_id` 为 `null` |
+| `task_finished` | `{task}` | 一件报过开始的任务结束了,`task.status` 是结局,`failed` 时 `task.error` 写明原因(宿主起的子 Agent 被 token 预算截停是 `budget_exceeded: …`,§6.3 `session.startAgent`);此后没有它的 `task_progress`,输出不再长,`session.taskOutput` 的 `final` 为 `true`。被停掉的任务等工作收尾后才发(§6.3 `session.stopTask`);`turn_id` 为 `null` |
 | `goal_changed` | `{goal}` | 会话目标变了(`goal` 同 `session.goal`,清除后为 `null`);`turn_id` 为 `null` |
 | `extension_entry` | `{entry}` | 宿主经 `session.appendEntry` 写了一条扩展条目(`entry` 同 `session.entries` 的条目);`turn_id` 为 `null` |
 | `permission_mode_changed` | `{mode,source}` | 会话的权限模式变了:`mode` 是变成的模式(§4.5),`source` 为 `host`(`session.setPermissionMode`,或 `session.rewind` 回到了 `plan` 里)或 `model`(模型的 `EnterPlanMode` / `ExitPlanMode`)。会话重建或恢复时按设置得到的模式不推,要知道读 `session.resume` 的 `permission.mode`。推给全部订阅者,包括发起切换的那条连接;`turn_id` 为 `null` |

@@ -18,10 +18,11 @@
 //! that stands in for one) adds its usage to the [`SpendNode`] the call's
 //! [`UsageTap`](crate::interface::model::UsageTap) is charged to. That node is
 //! the turn the call belongs to; above it is the turn that delegated it, and
-//! above a root turn its goal (for a goal round) and its session. A call
+//! above a root turn its goal (for a goal round) and its session; above a
+//! budgeted host sub-agent's turn, its task and then its session. A call
 //! spends into every node up the chain, and the engine's ceilings — a turn's,
-//! a goal's, a session's — are judged together: the next call may ask for no
-//! more than the tightest of them leaves ([`SpendNode::remaining`]).
+//! a goal's, a task's, a session's — are judged together: the next call may
+//! ask for no more than the tightest of them leaves ([`SpendNode::remaining`]).
 //!
 //! The engine counts [`Spend::counted_tokens`] — input not read from the cache,
 //! cache writes and output — against every ceiling and provider quota alike. A
@@ -116,6 +117,7 @@ impl From<crate::interface::model::Usage> for Spend {
 pub enum Scope {
     Turn,
     Goal,
+    Task,
     Session,
 }
 
@@ -124,13 +126,14 @@ impl Scope {
         match self {
             Self::Turn => "this turn's",
             Self::Goal => "the goal's",
+            Self::Task => "the task's",
             Self::Session => "this session's",
         }
     }
 }
 
-/// What one turn, goal or session has spent and the engine's ceiling on it,
-/// with the node above it that it spends into as well.
+/// What one turn, goal, task or session has spent and the engine's ceiling on
+/// it, with the node above it that it spends into as well.
 ///
 /// A turn's own calls, those made on its side (compaction, memory, web
 /// extraction) and those of the delegates it started all spend into its node:
@@ -163,6 +166,12 @@ impl SpendNode {
 
     pub fn goal(limit: Option<u64>, session: Arc<SpendNode>) -> Self {
         Self::node(Scope::Goal, limit, Some(session))
+    }
+
+    /// A host sub-agent's own ceiling. Never under a turn: a turn's
+    /// `delegated` counts only through the turns directly under it.
+    pub fn task(limit: Option<u64>, session: Arc<SpendNode>) -> Self {
+        Self::node(Scope::Task, limit, Some(session))
     }
 
     /// A root turn under its goal or session, or a delegate's under the
@@ -677,6 +686,60 @@ mod tests {
         assert_eq!(
             grandchild.find(Scope::Session).unwrap().read().input_tokens,
             111
+        );
+    }
+
+    #[test]
+    fn a_tasks_ceiling_is_its_own_and_its_calls_are_the_sessions() {
+        let session = Arc::new(SpendNode::session(Some(10_000)));
+        let budgeted = Arc::new(SpendNode::task(Some(3_000), session.clone()));
+        let sibling = SpendNode::turn(None, Some(session.clone()));
+        let child_session = Arc::new(SpendNode::session(None));
+        let turn =
+            SpendNode::turn(None, Some(budgeted.clone())).counting_into(child_session.clone());
+        turn.add(call(2_000, 500));
+        sibling.add(call(4_000, 0));
+        assert_eq!(budgeted.read().counted_tokens(), 2_500);
+        assert_eq!(session.read().counted_tokens(), 6_500);
+        assert_eq!(child_session.read().counted_tokens(), 2_500);
+        assert_eq!(budgeted.delegated(), Spend::default());
+        assert_eq!(session.delegated(), Spend::default());
+        assert_eq!(turn.whole_turn(), turn.read());
+        assert_eq!(
+            turn.remaining(),
+            Some((
+                Scope::Task,
+                Remaining {
+                    tokens: 500,
+                    limit: 3_000
+                }
+            ))
+        );
+        assert_eq!(
+            sibling.remaining().map(|(scope, _)| scope),
+            Some(Scope::Session)
+        );
+        turn.add(call(500, 0));
+        assert_eq!(
+            turn.judge(),
+            (Scope::Task, Spending::Exhausted { limit: 3_000 })
+        );
+        assert_eq!(sibling.judge().1, Spending::WithinBudget);
+        session.restore(Spend {
+            input_tokens: 9_900,
+            ..Default::default()
+        });
+        let fresh = SpendNode::task(Some(3_000), session);
+        assert_eq!(
+            fresh.remaining(),
+            Some((
+                Scope::Session,
+                Remaining {
+                    tokens: 100,
+                    limit: 10_000
+                }
+            )),
+            "a task's ceiling loosened its session's"
         );
     }
 

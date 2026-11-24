@@ -31,6 +31,9 @@ pub(super) struct Started {
     /// The worktree the delegate works in, which ends with it unless it
     /// leaves work there.
     pub(super) worktree: Option<::tools::worktree::WorktreeHandle>,
+    /// A host's task: one a token budget stopped ends `failed`, saying whose,
+    /// where the model's ends `done` with the note its parent reads.
+    pub(super) by_host: bool,
 }
 
 impl Delegator {
@@ -133,7 +136,9 @@ impl Delegator {
             tag,
             notify_parent,
             worktree,
+            by_host,
         } = started;
+        let held_to = by_host.then(|| spec.spend.clone());
         let admitted = self.me().and_then(|me| Ok((me, self.limits.admit_now()?)));
         let (me, admission) = match admitted {
             Ok(admitted) => admitted,
@@ -178,6 +183,10 @@ impl Delegator {
         tokio::spawn(async move {
             let (text, end) =
                 without_panics(async move { me.run_delegate(admission, shot).await }).await;
+            let end = match &held_to {
+                Some(spend) => budget_ran_out(end, spend.as_deref()),
+                None => end,
+            };
             if let Some(worktree) = worktree {
                 if let Some(kept) = worktree.remove_if_untouched().await {
                     lease
@@ -285,4 +294,24 @@ impl Delegator {
             session_id,
         }))
     }
+}
+
+/// A host's task a token budget stopped, as `failed` with
+/// `budget_exceeded: <whose budget>` for its error.
+fn budget_ran_out(
+    end: DelegateEnd,
+    spend: Option<&base::interface::budget_policy::SpendNode>,
+) -> DelegateEnd {
+    use base::interface::budget_policy::{exhausted_message, MIN_CALL_TOKENS};
+    if end != DelegateEnd::CutShort("budget_exceeded") {
+        return end;
+    }
+    let whose = spend
+        .and_then(|spend| spend.remaining())
+        .filter(|(_, left)| left.tokens < MIN_CALL_TOKENS)
+        .map(|(scope, left)| exhausted_message(scope, left.limit));
+    DelegateEnd::Failed(match whose {
+        Some(whose) => format!("budget_exceeded: {whose}"),
+        None => "budget_exceeded".into(),
+    })
 }

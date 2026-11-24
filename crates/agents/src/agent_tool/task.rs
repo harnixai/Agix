@@ -82,9 +82,7 @@ pub(crate) fn conclude(
     end: &DelegateEnd,
     notify_parent: bool,
 ) {
-    if !matches!(end, DelegateEnd::Failed(_)) {
-        lease.task().append_output(text);
-    }
+    lease.task().append_output(text);
     let notice = notify_parent.then(|| task_notification(lease.task(), end));
     lease.conclude(status_of(end), notice);
 }

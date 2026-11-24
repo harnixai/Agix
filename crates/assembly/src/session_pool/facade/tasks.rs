@@ -282,16 +282,26 @@ impl SessionPool {
 
     /// `session.startAgent`: a sub-agent the host starts under `session_id`,
     /// in the background, whether or not a turn is running. A session not in
-    /// memory is resumed for it.
+    /// memory is resumed for it. With `token_budget` it spends under a task
+    /// node of its own below the session's, so whichever of the two is
+    /// tighter holds it.
     pub async fn start_agent(
         &self,
         session_id: &str,
         mut request: base::interface::delegate::DelegateRequest,
+        token_budget: Option<u64>,
     ) -> Result<api::AgentStarted, PoolError> {
+        use base::interface::budget_policy::SpendNode;
         use base::interface::delegate::{DelegateMode, Delegated};
         if !matches!(request.mode, DelegateMode::Host { .. }) {
             return Err(PoolError::InvalidRequest(
                 "a host starts a sub-agent as DelegateMode::Host".into(),
+            ));
+        }
+        if token_budget.is_some() && request.spend.is_some() {
+            return Err(PoolError::InvalidRequest(
+                "a token budget goes under the session's spend, and the request names its own"
+                    .into(),
             ));
         }
         let not_found = || PoolError::no_session(session_id);
@@ -307,7 +317,11 @@ impl SessionPool {
         };
         if request.spend.is_none() {
             if let Some(state) = self.live_state(session_id).await {
-                request.spend = Some(state.ledger().spent.clone());
+                let session = state.ledger().spent.clone();
+                request.spend = Some(match token_budget {
+                    Some(limit) => Arc::new(SpendNode::task(Some(limit), session)),
+                    None => session,
+                });
             }
         }
         match delegator.delegate(request).await {

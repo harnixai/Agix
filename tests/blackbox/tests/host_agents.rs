@@ -1,8 +1,9 @@
 //! A sub-agent the host starts under a session (`session.startAgent`): a task
 //! of the session like one the model starts, reported with the host's tag,
 //! its own usage and its structured output, held to the session's limits and
-//! permissions, and able to ask the host while its parent is idle — its task
-//! showing as waiting until the host answers.
+//! permissions and to a token budget of its own when given one, and able to
+//! ask the host while its parent is idle — its task showing as waiting until
+//! the host answers.
 
 use std::time::Duration;
 
@@ -445,6 +446,142 @@ async fn the_hosts_deny_rules_hold_and_a_question_reaches_it_between_turns() -> 
         !project.join("draft.md").exists(),
         "the host's deny rule refused a write default mode would have allowed"
     );
+    daemon.stop().await;
+    Ok(())
+}
+
+/// 4500 counted tokens on its first call put a sub-agent with
+/// `token_budget: 4000` past it: it stops there, `failed` with
+/// `budget_exceeded`, while its sibling without one finishes, the session
+/// counts both and its next turn runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agents_own_token_budget_stops_it_and_nothing_else() -> anyhow::Result<()> {
+    let (_world, provider, daemon, mut client, session) = daemon_with("budget", json!({})).await?;
+    let mut watcher = daemon.connect().await?;
+    watcher.session_subscribe(&session).await?;
+    provider.script_when(
+        "BUDGETED-MARK",
+        [
+            Reply::spent(
+                4000,
+                500,
+                Reply::calls("g-1", "Glob", json!({ "pattern": "*" })),
+            ),
+            Reply::text("never sent"),
+        ],
+    );
+    provider.script_when(
+        "SIBLING-MARK",
+        [Reply::spent(4000, 500, Reply::text("SIBLING-DONE"))],
+    );
+
+    let budgeted = start_agent(
+        &mut client,
+        json!({
+            "session_id": session,
+            "prompt": "BUDGETED-MARK look around",
+            "description": "budgeted",
+            "token_budget": 4000
+        }),
+    )
+    .await?;
+    let sibling = start_agent(
+        &mut client,
+        json!({
+            "session_id": session,
+            "prompt": "SIBLING-MARK look around",
+            "description": "sibling"
+        }),
+    )
+    .await?;
+
+    let mut finished = Vec::new();
+    while finished.len() < 2 {
+        let frame = event_where(&mut watcher, |e| e["kind"] == "task_finished").await?;
+        finished.push(frame["event"]["task"].clone());
+    }
+    let task_of = |started: &Value| {
+        finished
+            .iter()
+            .find(|t| t["task_id"] == started["task_id"])
+            .cloned()
+            .unwrap_or_default()
+    };
+    let stopped = task_of(&budgeted);
+    assert_eq!(stopped["status"], "failed", "{stopped}");
+    assert_eq!(
+        stopped["error"], "budget_exceeded: the task's token budget of 4000 is used up",
+        "{stopped}"
+    );
+    assert_eq!(stopped["usage"]["input_tokens"], 4000, "{stopped}");
+    let output = client
+        .call(
+            "session.taskOutput",
+            json!({ "session_id": session, "task_id": budgeted["task_id"] }),
+        )
+        .await?
+        .result
+        .unwrap_or_default();
+    assert!(
+        output["output"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("budget_exceeded"),
+        "{output}"
+    );
+    let done = task_of(&sibling);
+    assert_eq!(done["status"], "done", "{done}");
+    assert!(done.get("error").is_none(), "{done}");
+    let budgeted_calls = provider
+        .calls()
+        .iter()
+        .filter(|c| c.body.to_string().contains("BUDGETED-MARK"))
+        .count();
+    assert_eq!(budgeted_calls, 1, "the sub-agent called past its budget");
+
+    let got = client
+        .call("session.get", json!({ "session_id": session }))
+        .await?
+        .result
+        .unwrap_or_default();
+    assert_eq!(got["usage"]["input_tokens"], 8000, "{got}");
+    assert_eq!(got["usage"]["output_tokens"], 1000, "{got}");
+
+    provider.script([Reply::text("noted")]);
+    let next = client
+        .session_run_turn(&session, "anything new?", "t1", None)
+        .await?;
+    let ended = next.turn_complete_event.clone().unwrap_or_default();
+    assert_eq!(ended["stop_reason"], "end_turn", "{ended}");
+    let told = provider.calls().last().cloned().expect("a call");
+    assert!(
+        told.body.to_string().contains("budget_exceeded"),
+        "the parent is not told how its sub-agent ended"
+    );
+    daemon.stop().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_budget_of_zero_is_refused() -> anyhow::Result<()> {
+    let (_world, provider, daemon, mut client, session) =
+        daemon_with("budget-zero", json!({})).await?;
+    let refused = client
+        .call(
+            "session.startAgent",
+            json!({ "session_id": session, "prompt": "look around", "token_budget": 0 }),
+        )
+        .await?;
+    let error = refused.error.expect("refused");
+    assert_eq!(error.code, -32602, "{error:?}");
+    assert!(error.message.contains("token_budget"), "{error:?}");
+    let listed = client
+        .call("session.tasks", json!({ "session_id": session }))
+        .await?
+        .result
+        .unwrap_or_default();
+    assert_eq!(listed["tasks"], json!([]), "{listed}");
+    assert_eq!(provider.call_count(), 0);
     daemon.stop().await;
     Ok(())
 }

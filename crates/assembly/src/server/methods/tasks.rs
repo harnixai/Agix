@@ -78,6 +78,12 @@ async fn start_agent(
     if p.prompt.trim().is_empty() {
         return Err(invalid("session.startAgent needs a prompt"));
     }
+    if p.token_budget == Some(0) {
+        return Err(invalid("token_budget must be a positive integer"));
+    }
     let session_id = p.session_id.clone();
-    Ok(s.pool.start_agent(&session_id, p.into_request()).await?)
+    let token_budget = p.token_budget;
+    Ok(s.pool
+        .start_agent(&session_id, p.into_request(), token_budget)
+        .await?)
 }

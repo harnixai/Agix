@@ -273,8 +273,10 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 
 节点连成链:delegate 那一轮的节点在起它的那一轮下面(`Agent` 工具、`TeamCreate` 的阶段成员、派给持久
 成员的消息、fork 的 skill、`agent` hook 把起它的那一轮放进 `DelegateRequest.spend`;宿主 `session.startAgent` 起的放
-会话的节点),根轮在会话的节点下面,目标轮在两者之间插一层目标的节点。一次调用逐级加到链上每个节点。
-引擎自己的上限挂在节点上——一轮的(`turn.token_budget`,挂在根轮,delegate 共用)、目标的、会话的——
+会话的节点,带 `token_budget` 的放会话节点下的一个任务节点 `SpendNode::task`),根轮在会话的节点下面,目标轮在
+两者之间插一层目标的节点。任务节点只挂在会话下面、不挂在轮下面:一轮的 `delegated` 只经它正下方的轮节点累计,
+中间夹一层任务节点会把 delegate 的花费从 `usage_breakdown.delegates` 里漏掉。一次调用逐级加到链上每个节点。
+引擎自己的上限挂在节点上——一轮的(`turn.token_budget`,挂在根轮,delegate 共用)、目标的、任务的、会话的——
 第 1 步取整条链上最小的剩余(`SpendNode::remaining`),减去这次请求输入的估计(见下)后压低 `max_tokens`、
 不到 `MIN_CALL_TOKENS` 不发(付不起的是目标的上限时目标转 `blocked`),
 第 7 步(`SpendNode::judge`)任何一层到顶即以 `budget_exceeded` 结束,最近的一层到 90% 时提醒收尾;

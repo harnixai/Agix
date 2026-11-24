@@ -205,23 +205,16 @@ impl Delegator {
             asks,
             rules: delegate_rules(deny_rules, grants),
         };
+        let by_host = matches!(mode, DelegateMode::Host { .. });
         match mode {
             DelegateMode::Wait => self.wait(spec, prompt, description, stop, ask).await,
-            DelegateMode::Background { notify_parent } => {
+            DelegateMode::Background { notify_parent } | DelegateMode::Host { notify_parent } => {
                 let started = run::Started {
                     description,
-                    tag: None,
+                    tag: tag.filter(|_| by_host),
                     notify_parent,
                     worktree,
-                };
-                self.start(spec, prompt, stop, ask, started).await
-            }
-            DelegateMode::Host { notify_parent } => {
-                let started = run::Started {
-                    description,
-                    tag,
-                    notify_parent,
-                    worktree: None,
+                    by_host,
                 };
                 self.start(spec, prompt, stop, ask, started).await
             }
