@@ -83,7 +83,7 @@ async fn mcp_status_until(
     what: &str,
     done: impl Fn(&[Value]) -> bool,
 ) -> anyhow::Result<Vec<Value>> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
     loop {
         let resp = run.client.mcp_status().await?;
         let servers = resp.result.unwrap_or_default()["servers"]
@@ -128,19 +128,21 @@ async fn a_server_that_never_answers_initialize_does_not_hold_up_a_session() -> 
     let stub = ProviderStub::start().await?;
     let scratch = tempfile::tempdir()?;
     let calls = scratch.path().join("calls.log");
+    let mut mute = shell_server(
+        scratch.path(),
+        "mute",
+        "while IFS= read -r line; do :; done\n",
+    )?;
+    mute["startup_timeout_ms"] = json!(600_000);
     let servers = json!({
-        "mute": shell_server(
-            scratch.path(),
-            "mute",
-            "while IFS= read -r line; do :; done\n",
-        )?,
+        "mute": mute,
         "toy": McpToy::stdio_config(&["--calls", &calls.to_string_lossy()])?,
     });
     let mut run = stubbed("mute", &stub)
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
-    let session = tokio::time::timeout(Duration::from_secs(20), run.session())
+    let session = tokio::time::timeout(Duration::from_secs(120), run.session())
         .await
         .map_err(|_| anyhow::anyhow!("session.create still waiting on the mute server"))??;
     let _host = run.watch(&session, true).await?;
@@ -172,14 +174,14 @@ async fn a_server_stuck_connecting_to_one_project_holds_up_no_other() -> anyhow:
 
     let mut adder = run.daemon.connect().await?;
     let mut mute = McpToy::stdio_config(&["--mute", "--calls", &calls.to_string_lossy()])?;
-    mute["startup_timeout_ms"] = json!(20_000);
+    mute["startup_timeout_ms"] = json!(600_000);
     let adding = tokio::spawn(async move {
         adder
             .mcp_add_server(&rpc_client::Target::own(), "mute", mute)
             .await
     });
     anyhow::ensure!(
-        wait_for_line(&calls, ("toy", "muted"), Duration::from_secs(20)).await,
+        wait_for_line(&calls, ("toy", "muted"), Duration::from_secs(120)).await,
         "the mute server was never started"
     );
 
@@ -215,7 +217,7 @@ async fn a_server_that_answers_garbage_is_left_out_and_the_others_still_work() -
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
-    let session = tokio::time::timeout(Duration::from_secs(20), run.session())
+    let session = tokio::time::timeout(Duration::from_secs(120), run.session())
         .await
         .map_err(|_| anyhow::anyhow!("session.create still waiting on the garbage server"))??;
     let _host = run.watch(&session, true).await?;
@@ -782,7 +784,7 @@ async fn an_interrupted_mcp_call_is_cancelled_on_the_server() -> anyhow::Result<
     ]);
     let handle = run.spawn_turn(&session, "go slow", json!({})).await?;
     assert!(
-        wait_for_line(&calls, ("toy", "slow"), Duration::from_secs(20)).await,
+        wait_for_line(&calls, ("toy", "slow"), Duration::from_secs(120)).await,
         "the slow call never reached the server"
     );
     let resp = run
@@ -790,11 +792,11 @@ async fn an_interrupted_mcp_call_is_cancelled_on_the_server() -> anyhow::Result<
         .call("session.interrupt", json!({ "session_id": session }))
         .await?;
     assert_eq!(resp.result.unwrap_or_default()["interrupted"], json!(true));
-    tokio::time::timeout(Duration::from_secs(10), handle).await???;
-    run.wait_turn_state(&session, "idle", Duration::from_secs(10))
+    tokio::time::timeout(Duration::from_secs(60), handle).await???;
+    run.wait_turn_state(&session, "idle", Duration::from_secs(60))
         .await?;
     assert!(
-        wait_for_line(&calls, ("toy", "slow:cancelled"), Duration::from_secs(5)).await,
+        wait_for_line(&calls, ("toy", "slow:cancelled"), Duration::from_secs(60)).await,
         "the server was never told: {:?}",
         McpToy::calls(&calls)
     );

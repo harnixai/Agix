@@ -122,7 +122,7 @@ async fn a_tool_named_like_a_builtin_is_refused_by_name_and_replaces_nothing() -
 #[tokio::test(flavor = "multi_thread")]
 async fn a_health_check_that_blocks_does_not_stall_other_sessions() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
-    let block = Duration::from_secs(6);
+    let block = Duration::from_secs(30);
     let mut run = with_plugins(
         "hostile-health",
         &stub,

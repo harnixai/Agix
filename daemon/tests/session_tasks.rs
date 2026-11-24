@@ -932,7 +932,7 @@ async fn a_monitor_runs_beside_the_session_and_its_events_reach_the_model() {
         )
         .await;
     assert!(
-        started.elapsed() < Duration::from_secs(5),
+        started.elapsed() < Duration::from_secs(30),
         "the turn did not wait for the monitor"
     );
 

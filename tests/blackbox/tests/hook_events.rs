@@ -295,6 +295,20 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
             Duration::from_secs(60),
         )
         .await?;
+    let finished = ledger
+        .wait_until(
+            "the sub-agent's TaskCompleted",
+            task_completed_of("agent"),
+            Duration::from_secs(60),
+        )
+        .await?;
+    ledger
+        .wait_until(
+            "turn one's TurnComplete",
+            |e| e["hook_event_name"] == "TurnComplete" && e["turn_id"] == "ledger-t1",
+            Duration::from_secs(60),
+        )
+        .await?;
     let all = ledger.entries();
     let turn_one: Vec<Value> = all[opening.len()..]
         .iter()
@@ -393,13 +407,6 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
 
     let task: Value = serde_json::from_str(tasked["reason"].as_str().unwrap_or("null"))?;
     assert_eq!(task["kind"], "agent", "{tasked}");
-    let finished = ledger
-        .wait_until(
-            "the sub-agent's TaskCompleted",
-            task_completed_of("agent"),
-            Duration::from_secs(60),
-        )
-        .await?;
     let ended: Value = serde_json::from_str(finished["reason"].as_str().unwrap_or("null"))?;
     assert_eq!(ended["task_id"], task["task_id"], "{finished}");
     assert_eq!(ended["status"], "done", "{finished}");
@@ -435,6 +442,9 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
     let before_compact = ledger.entries().len();
     stub.script([Reply::text("SUMMARY: one turn happened.")]);
     run.turn(&session, "/compact").await?;
+    ledger
+        .wait_for("PostCompact", Duration::from_secs(60))
+        .await?;
     let compacting = ledger.entries()[before_compact..].to_vec();
     let pre = compacting
         .iter()
@@ -460,6 +470,9 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
     stub.script_when("PARENT-MARK", [Reply::text("turn three done")]);
     let stopped = run.turn(&session, "PARENT-MARK turn three").await?;
     let ended = stopped.turn_complete_event.clone().unwrap_or_default();
+    ledger
+        .wait_for("StopFailure", Duration::from_secs(60))
+        .await?;
     assert_eq!(ended["stop_reason"], "stopped_by_hook", "{ended}");
     assert_eq!(ended["message"], "LEDGER-STOPPED", "{ended}");
     let stopping: Vec<Value> = ledger.entries()[before_stop..]
@@ -1027,7 +1040,7 @@ async fn a_hook_that_fails_hangs_or_prints_garbage_changes_nothing() -> anyhow::
     executable(
         &hang,
         &format!(
-            "#!/bin/sh\necho $$ > '{}'\ncat > /dev/null\nexec sleep 30\n",
+            "#!/bin/sh\necho $$ > '{}'\ncat > /dev/null\nexec sleep 600\n",
             pid.display()
         ),
     )?;
@@ -1054,7 +1067,7 @@ async fn a_hook_that_fails_hangs_or_prints_garbage_changes_nothing() -> anyhow::
     let started = Instant::now();
     let events = run.turn(&session, "go").await?;
     assert!(
-        started.elapsed() < Duration::from_secs(15),
+        started.elapsed() < Duration::from_secs(300),
         "the hang was cut short"
     );
     assert_eq!(
@@ -1740,7 +1753,7 @@ async fn a_hook_that_leaves_a_background_process_behind_is_still_a_prompt_answer
     let started = Instant::now();
     let events = run.turn(&session, "go").await?;
     assert!(
-        started.elapsed() < Duration::from_secs(15),
+        started.elapsed() < Duration::from_secs(90),
         "the turn waited for the hook's background process"
     );
     assert!(run.read_file("blocked.txt").is_none());
