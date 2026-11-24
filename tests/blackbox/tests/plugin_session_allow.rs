@@ -1036,3 +1036,70 @@ async fn the_daemon_says_a_session_can_narrow_its_plugins() -> anyhow::Result<()
     embedded.shutdown().await;
     Ok(())
 }
+
+fn settings_server(root: &Root, key: &str) -> anyhow::Result<()> {
+    let path = root.data.join("settings.json");
+    let mut settings: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+    settings["mcp"] = json!({ "servers": { key: McpToy::stdio_config(&[])? } });
+    std::fs::write(path, serde_json::to_vec(&settings)?)?;
+    Ok(())
+}
+
+async fn shadow_status(settings_key: &str) -> anyhow::Result<Value> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub, json!({}))?;
+    let b = package(
+        &root,
+        "b",
+        "[[mcp]]\nname = \"toy\"\nkind = \"native\"\nconfig = \"mcp/server.json\"\n",
+    )?;
+    write(
+        &b,
+        "mcp/server.json",
+        &McpToy::stdio_config(&[])?.to_string(),
+    )?;
+    settings_server(&root, settings_key)?;
+    let (embedded, mut client) = start(&root, vec![b]).await?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let status = loop {
+        let status = client.call("mcp.status", json!({})).await?.result;
+        let status = status.unwrap_or_default();
+        let servers = status["servers"].as_array().cloned().unwrap_or_default();
+        if servers.iter().any(|s| s["state"] == "connected") {
+            break status;
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "nothing connected: {status}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    };
+    embedded.shutdown().await;
+    Ok(status)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_package_server_with_a_settings_key_is_warned_about() -> anyhow::Result<()> {
+    let status = shadow_status("b-mcp-toy").await?;
+    let named: Vec<&Value> = status["servers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["name"] == "b-mcp-toy")
+        .collect();
+    assert_eq!(named.len(), 1, "{status}");
+    assert_eq!(named[0]["state"], "connected", "{status}");
+    let warnings = status["warnings"].as_array().expect("warnings");
+    assert_eq!(warnings.len(), 1, "{status}");
+    let warning = warnings[0].as_str().unwrap();
+    assert!(warning.contains("`b`") && warning.contains("`b-mcp-toy`"));
+    assert!(warning.contains("replaces the settings one"));
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn differing_package_and_settings_keys_give_no_warning() -> anyhow::Result<()> {
+    let status = shadow_status("elsewhere").await?;
+    assert!(status["warnings"].is_null(), "{status}");
+    Ok(())
+}

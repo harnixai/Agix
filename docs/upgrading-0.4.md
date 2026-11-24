@@ -258,7 +258,7 @@
 - 场景 `plugin:<name>`:包不在会话集合里时 `session.create`、恢复与重建以 `INVALID_PARAMS` 拒绝
   (`invalid_options` 字段 `settings.plugins`);agent 类型的 `scene:` 指向这样的场景时,子 Agent 的派生报错,不退回父场景。
 - MCP:被排除的包声明的 server 仍由共享的 hub 连着(连接按 (项目, 场景) 共用),只是不交给这个会话。包与 settings 写了
-  同一个 MCP 键时,连上的是包的那个,所以排除这个包的会话两者都拿不到。
+  同一个 MCP 键时,连上的是包的那个,所以排除这个包的会话两者都拿不到。这种同名会报警告(`mcp.status` 的 `warnings`,连接时另写日志)。
 - 收窄的会话在建引擎时定下集合:之后才启用的包要等重建(`session.setModel`、`session.setPrompt` 等)才进来;没有
   设 `plugins` 的会话继续跟着池走。
 - 日志里最后一条会话规格读不出来时,会话不再退回更早的规格而放宽到池的全部插件;`plugins` 段读不出就是没有插件。

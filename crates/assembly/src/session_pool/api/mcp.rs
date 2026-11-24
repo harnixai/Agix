@@ -79,6 +79,8 @@ pub struct McpStatusList {
     /// configure, and nothing was started to find out.
     pub loaded: bool,
     pub servers: Vec<McpServerStatus>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// The one server `mcp.reconnect` connected again.

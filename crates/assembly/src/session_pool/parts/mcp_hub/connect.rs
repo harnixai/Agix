@@ -141,7 +141,7 @@ impl SessionPool {
         cfg.run_in(&home)
     }
 
-    fn refuse_clashing_plugin_servers(&self, admitted: &mut AdmittedMcp) {
+    fn refuse_clashing_plugin_servers(&self, settings: &Settings, admitted: &mut AdmittedMcp) {
         for (key, kept, refused) in self.plugins.mcp_key_clashes() {
             let error = format!(
                 "package `{refused}` declares an MCP server that would also be `{key}`, which \
@@ -157,6 +157,32 @@ impl SessionPool {
                 error,
             });
         }
+        for warning in self.shadowed_mcp_warnings(settings) {
+            tracing::warn!("{warning}");
+        }
+    }
+
+    pub(in crate::session_pool) fn shadowed_mcp_warnings(
+        &self,
+        settings: &Settings,
+    ) -> Vec<String> {
+        let owners = self.plugins.mcp_server_owners();
+        let mut shadowed: Vec<_> = settings
+            .mcp
+            .declared()
+            .filter_map(|(key, _)| owners.get(key).map(|owner| (key.clone(), owner.clone())))
+            .collect();
+        shadowed.sort();
+        shadowed
+            .into_iter()
+            .map(|(key, package)| {
+                format!(
+                    "package `{package}` declares MCP server `{key}`, which settings \
+                     `mcp.servers` also has; the package's replaces the settings one, and a \
+                     session excluding `{package}` gets neither"
+                )
+            })
+            .collect()
     }
 
     /// Parse the servers `settings` configure and pass each through
@@ -168,7 +194,7 @@ impl SessionPool {
         settings: &settings::LoadedSettings,
     ) -> AdmittedMcp {
         let mut admitted = AdmittedMcp::default();
-        self.refuse_clashing_plugin_servers(&mut admitted);
+        self.refuse_clashing_plugin_servers(&settings.values, &mut admitted);
         let judge = McpJudge::of(self, settings);
         for (name, v) in &self.configured_mcp_servers(&settings.values) {
             let refusal = match judge.admit(self, settings, name, v) {

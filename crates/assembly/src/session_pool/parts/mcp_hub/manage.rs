@@ -256,6 +256,7 @@ impl SessionPool {
             return Ok(api::McpStatusList {
                 loaded: true,
                 servers,
+                warnings: self.shadowed_mcp_warnings(&settings.values),
             });
         }
         let settings = if own {
@@ -266,6 +267,7 @@ impl SessionPool {
         Ok(api::McpStatusList {
             loaded: false,
             servers: self.unstarted_mcp_entries(&settings),
+            warnings: self.shadowed_mcp_warnings(&settings.values),
         })
     }
 

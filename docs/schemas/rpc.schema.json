@@ -4550,6 +4550,12 @@
             "$ref": "#/$defs/McpServerStatus"
           },
           "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [

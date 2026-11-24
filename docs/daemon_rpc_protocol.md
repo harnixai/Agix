@@ -3650,6 +3650,7 @@ provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同
 { "scene": "code", "project_root": "/Users/x/repo-b" }
 // ← result
 { "loaded": true, "servers": [ ] }
+// 另有 "warnings": [ "…" ],仅当有配置警告时才出现,见下
 // 元素:{ "name":"…", "transport":"…", "tool_count": 0, "state":"connected",
 //         "limited": "kept 200 of 300 tools; …",   // 仅当 server 的工具表被截过
 //         "auth": { "state":"authorized", "issuer":"https://…", "scopes":["…"],
@@ -3669,6 +3670,9 @@ provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同
 | `untrusted` | 项目自己声明的 server,项目未被信任(§3.6),没有启动;`tool_count` 为 0,另带 `error`。`project.trust` 之后启动 |
 | `disabled` | 被 `enabled: false` 关了(`mcp.setEnabled`),没有启动;`tool_count` 为 0 |
 | `not_started` | 这一对的 MCP 还没连过(`loaded: false`),它会在这一对第一个会话时连接 |
+
+`warnings`:不是哪台 server 的状态、但值得知道的配置问题,每条一句。目前只有一种:某个包声明的 MCP server 与 `settings.json` 的 `mcp.servers` 同键,
+包的那个顶替设置里的(该键只有一条记录),排除该包的会话两者都拿不到。
 
 `loaded` 说这一对 `(项目, 场景)` 的 MCP 连过没有。连过的,`servers` 是连接的实际状态;没连过的
 (`loaded: false`),`servers` 只按设置列出配了什么,**不建绑定、不连接、不启动任何进程**——查未受信项目的
