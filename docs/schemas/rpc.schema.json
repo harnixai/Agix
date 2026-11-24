@@ -3472,6 +3472,10 @@
           "description": "`^[A-Za-z][A-Za-z0-9_-]{0,63}$`, not starting `mcp__`, not taken.",
           "type": "string"
         },
+        "permit": {
+          "$ref": "#/$defs/HostToolPermit",
+          "description": "`allow`: its calls run without a rule, as a rule allowing this one\ntool would let them; deny and ask rules, the host's policy, hooks and\n`plan` mode's refusal of what is not `read_only` still stand."
+        },
         "read_only": {
           "default": false,
           "type": "boolean"
@@ -3495,6 +3499,14 @@
         "input_schema"
       ],
       "type": "object"
+    },
+    "HostToolPermit": {
+      "description": "Whether a host tool's calls are asked about as the settings say, or let\nthrough on the host's own word.",
+      "enum": [
+        "ask",
+        "allow"
+      ],
+      "type": "string"
     },
     "HostToolResult": {
       "properties": {

@@ -11,6 +11,7 @@
 //! path honors.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use base::interface::scene::SceneSpec;
 use base::interface::tool::{Tool, ToolOrigin};
@@ -25,6 +26,7 @@ pub(crate) struct ToolPolicy {
     scene_deny: ToolSelector,
     delegation: ToolSelector,
     admitted: HashSet<String>,
+    host_tools: Arc<HashSet<String>>,
 }
 
 impl ToolPolicy {
@@ -43,7 +45,23 @@ impl ToolPolicy {
             scene_deny: ToolSelector::layer(None, scene.tools.deny.clone()),
             delegation,
             admitted: admitted_plugin_tools.into_iter().collect(),
+            host_tools: Arc::default(),
         }
+    }
+
+    /// `names` are the tools registered into this session from its host
+    /// declarations, which no other tool can hold the name of.
+    pub(crate) fn with_host_tools(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.host_tools = Arc::new(names.into_iter().collect());
+        self
+    }
+
+    pub(crate) fn is_host_tool(&self, name: &str) -> bool {
+        self.host_tools.contains(name)
+    }
+
+    pub(crate) fn host_tools(&self) -> &Arc<HashSet<String>> {
+        &self.host_tools
     }
 
     pub(crate) fn permits(&self, tool: &dyn Tool) -> bool {

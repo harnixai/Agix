@@ -115,6 +115,22 @@ pub(super) struct Authorized {
     pub by_person: bool,
 }
 
+/// What the tool says about the call. A declaration's permit counts only
+/// for a tool the session admitted as the host's under that name: a tool's
+/// claim to be the host's is its own word.
+async fn facts_of(
+    ctx: &ToolExecCtx,
+    name: &str,
+    tool: &Arc<dyn base::tool::Tool>,
+    input: &serde_json::Value,
+    tool_ctx: &base::tool::ToolContext,
+) -> base::interface::permission::ToolFacts {
+    let mut facts =
+        base::interface::permission::ToolFacts::gather(tool.as_ref(), input, tool_ctx).await;
+    facts.host_permits &= ctx.host_tools.contains(name);
+    facts
+}
+
 /// Decide the call once, put a question to whoever can answer it, and record
 /// the conclusion.
 pub(super) async fn authorize(
@@ -126,10 +142,10 @@ pub(super) async fn authorize(
     hook: &base::interface::permission::HookAnswer,
 ) -> Result<Authorized, String> {
     use base::interface::permission::{
-        Approval, Basis, PermissionOutcome, PermissionRequest, Stage, ToolFacts,
+        Approval, Basis, PermissionOutcome, PermissionRequest, Stage,
     };
     let started = std::time::Instant::now();
-    let facts = ToolFacts::gather(tool.as_ref(), input, tool_ctx).await;
+    let facts = facts_of(ctx, name, tool, input, tool_ctx).await;
     let judged: std::sync::Arc<dyn base::context::Session> = ctx.session_state.clone();
     let mut request =
         PermissionRequest::new(name, Some(tool), input, &facts, tool_ctx, &judged).with_hook(hook);

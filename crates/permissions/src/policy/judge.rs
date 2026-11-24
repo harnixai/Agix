@@ -8,6 +8,10 @@
 //! fast path but not a user's allow rule (S13). And the managed layer's ask is
 //! reported as its own even when another rule asks too, so that a hook cannot
 //! answer it.
+//!
+//! A host's declaration that its own tool runs without asking is an allow
+//! rule for that one tool and no more: it is weighed only where no rule of
+//! any tier matched the call, and never as a rule pattern by name.
 
 use super::delegated::Delegated;
 use super::host::HostSays;
@@ -81,6 +85,20 @@ fn unenforceable(tool: &str) -> String {
 struct Asked {
     reason: Reason,
     answerable: Answerable,
+}
+
+enum Allowed {
+    Rule(PermissionRule),
+    HostDeclared,
+}
+
+impl Allowed {
+    fn basis(self) -> Basis {
+        match self {
+            Self::Rule(rule) => Basis::Rule(rule),
+            Self::HostDeclared => Basis::HostDeclared,
+        }
+    }
 }
 
 impl Asked {
@@ -171,8 +189,8 @@ impl Policy {
         {
             return Verdict::Permit(Basis::Contained);
         }
-        if let Some(rule) = rule_allow {
-            return Verdict::Permit(Basis::Rule(rule));
+        if let Some(allowed) = rule_allow {
+            return Verdict::Permit(allowed.basis());
         }
         by_mode(call, writes_configuration)
     }
@@ -233,10 +251,7 @@ impl Policy {
 
     /// The rules' allow and ask for the call — the host's among them — or
     /// its denial.
-    fn rule_hit(
-        &self,
-        call: &Call<'_>,
-    ) -> Result<(Option<PermissionRule>, Option<Asked>), Verdict> {
+    fn rule_hit(&self, call: &Call<'_>) -> Result<(Option<Allowed>, Option<Asked>), Verdict> {
         let hit = call.named.hit(&self.rules_now(), call.name, call.ctx);
         let asked = |rule: PermissionRule, message: String| {
             let managed = self.managed.rules.rules().contains(&rule);
@@ -289,8 +304,11 @@ impl Policy {
             }
         });
         let allow = match (allow, &ask) {
-            (None, None) => self.exact_allow(call.name, call.named.content()),
-            (allow, _) => allow,
+            (None, None) => self
+                .exact_allow(call.name, call.named.content())
+                .map(Allowed::Rule)
+                .or(call.facts.host_permits.then_some(Allowed::HostDeclared)),
+            (allow, _) => allow.map(Allowed::Rule),
         };
         match &call.host {
             HostSays::Nothing => Ok((allow, ask)),
@@ -306,7 +324,7 @@ impl Policy {
                 ),
             }),
             HostSays::Allow(rule) => Ok(match (allow, ask) {
-                (None, None) => (Some(rule.clone()), None),
+                (None, None) => (Some(Allowed::Rule(rule.clone())), None),
                 kept => kept,
             }),
         }

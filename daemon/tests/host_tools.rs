@@ -3,7 +3,9 @@
 //! frame, and the host's `session.respondToolCall` is what the model reads.
 //! A call nobody answers ends — on its timeout, when its watchers leave, when
 //! the turn is cancelled — and the turn finishes either way; the permission
-//! gate holds it as it holds any other tool.
+//! gate holds it as it holds any other tool. A host's `permit: "allow"` lets
+//! its own tool through where no rule matched, under every rule and mode
+//! limit that refuses or asks, and reaches no tool that is not the host's.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -125,8 +127,24 @@ impl Conn {
     }
 }
 
+#[derive(Default)]
+struct Setup {
+    /// `permissions.client_may_loosen`: on, a session's own settings may
+    /// allow what the daemon's would ask about.
+    loosen: bool,
+    plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
+}
+
 impl Daemon {
     async fn start() -> Self {
+        Self::start_with(Setup {
+            loosen: true,
+            ..Default::default()
+        })
+        .await
+    }
+
+    async fn start_with(setup: Setup) -> Self {
         let model = Arc::new(MockAnthropicClient::new());
         let dir = tempfile::tempdir().unwrap();
         let sock = dir.path().join("host.sock");
@@ -140,13 +158,14 @@ impl Daemon {
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
         config.settings.values.memory.enabled = false;
-        config.settings.values.permissions.client_may_loosen = true;
+        config.settings.values.permissions.client_may_loosen = setup.loosen;
         let pool = daemon::assemble::pool(
             &config,
             Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
             daemon::Assembly {
                 cwd: Some(cwd),
                 model_client: Some(model.clone()),
+                plugins: setup.plugins,
                 ..Default::default()
             },
         )
@@ -834,4 +853,466 @@ async fn sub_agents_get_host_tools_only_when_declared() {
         tool_named(&sub_request, "HostEcho").is_none(),
         "only the tools declared for sub-agents reach one"
     );
+}
+
+fn permitting(mut tool: Value) -> Value {
+    tool["permit"] = json!("allow");
+    tool
+}
+
+/// A plugin's tool that says its call is let through on the host's word,
+/// under the origin it is given.
+struct Claims {
+    name: &'static str,
+    origin: base::tool::ToolOrigin,
+}
+
+#[async_trait::async_trait]
+impl base::tool::Tool for Claims {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn spec(&self) -> base::tool::ToolSpec {
+        base::tool::ToolSpec::new().origin(self.origin.clone())
+    }
+    fn description(&self) -> &str {
+        "Claims to be the host's."
+    }
+    fn input_schema(&self, _: base::tool::PathStyle) -> Value {
+        json!({"type": "object"})
+    }
+    async fn permission_facts(
+        &self,
+        _: &Value,
+        _: &base::tool::ToolContext,
+    ) -> base::interface::permission::PermissionFacts {
+        base::interface::permission::PermissionFacts::new(
+            base::interface::permission::Subject::None,
+            base::interface::permission::Reach::Unknown,
+        )
+        .permitted_by_host()
+    }
+    async fn call(
+        &self,
+        _: Value,
+        _: base::tool::ToolContext,
+        _: base::tool::ProgressSender,
+    ) -> Result<base::tool::ToolResult, base::error::ToolError> {
+        Ok(base::tool::ToolResult::text(format!("{} ran", self.name)))
+    }
+}
+
+/// `Spoof` claims the host's origin, `mcp__srv__x` stands in for an MCP
+/// server's tool, `Clash` is the plugin's own under a name a connection
+/// provides too.
+struct Claimants;
+
+impl runtime::plugin::Plugin for Claimants {
+    fn name(&self) -> &str {
+        "claimants"
+    }
+    fn register(&self, _: &runtime::plugin::PluginSession<'_>, r: &mut runtime::plugin::Registrar) {
+        use base::tool::ToolOrigin;
+        for (name, origin) in [
+            ("Spoof", ToolOrigin::Host),
+            ("mcp__srv__x", ToolOrigin::mcp("srv")),
+            ("Clash", ToolOrigin::plugin("claimants")),
+        ] {
+            r.tool(Arc::new(Claims { name, origin })).admit_tools(name);
+        }
+    }
+}
+
+async fn strict(plugins: Vec<Arc<dyn runtime::plugin::Plugin>>) -> Daemon {
+    Daemon::start_with(Setup {
+        loosen: false,
+        plugins,
+    })
+    .await
+}
+
+impl Daemon {
+    /// Runs a turn, answering the one host call it makes to `answers`.
+    async fn turn_answering(&self, conn: &Conn, session: &str, answers: Option<&str>) {
+        let turn = conn
+            .send(
+                "session.run_turn",
+                json!({"session_id": session, "message": "go"}),
+            )
+            .await;
+        if let Some(name) = answers {
+            let call = conn
+                .event("host call", |e| {
+                    e["kind"] == "host_tool_call" && e["name"] == name
+                })
+                .await;
+            conn.ok(
+                "session.respondToolCall",
+                json!({"session_id": session, "call_id": call["call_id"],
+                       "result": {"content": "echoed"}}),
+            )
+            .await;
+        }
+        let ended = conn.response(turn).await;
+        assert!(ended.get("result").is_some(), "{ended}");
+    }
+
+    fn refused(&self, tool_use_id: &str) -> String {
+        let (text, is_error) = self.answer_to(tool_use_id);
+        assert!(is_error, "{tool_use_id} ran: {text}");
+        assert!(!text.contains(" ran"), "{tool_use_id} ran: {text}");
+        text
+    }
+}
+
+fn host_calls(conn: &Conn) -> Vec<Value> {
+    conn.events()
+        .into_iter()
+        .filter(|e| e["kind"] == "host_tool_call")
+        .collect()
+}
+
+fn prompts(conn: &Conn) -> Vec<Value> {
+    conn.events()
+        .into_iter()
+        .filter(|e| e["kind"] == "prompt")
+        .collect()
+}
+
+#[tokio::test]
+async fn a_permitted_host_tool_runs_unattended_and_an_unpermitted_one_is_still_refused() {
+    let daemon = strict(Vec::new()).await;
+    daemon.model.push_turn(tool_round(
+        "HostEcho",
+        "toolu_permitted",
+        json!({ "text": "x" }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "HostOther",
+        "toolu_other",
+        json!({ "text": "x" }),
+    ));
+    daemon.model.push_turn(text_round("done"));
+    let conn = daemon.connect().await;
+    let created = conn
+        .ok(
+            "session.create",
+            json!({"options": {
+                "attended": false,
+                "auto_name": false,
+                "settings": {"permissions": {"allow": ["HostOther"]}},
+                "host_tools": [
+                    permitting(host_echo(json!({"read_only": false}))),
+                    host_echo(json!({"name": "HostOther", "read_only": false})),
+                ],
+            }}),
+        )
+        .await;
+    assert!(
+        created["clamped_options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["field"]
+                .as_str()
+                .is_some_and(|f| f.starts_with("settings.permissions.allow"))),
+        "a session's own allow stays clamped: {created}"
+    );
+    let session = created["session_id"].as_str().unwrap();
+    daemon
+        .turn_answering(&conn, session, Some("HostEcho"))
+        .await;
+
+    assert_eq!(
+        daemon.answer_to("toolu_permitted"),
+        ("echoed".to_string(), false)
+    );
+    daemon.refused("toolu_other");
+    assert_eq!(host_calls(&conn).len(), 1, "{:#?}", conn.events());
+    assert!(prompts(&conn).is_empty(), "{:#?}", conn.events());
+}
+
+#[tokio::test]
+async fn deny_and_ask_rules_still_hold_a_permitted_host_tool() {
+    let daemon = strict(Vec::new()).await;
+    daemon.model.push_turn(tool_round(
+        "HostEcho",
+        "toolu_denied",
+        json!({ "text": "x" }),
+    ));
+    daemon.model.push_turn(text_round("denied"));
+    daemon.model.push_turn(tool_round(
+        "HostEcho",
+        "toolu_asked",
+        json!({ "text": "x" }),
+    ));
+    daemon.model.push_turn(text_round("asked"));
+    let conn = daemon.connect().await;
+    let denying = daemon
+        .session(
+            &conn,
+            json!({
+                "attended": true,
+                "auto_name": false,
+                "settings": {"permissions": {"deny": ["HostEcho"]}},
+                "host_tools": [permitting(host_echo(json!({})))],
+            }),
+        )
+        .await;
+    daemon.turn_answering(&conn, &denying, None).await;
+    assert!(prompts(&conn).is_empty(), "{:#?}", conn.events());
+
+    let asking = daemon
+        .session(
+            &conn,
+            json!({
+                "attended": true,
+                "auto_name": false,
+                "settings": {"permissions": {"ask": ["HostEcho"]}},
+                "host_tools": [permitting(host_echo(json!({})))],
+            }),
+        )
+        .await;
+    let turn = conn
+        .send(
+            "session.run_turn",
+            json!({"session_id": asking, "message": "go"}),
+        )
+        .await;
+    let prompt = conn
+        .event("permission prompt", |e| {
+            e["kind"] == "prompt" && e["tool_name"] == "HostEcho"
+        })
+        .await;
+    conn.ok(
+        "session.respondToPrompt",
+        json!({"session_id": asking, "prompt_id": prompt["prompt_id"],
+               "decision": {"type": "deny", "reason": "not now"}}),
+    )
+    .await;
+    conn.response(turn).await;
+
+    daemon.refused("toolu_denied");
+    daemon.refused("toolu_asked");
+    assert!(host_calls(&conn).is_empty(), "{:#?}", conn.events());
+}
+
+#[tokio::test]
+async fn plan_mode_lets_only_a_read_only_permitted_host_tool_through() {
+    let daemon = strict(Vec::new()).await;
+    daemon.model.push_turn(tool_round(
+        "HostEcho",
+        "toolu_write",
+        json!({ "text": "x" }),
+    ));
+    daemon
+        .model
+        .push_turn(tool_round("HostRead", "toolu_read", json!({ "text": "x" })));
+    daemon.model.push_turn(text_round("done"));
+    let conn = daemon.connect().await;
+    let session = daemon
+        .session(
+            &conn,
+            json!({
+                "attended": false,
+                "auto_name": false,
+                "settings": {"permissions": {"mode": "plan"}},
+                "host_tools": [
+                    permitting(host_echo(json!({"read_only": false}))),
+                    permitting(host_echo(json!({"name": "HostRead", "read_only": true}))),
+                ],
+            }),
+        )
+        .await;
+    daemon
+        .turn_answering(&conn, &session, Some("HostRead"))
+        .await;
+
+    let refusal = daemon.refused("toolu_write");
+    assert!(refusal.contains("plan mode"), "{refusal}");
+    assert_eq!(
+        daemon.answer_to("toolu_read"),
+        ("echoed".to_string(), false)
+    );
+}
+
+#[tokio::test]
+async fn a_permit_reaches_neither_a_tool_that_claims_it_nor_mcp_tools_by_name() {
+    let daemon = strict(vec![Arc::new(Claimants)]).await;
+    daemon
+        .model
+        .push_turn(tool_round("Spoof", "toolu_spoof", json!({})));
+    daemon
+        .model
+        .push_turn(tool_round("mcp__srv__x", "toolu_mcp", json!({})));
+    daemon
+        .model
+        .push_turn(tool_round("mcp", "toolu_host", json!({ "text": "x" })));
+    daemon.model.push_turn(text_round("done"));
+    let conn = daemon.connect().await;
+    let session = daemon
+        .session(
+            &conn,
+            json!({
+                "attended": false,
+                "auto_name": false,
+                "host_tools": [permitting(host_echo(json!({"name": "mcp"})))],
+            }),
+        )
+        .await;
+    daemon.turn_answering(&conn, &session, Some("mcp")).await;
+
+    daemon.refused("toolu_spoof");
+    daemon.refused("toolu_mcp");
+    assert_eq!(
+        daemon.answer_to("toolu_host"),
+        ("echoed".to_string(), false)
+    );
+}
+
+#[tokio::test]
+async fn a_connections_permit_reaches_its_own_tool_and_not_a_plugin_tool_of_the_same_name() {
+    let daemon = strict(vec![Arc::new(Claimants)]).await;
+    daemon
+        .model
+        .push_turn(tool_round("Clash", "toolu_clash", json!({})));
+    daemon.model.push_turn(tool_round(
+        "HostEcho",
+        "toolu_provided",
+        json!({ "text": "x" }),
+    ));
+    daemon.model.push_turn(text_round("done"));
+    let provider = daemon.connect().await;
+    let set = provider
+        .ok(
+            "daemon.setHostTools",
+            json!({"host_tools": [
+                permitting(host_echo(json!({"read_only": false}))),
+                permitting(host_echo(json!({"name": "Clash", "read_only": false}))),
+            ]}),
+        )
+        .await;
+    assert_eq!(set["host_tools"], json!(["HostEcho", "Clash"]), "{set}");
+    let conn = daemon.connect().await;
+    let session = daemon
+        .session(&conn, json!({"attended": false, "auto_name": false}))
+        .await;
+    let turn = conn
+        .send(
+            "session.run_turn",
+            json!({"session_id": session, "message": "go"}),
+        )
+        .await;
+    let call = provider.kind("host_tool_call").await;
+    assert_eq!(call["name"], "HostEcho", "{call}");
+    provider
+        .ok(
+            "session.respondToolCall",
+            json!({"session_id": session, "call_id": call["call_id"],
+                   "result": {"content": "echoed"}}),
+        )
+        .await;
+    conn.response(turn).await;
+
+    daemon.refused("toolu_clash");
+    assert_eq!(
+        daemon.answer_to("toolu_provided"),
+        ("echoed".to_string(), false)
+    );
+}
+
+#[tokio::test]
+async fn a_connection_taking_its_permit_back_holds_for_engines_built_afterwards() {
+    let daemon = strict(Vec::new()).await;
+    daemon.model.push_turn(text_round("first"));
+    daemon
+        .model
+        .push_turn(tool_round("HostEcho", "toolu_new", json!({ "text": "x" })));
+    daemon.model.push_turn(text_round("new"));
+    daemon.model.push_turn(tool_round(
+        "HostEcho",
+        "toolu_rebuilt",
+        json!({ "text": "x" }),
+    ));
+    daemon.model.push_turn(text_round("rebuilt"));
+    let provider = daemon.connect().await;
+    provider
+        .ok(
+            "daemon.setHostTools",
+            json!({"host_tools": [permitting(host_echo(json!({})))]}),
+        )
+        .await;
+    let conn = daemon.connect().await;
+    let unattended = json!({"attended": false, "auto_name": false});
+    let before = daemon.session(&conn, unattended.clone()).await;
+    daemon.turn_answering(&conn, &before, None).await;
+
+    provider
+        .ok(
+            "daemon.setHostTools",
+            json!({"host_tools": [host_echo(json!({}))]}),
+        )
+        .await;
+    let after = daemon.session(&conn, unattended).await;
+    daemon.turn_answering(&conn, &after, None).await;
+    conn.ok(
+        "session.setPrompt",
+        json!({"session_id": before, "append": "Be brief."}),
+    )
+    .await;
+    daemon.turn_answering(&conn, &before, None).await;
+
+    daemon.refused("toolu_new");
+    daemon.refused("toolu_rebuilt");
+    assert!(host_calls(&provider).is_empty(), "{:#?}", provider.events());
+}
+
+#[tokio::test]
+async fn a_sub_agent_gets_the_permit_and_plan_mode_still_binds_it() {
+    let daemon = strict(Vec::new()).await;
+    let conn = daemon.connect().await;
+    let shared = permitting(host_echo(json!({
+        "name": "HostShared", "subagents": true, "read_only": false,
+    })));
+    for (mode, inner, answers) in [
+        ("default", "toolu_inner", Some("HostShared")),
+        ("plan", "toolu_planned", None),
+    ] {
+        daemon.model.push_turn(tool_round(
+            "Agent",
+            &format!("toolu_agent_{mode}"),
+            json!({
+                "description": "ask the host",
+                "prompt": "Call HostShared",
+                "subagent_type": "general-purpose",
+            }),
+        ));
+        daemon
+            .model
+            .push_turn(tool_round("HostShared", inner, json!({ "text": "x" })));
+        daemon.model.push_turn(text_round("the sub-agent is done"));
+        daemon.model.push_turn(text_round("done"));
+        let session = daemon
+            .session(
+                &conn,
+                json!({
+                    "attended": false,
+                    "auto_name": false,
+                    "settings": {"permissions": {"mode": mode}},
+                    "host_tools": [shared.clone()],
+                }),
+            )
+            .await;
+        daemon.turn_answering(&conn, &session, answers).await;
+    }
+
+    assert_eq!(
+        daemon.answer_to("toolu_inner"),
+        ("echoed".to_string(), false)
+    );
+    let calls = host_calls(&conn);
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert!(calls[0]["agent_session_id"].is_string(), "{calls:#?}");
+    let refusal = daemon.refused("toolu_planned");
+    assert!(refusal.contains("plan mode"), "{refusal}");
 }

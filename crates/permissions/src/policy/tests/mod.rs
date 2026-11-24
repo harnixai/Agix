@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 mod answering;
 mod contract;
+mod host_permit;
 mod judging;
 mod requests;
 

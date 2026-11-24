@@ -136,16 +136,7 @@ impl Builder {
         let host_names = admit_extra_tools(tools, scene, host_tools, plugin_tools)?;
 
         let host_schema = self.spec.output_schema.clone();
-        let tool_policy = Arc::new(crate::tool_policy::ToolPolicy::new(
-            scene,
-            self.spec.tool_selector.clone(),
-            plugin_tool_owners
-                .iter()
-                .filter(|(_, owner)| owner.admitted)
-                .map(|(name, _)| name.clone())
-                .chain(host_names)
-                .chain(host_schema.is_some().then(|| STRUCTURED_OUTPUT.to_string())),
-        ));
+        let tool_policy = Arc::new(self.tool_policy(scene, plugin_tool_owners, host_names));
 
         match &host_schema {
             Some(schema) => tools::bind_output_schema(tools, schema),
@@ -201,6 +192,43 @@ impl Builder {
 }
 
 impl Builder {
+    /// What the session may have: the scene's, the delegation's and what the
+    /// plugins admitted, with the host tools registered under `host_names`.
+    fn tool_policy(
+        &self,
+        scene: &SceneSpec,
+        plugin_tool_owners: &std::collections::HashMap<String, crate::plugin::ToolOwner>,
+        host_names: Vec<String>,
+    ) -> crate::tool_policy::ToolPolicy {
+        let admitted = plugin_tool_owners
+            .iter()
+            .filter(|(_, owner)| owner.admitted)
+            .map(|(name, _)| name.clone())
+            .chain(host_names.iter().cloned())
+            .chain(
+                self.spec
+                    .output_schema
+                    .is_some()
+                    .then(|| STRUCTURED_OUTPUT.to_string()),
+            );
+        crate::tool_policy::ToolPolicy::new(scene, self.spec.tool_selector.clone(), admitted)
+            .with_host_tools(host_names)
+    }
+
+    /// The host declarations the session's tools were registered from: a
+    /// connection's tool left out for its name is not among them.
+    pub(super) fn admitted_host_tools(
+        &self,
+        policy: &crate::tool_policy::ToolPolicy,
+    ) -> Vec<base::interface::host_call::HostToolDecl> {
+        self.spec
+            .host_tools
+            .iter()
+            .filter(|d| policy.is_host_tool(&d.name))
+            .cloned()
+            .collect()
+    }
+
     /// `RunExt`, when enabled packages bring commands: ahead of the tools
     /// admitted with a collision check, so none of them can take its name.
     fn register_run_ext(&self, tools: &InMemoryToolRegistry, layout: &base::paths::Layout) {

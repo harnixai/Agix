@@ -87,7 +87,7 @@ impl Builder {
                 session_ended,
                 checkpoints,
                 host_calls: &events.host_calls,
-                host_tools: &self.spec.host_tools,
+                host_tools: &events.host_tools,
             };
             for module in modules {
                 module

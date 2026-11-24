@@ -51,7 +51,8 @@ pub struct PermissionDecisionPayload {
     pub destructive: bool,
     pub latency_ms: u64,
     /// On whose word the call ran: `rule`, `contained`, `accept_edits`,
-    /// `bypass`, `hook_approved`, `unattended_confined` or `person`.
+    /// `bypass`, `hook_approved`, `unattended_confined`, `host_declared` or
+    /// `person`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub basis: Option<String>,
     /// Where the call was refused, or asked about before a person refused it.

@@ -267,6 +267,7 @@ pub const CAPABILITIES: &[&str] = &[
     "session_settings",
     "host_tool_progress",
     "host_tool_provider",
+    "host_tool_permit",
     "host_hooks",
     "provider_tiers",
     "host_call_context",

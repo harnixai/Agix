@@ -65,6 +65,9 @@ pub(super) struct EventWiring {
     pub(super) pending_host_calls: crate::host_tools::PendingHostCalls,
     pub(super) pending_host_progress: crate::host_tools::PendingHostProgress,
     pub(super) host_calls: Arc<dyn base::interface::host_call::HostCalls>,
+    /// Filled once the session's tools are in place, before the agent is
+    /// handed out: what its delegates are offered.
+    pub(super) host_tools: crate::module::AdmittedHostTools,
 }
 
 /// Not `ToolSurface`: that name is the scene's allow/deny lists in `base`.

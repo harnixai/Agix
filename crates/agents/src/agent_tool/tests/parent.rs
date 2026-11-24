@@ -130,7 +130,7 @@ impl TestParent {
             under_hook: false,
             checkpoints: None,
             tool_results_dir: None,
-            host_tools: Vec::new(),
+            host_tools: Default::default(),
             host_calls,
         };
         let catalog = match self.shared_types {

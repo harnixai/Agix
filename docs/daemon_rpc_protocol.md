@@ -865,6 +865,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `session_settings` | `options.settings`:按会话给的设置覆盖层(形状同 settings.json,只收按会话决定的键,推理强度、思考开关与提示词都在这里),缺省只能收紧,放宽的被夹住并报在 `session.create` 的 `clamped_options`;`session.setModel` 的 `effort` / `thinking` 与 `session.setPrompt` 改的是同一层,被夹住的报在各自结果的 `clamped_options`;一轮的 token 预算与 `turn_complete.usage` 含子 Agent 与旁路调用,带 `usage_breakdown`(§4.8、§6.3、§7.2) |
 | `host_tool_progress` | 有 `session.reportToolProgress`,宿主工具的进度推成 `tool_progress`(§6.3、§7.3) |
 | `host_tool_provider` | 有 `daemon.setHostTools`,连接提供的工具,`host_tool_call` 一定发给提供者(§6.1、§7.4) |
+| `host_tool_permit` | `options.host_tools` 与 `daemon.setHostTools` 的条目认 `permit`(`"ask"` / `"allow"`):`allow` 只放行这一个宿主工具的调用,规则与模式上限照旧压过它(§6.1、§6.3) |
 | `host_hooks` | 有 `daemon.setHooks` / `session.respondHook`,连接登记的 hook,`hook_call` 帧只发给登记者(§6.1、§7.6) |
 | `provider_tiers` | `config.setProvider` 接受 `tier`(`project` / `global`)与 `dry_run`,结果带 `tier`、`dry_run`(§6.4) |
 | `host_call_context` | `host_tool_call` 与 `hook_call` 帧带 `cwd`(发起调用的会话的工作目录)与 `depth`(根会话 0,子 Agent 逐层加 1);hook 的 payload 带 `depth`(§7.4、§7.6) |
@@ -1159,8 +1160,13 @@ bwrap,或 `sandbox.enabled` 为 `false`)时是 `degraded`:通道照常放行,命
 - **会话自己的优先。** 会话的 `options.host_tools` 里有同名项时,这条连接的那个不进该会话
   (daemon 日志记一条 warn),会话照常建起来;与插件或场景工具重名也是只丢连接这一个、记 warn,
   不会让构建失败。
-- `subagents:true` 的,子 Agent 也拿得到(同 `options.host_tools`)。一个会话里连接提供的工具
-  至多 128 个,与 `options.host_tools` 的 64 个互不占用。
+- `subagents:true` 的,子 Agent 也拿得到(同 `options.host_tools`);在父会话里因重名没进去的,
+  子 Agent 也拿不到。一个会话里连接提供的工具至多 128 个,与 `options.host_tools` 的 64 个互不占用。
+- **`permit:"allow"` 作用于这个 daemon 里此后建起的每个会话**,不论会话是哪条连接建的(放行规则同
+  `options.host_tools`,§6.3)。它跟着工具走:重名没进会话的,放行也不落到同名的插件或场景工具上。
+  改回 `ask` 或撤回工具同样只对此后建起的引擎生效;已经建好的会话和它此后起的子 Agent 沿用建起时
+  那份,直到会话下一次重建(`session.setPrompt`、`session.setModel` 等)。要立刻收回,宿主对这些
+  调用用 `session.respondToolCall` 回 `error` 即可(工具调用一定发给提供它的连接)。
 
 连接提供的工具被调用时,`host_tool_call` 帧(§7.4)**一定**发给提供它的那条连接——即使它没有订阅
 这个会话——同时照常发给该会话的订阅者。**只有提供者的** `session.respondToolCall` 算数,
@@ -1606,21 +1612,35 @@ hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(
     "concurrency_safe": true,                 // 可选,默认同 read_only
     "timeout_ms": 120000,                     // 可选,默认 120000,范围 1000..=600000
     "deferred": false,                        // 可选,true 时只报名字,schema 经 ToolSearch 取
-    "subagents": false } ]                    // 可选,true 时子 Agent 也拿得到,见 §7.4
+    "subagents": false,                       // 可选,true 时子 Agent 也拿得到,见 §7.4
+    "permit": "ask" } ]                       // 可选,"ask"(默认)或 "allow",见下
 ```
 
 一个会话至多 64 个。读不出来的逐项进 `invalid_options`,`field` 带下标与字段名,如
 `host_tools[1].input_schema`、`host_tools[0].name`(重名也报在 `name` 上);与会话已有的工具
 重名(`Read`、场景或插件的工具)要等引擎建起来才知道,报在 `host_tools` 上。两种都是
 `INVALID_PARAMS`,不建会话。宿主工具只是加法,与场景的 `extra_tools` 同一个重名检查,场景的
-`tools.deny` 写名字即可拒掉它。它们随 `options` 记在会话日志里,重建、恢复、`session.fork`
-都照原样再挂上。连接提供的工具(`daemon.setHostTools`,§6.1)是另一条路:不进这里,也不进会话日志,
+`tools.deny` 写名字即可拒掉它。它们随 `options` 记在会话日志里(`permit` 也在内),重建、恢复、
+`session.fork` 都照原样再挂上:不带 `options` 恢复的会话,`permit` 取日志里记的那份。连接提供的工具(`daemon.setHostTools`,§6.1)是另一条路:不进这里,也不进会话日志,
 重建时取登记表当时的内容;会话自己的同名项优先。
 
 权限上它和 MCP 工具同一档:缺省模式下每次调用都先问(`prompt_type:"permission"`);无人值守的
-会话(如没给 `attended` 的 `harnix`)里这样的询问直接被拒绝,宿主要自己回答就给 `attended:true`,
-想免问就在设置的 `permissions.allow` 里写 `HostEcho`(经 `options.settings.permissions.allow` 给时,设置得开着
-`permissions.client_may_loosen`,否则被扣下);
+会话(如没给 `attended` 的 `harnix`)里这样的询问直接被拒绝,宿主要自己回答就给 `attended:true`。
+想免问有两条路:
+
+- 条目上写 `"permit": "allow"`。只放行这一个工具的调用,如同一条只认它的 allow 规则:不按名字去匹配
+  别的工具(名为 `mcp` 的宿主工具放行不了任何 `mcp__*`),不放宽会话的权限模式,也不受
+  `permissions.client_may_loosen` 管。压过它的照旧:任何一层(含 managed)的 deny 与 ask 规则、
+  宿主自带的权限策略的拒绝与询问、`PreToolUse` hook 的拦截、`plan` 模式只放行 `read_only` 的。
+  `dontAsk` 模式和无人值守的会话里它算一条命中的 allow 规则;`bypassPermissions` 下用不上它。
+  只有宿主声明的那个工具认这个放行:插件或场景的工具自称宿主的也不算。遥测的
+  `permission_decision` 里这样放行的 `basis` 是 `host_declared`,与规则放行的 `rule` 分得开。
+  子 Agent 拿到的同一个工具(`subagents:true`)带着同一个放行,子 Agent 的模式上限照旧管它。
+  能力位 `host_tool_permit`;不认这个字段的引擎把整个 `options` 以 `INVALID_PARAMS` 退回,
+  宿主先看 `daemon.ping` 的能力位再决定写不写。
+- 在设置的 `permissions.allow` 里写 `HostEcho`(经 `options.settings.permissions.allow` 给时,设置得开着
+  `permissions.client_may_loosen`,否则被扣下)。
+
 deny 规则同样管得住它。宿主只会收到符合 `input_schema` 的 `input`,不符合的调用以校验错误
 退回给模型,不发帧。
 

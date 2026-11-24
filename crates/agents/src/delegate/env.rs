@@ -38,9 +38,9 @@ pub(crate) struct DelegateEnv {
     pub(crate) checkpoints: Option<Arc<runtime::checkpoint::Checkpoints>>,
     /// The root session's: a delegate's long tool results are saved there.
     pub(crate) tool_results_dir: Option<std::path::PathBuf>,
-    /// The host tools the session declared for its delegates too, and how
-    /// their calls reach the host.
-    pub(crate) host_tools: Vec<base::interface::host_call::HostToolDecl>,
+    /// The host tools the session admitted, those declared for its delegates
+    /// too among them, and how their calls reach the host.
+    pub(crate) host_tools: runtime::module::AdmittedHostTools,
     pub(crate) host_calls: Arc<dyn base::interface::host_call::HostCalls>,
 }
 
@@ -83,17 +83,21 @@ impl DelegateEnv {
             under_hook: hook_agents.includes(cx.session_id),
             checkpoints: cx.checkpoints.cloned(),
             tool_results_dir: cx.config.tool_results.dir.clone(),
-            host_tools: cx
-                .host_tools
-                .iter()
-                .filter(|decl| decl.subagents)
-                .cloned()
-                .collect(),
+            host_tools: cx.host_tools.clone(),
             host_calls: cx.host_calls.clone(),
         }
     }
 
     pub(crate) fn hooks(&self) -> Option<Arc<hooks::HookRunner>> {
         self.hooks.upgrade()
+    }
+
+    pub(crate) fn delegates_host_tools(&self) -> Vec<base::interface::host_call::HostToolDecl> {
+        self.host_tools
+            .get()
+            .iter()
+            .filter(|decl| decl.subagents)
+            .cloned()
+            .collect()
     }
 }

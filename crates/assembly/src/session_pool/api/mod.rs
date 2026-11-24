@@ -46,8 +46,8 @@ pub use mcp::{
 };
 pub(crate) use options::requested_permission_mode;
 pub use options::{
-    ClampedOption, ClockOptions, HostToolOption, RecorderOptions, SessionOptions, SkillDirOption,
-    TelemetryOptions,
+    ClampedOption, ClockOptions, HostToolOption, HostToolPermit, RecorderOptions, SessionOptions,
+    SkillDirOption, TelemetryOptions,
 };
 pub use plugin::{
     CommandConflict, CommandShadow, PluginCommand, PluginDisclosure, PluginFunctionEntry,

@@ -121,6 +121,38 @@ pub struct HostToolOption {
     /// The session's sub-agents are offered it too.
     #[serde(default)]
     pub subagents: bool,
+    /// `allow`: its calls run without a rule, as a rule allowing this one
+    /// tool would let them; deny and ask rules, the host's policy, hooks and
+    /// `plan` mode's refusal of what is not `read_only` still stand.
+    #[serde(default, skip_serializing_if = "HostToolPermit::is_ask")]
+    pub permit: HostToolPermit,
+}
+
+/// Whether a host tool's calls are asked about as the settings say, or let
+/// through on the host's own word.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum HostToolPermit {
+    #[default]
+    Ask,
+    Allow,
+}
+
+impl HostToolPermit {
+    fn is_ask(&self) -> bool {
+        *self == Self::Ask
+    }
 }
 
 impl HostToolOption {
@@ -142,6 +174,7 @@ impl HostToolOption {
         .timeout(std::time::Duration::from_millis(self.timeout_ms))
         .deferred(self.deferred)
         .subagents(self.subagents)
+        .permitted(self.permit == HostToolPermit::Allow)
     }
 }
 

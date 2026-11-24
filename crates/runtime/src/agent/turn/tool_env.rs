@@ -359,6 +359,7 @@ impl Agent {
             session_state: Arc::clone(&self.session_state),
             elicitation: Arc::clone(self.gate.elicitation()),
             host_calls: Some(Arc::clone(&self.channels.host_calls)),
+            host_tools: Arc::clone(self.tooling.tool_policy().host_tools()),
             tool_middleware: Arc::clone(self.tooling.tool_middleware()),
             result_transformers: Arc::clone(self.tooling.result_transformers()),
             discontinued: Arc::clone(discontinued),

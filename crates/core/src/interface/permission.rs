@@ -135,6 +135,9 @@ pub struct PermissionFacts {
     /// Where a write the call makes lands, as judged: the call writes there
     /// or nowhere.
     pub lands_at: Option<std::path::PathBuf>,
+    /// The host's declaration of the tool lets the call through: counted
+    /// only for a tool of [`ToolOrigin::Host`].
+    pub host_permits: bool,
 }
 
 impl PermissionFacts {
@@ -152,6 +155,7 @@ impl PermissionFacts {
             relays: None,
             also_named: None,
             lands_at: None,
+            host_permits: false,
         }
     }
 
@@ -179,6 +183,11 @@ impl PermissionFacts {
         self.lands_at = Some(path);
         self
     }
+
+    pub fn permitted_by_host(mut self) -> Self {
+        self.host_permits = true;
+        self
+    }
 }
 
 /// Everything the permission policy reads about one call: the tool's spec,
@@ -196,6 +205,10 @@ pub struct ToolFacts {
     pub relays: Option<Relays>,
     pub also_named: Option<String>,
     pub lands_at: Option<std::path::PathBuf>,
+    /// The host's declaration lets the call through. A tool's own word is
+    /// not enough: the session running the call keeps it only for a host tool
+    /// it admitted under that name.
+    pub host_permits: bool,
 }
 
 impl ToolFacts {
@@ -204,6 +217,7 @@ impl ToolFacts {
     pub async fn gather(tool: &dyn Tool, input: &Value, ctx: &ToolContext) -> Self {
         let spec = tool.spec();
         let facts = tool.permission_facts(input, ctx).await;
+        let host_permits = facts.host_permits && spec.origin == ToolOrigin::Host;
         Self {
             subject: facts.subject,
             traits: tool.call_traits(input),
@@ -215,6 +229,7 @@ impl ToolFacts {
             relays: facts.relays,
             also_named: facts.also_named,
             lands_at: facts.lands_at,
+            host_permits,
         }
     }
 
@@ -231,6 +246,7 @@ impl ToolFacts {
             relays: None,
             also_named: None,
             lands_at: None,
+            host_permits: false,
         }
     }
 }
@@ -319,6 +335,8 @@ pub enum Basis {
     HookApproved(String),
     /// A command nobody can be asked about, which the session's sandbox holds.
     UnattendedConfined,
+    /// The host's declaration of its own tool (`permit: "allow"`).
+    HostDeclared,
     Person,
 }
 
@@ -331,6 +349,7 @@ impl Basis {
             Self::Bypass => "bypass",
             Self::HookApproved(_) => "hook_approved",
             Self::UnattendedConfined => "unattended_confined",
+            Self::HostDeclared => "host_declared",
             Self::Person => "person",
         }
     }

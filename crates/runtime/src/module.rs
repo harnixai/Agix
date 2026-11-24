@@ -112,8 +112,9 @@ pub struct SessionContext<'a> {
     /// How this session's host tools reach the host — the way a delegate's
     /// must go too.
     pub host_calls: &'a Arc<dyn base::interface::host_call::HostCalls>,
-    /// The tools the host declared for this session.
-    pub host_tools: &'a [base::interface::host_call::HostToolDecl],
+    /// The tools the host declared for this session that it admitted, once
+    /// its tools are in place.
+    pub host_tools: &'a AdmittedHostTools,
 }
 
 impl SessionContext<'_> {
@@ -156,6 +157,23 @@ impl SessionContext<'_> {
     /// after this one; empty if none does.
     pub fn skill_catalog(&self) -> Arc<dyn SkillCatalog> {
         Arc::new(self.skill_catalog.clone())
+    }
+}
+
+/// The host tools a session admitted, known only after the modules ran: a
+/// connection's tool whose name the session's own tools hold is not among
+/// them, so a delegate does not get it either.
+#[derive(Default, Clone)]
+pub struct AdmittedHostTools(Arc<OnceLock<Vec<base::interface::host_call::HostToolDecl>>>);
+
+impl AdmittedHostTools {
+    pub(crate) fn set(&self, decls: Vec<base::interface::host_call::HostToolDecl>) {
+        let _ = self.0.set(decls);
+    }
+
+    /// Empty until the session's tools are in place.
+    pub fn get(&self) -> &[base::interface::host_call::HostToolDecl] {
+        self.0.get().map_or(&[], Vec::as_slice)
     }
 }
 

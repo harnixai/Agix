@@ -267,7 +267,7 @@ assert_eq!(said, "你好。");
 宿主自己执行、以会话工具的身份交给模型的工具，在 `SessionOptions::host_tools` 里声明，调用来了用 `respond_tool_call` 回答。声明的约束：
 
 - `name` 匹配 `^[A-Za-z][A-Za-z0-9_-]{0,63}$`，不以 `mcp__` 开头；`description` 不超过 8 KiB；`input_schema` 是 `type: object`，不超过 64 KiB。
-- `timeout_ms` 取 1000 到 600000，缺省 120000；另有 `read_only`、`destructive`、`concurrency_safe`、`deferred`、`subagents`。
+- `timeout_ms` 取 1000 到 600000，缺省 120000；另有 `read_only`、`destructive`、`concurrency_safe`、`deferred`、`subagents`，以及 `permit`（`HostToolPermit::Ask` 缺省按设置判；`Allow` 只放行这一个工具，规则与模式上限照旧压过它，见 `daemon_rpc_protocol.md` §6.3）。
 
 调用到来是 `AgentEvent::HostToolCall { call_id, name, input, timeout_ms, cwd, depth, .. }`，`cwd` 与 `depth` 是发起调用的会话的工作目录与委派深度（根会话 0；在 worktree 里跑的子 Agent 的 `cwd` 是那个 worktree）；回答是 `HostReply::Result(ToolResult)`（结果本身可以带 `is_error`）或 `HostReply::Failed(message)`（宿主跑不了这次调用）。宿主工具和别的工具一样过权限门，所以非只读的工具先有一个 `PermissionPrompt`，答过才轮到 `HostToolCall`。没人回答的调用在超时、**所有 watcher 离开**或这一轮被取消时结束：回答期间 watcher 要一直挂着。
 
@@ -277,7 +277,7 @@ assert_eq!(said, "你好。");
 # use std::sync::Arc;
 use agix::contracts::tools::ToolResult;
 use agix::events::{AgentEvent, SessionEvent, SessionFrame, SessionWatcher, WatcherId};
-use agix::host_tools::{HostReply, HostToolOption};
+use agix::host_tools::{HostReply, HostToolOption, HostToolPermit};
 use agix::prelude::*;
 use agix::prompts::{PermissionDecision, PromptAnswer};
 use agix::session::SessionOptions;
@@ -316,6 +316,7 @@ let options = SessionOptions {
         timeout_ms: 120_000,
         deferred: false,
         subagents: false,
+        permit: HostToolPermit::Ask,
     }],
     ..Default::default()
 };

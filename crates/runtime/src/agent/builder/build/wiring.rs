@@ -221,6 +221,7 @@ impl Builder {
             pending_host_calls,
             pending_host_progress,
             host_calls,
+            host_tools: Default::default(),
         }
     }
 }

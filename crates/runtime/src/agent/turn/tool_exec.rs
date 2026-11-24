@@ -61,6 +61,9 @@ pub(crate) struct ToolExecCtx {
     /// How a host-declared tool reaches the host; `None` for a program's
     /// calls, which cannot hand one over.
     pub host_calls: Option<Arc<dyn base::interface::host_call::HostCalls>>,
+    /// The names the session admitted its host-declared tools under: a
+    /// declaration's permit counts for a call to one of these alone.
+    pub host_tools: Arc<std::collections::HashSet<String>>,
     /// Rings around every tool call — see
     /// [`base::interface::tool_middleware`]. Empty in every session that
     /// registered none, which is the case dispatch short-circuits.

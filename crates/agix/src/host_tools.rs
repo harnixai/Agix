@@ -4,6 +4,6 @@
 
 pub use ::assembly::session_pool::api::{
     HookAnswer, HooksSet, HostHookOnError, HostHookOption, HostHookSet, HostToolOption,
-    HostToolsSet, RefusedEntry,
+    HostToolPermit, HostToolsSet, RefusedEntry,
 };
 pub use ::base::interface::host_call::{HostId, HostReply};

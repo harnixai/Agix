@@ -283,6 +283,7 @@ mod tests {
                 timeout_ms: 120_000,
                 deferred: false,
                 subagents: false,
+                permit: crate::session_pool::api::HostToolPermit::Allow,
             }],
             attended: Some(true),
             auto_name: Some(false),

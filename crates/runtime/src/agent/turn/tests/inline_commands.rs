@@ -52,6 +52,7 @@ fn turn_in(cwd: &std::path::Path, rules: Vec<PermissionRule>, with_bash: bool) -
         session_state: Arc::new(session_state::SessionState::for_tests(cwd.to_path_buf())),
         elicitation: Arc::new(base::interface::elicitation::DeclineAll),
         host_calls: None,
+        host_tools: Arc::default(),
         tool_middleware: Arc::default(),
         result_transformers: Arc::default(),
         images: Arc::default(),

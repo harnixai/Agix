@@ -4,6 +4,9 @@ use super::*;
 
 impl Builder {
     pub(super) fn assemble(mut self, w: Wired) -> (Agent, EventReceiver, InputSender) {
+        w.events
+            .host_tools
+            .set(self.admitted_host_tools(&w.tool_policy));
         let chains = w.chains;
         let (recovery_policy, turn_policy, budget_policy) =
             self.policies(&w.resolved.settings, &w.resolved.scene);

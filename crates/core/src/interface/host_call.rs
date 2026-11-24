@@ -34,6 +34,9 @@ pub struct HostToolDecl {
     pub subagents: bool,
     /// The connection that provides it; `None` for the session's own.
     pub host: Option<HostId>,
+    /// The host lets its calls through without a rule; what refuses or asks
+    /// still does.
+    pub permitted: bool,
 }
 
 impl HostToolDecl {
@@ -55,6 +58,7 @@ impl HostToolDecl {
             deferred: false,
             subagents: false,
             host: None,
+            permitted: false,
         }
     }
 
@@ -80,6 +84,11 @@ impl HostToolDecl {
 
     pub fn host(mut self, host: HostId) -> Self {
         self.host = Some(host);
+        self
+    }
+
+    pub fn permitted(mut self, yes: bool) -> Self {
+        self.permitted = yes;
         self
     }
 }

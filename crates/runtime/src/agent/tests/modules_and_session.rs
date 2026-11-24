@@ -586,3 +586,67 @@ async fn the_rule_index_comes_from_the_provider_the_session_was_built_with() {
         "{seen:?}"
     );
 }
+
+struct KeepsHostTools(Arc<std::sync::Mutex<Option<crate::module::AdmittedHostTools>>>);
+
+impl crate::module::Module for KeepsHostTools {
+    fn id(&self) -> &'static str {
+        "keeps"
+    }
+    fn on_session(
+        &self,
+        cx: &mut crate::module::SessionContext<'_>,
+    ) -> Result<(), crate::module::ModuleError> {
+        *self.0.lock().unwrap() = Some(cx.host_tools.clone());
+        Ok(())
+    }
+}
+
+struct SceneTool;
+
+#[async_trait::async_trait]
+impl base::tool::Tool for SceneTool {
+    fn name(&self) -> &str {
+        "Clash"
+    }
+    fn spec(&self) -> base::tool::ToolSpec {
+        base::tool::ToolSpec::new()
+    }
+    fn description(&self) -> &str {
+        "the scene's"
+    }
+    fn input_schema(&self, _: base::tool::PathStyle) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+    async fn call(
+        &self,
+        _: serde_json::Value,
+        _: base::tool::ToolContext,
+        _: base::tool::ProgressSender,
+    ) -> Result<base::tool::ToolResult, base::error::ToolError> {
+        Ok(base::tool::ToolResult::text("scene"))
+    }
+}
+
+/// What a delegate is handed is what the session admitted: a connection's
+/// tool left out for a name the session's own tools hold stays out of it.
+#[test]
+fn modules_see_the_host_tools_the_session_admitted() {
+    use base::interface::host_call::{HostId, HostToolDecl};
+    let kept = Arc::new(std::sync::Mutex::new(None));
+    let decl = |name: &str| HostToolDecl::new(name, "d", serde_json::json!({"type": "object"}));
+    let mut scene = scene::code::spec(scene::code::Interaction::Interactive);
+    scene.extra_tools = vec![Arc::new(SceneTool)];
+    probe_builder(vec![Arc::new(KeepsHostTools(kept.clone()))])
+        .scene(Arc::new(scene))
+        .host_tools(vec![
+            decl("Own"),
+            decl("Clash").host(HostId(1)).permitted(true),
+            decl("Given").host(HostId(1)),
+        ])
+        .build()
+        .expect("build should succeed");
+    let admitted = kept.lock().unwrap().clone().expect("the module ran");
+    let names: Vec<&str> = admitted.get().iter().map(|d| d.name.as_str()).collect();
+    assert_eq!(names, ["Own", "Given"]);
+}
