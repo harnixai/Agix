@@ -1214,7 +1214,13 @@ async fn the_turn_complete_event_carries_the_whole_of_usage(mode: Mode) -> anyho
         .turn_complete_event
         .clone()
         .ok_or_else(|| anyhow::anyhow!("no turn_complete event: {turn:?}"))?;
+    // `last_call_usage` is the one main-loop call the stub answered; `usage`
+    // is the turn's total and also counts a side call
+    // that happens to finish inside the turn, so it is checked as the sum of
+    // its breakdown rather than against the stub.
+    let last = &event["last_call_usage"];
     let usage = &event["usage"];
+    let breakdown = &event["usage_breakdown"];
 
     // Spelled out rather than round-tripped through `Usage`. These names are
     // the protocol, and a test that deserialized them back into the type it
@@ -1232,9 +1238,23 @@ async fn the_turn_complete_event_carries_the_whole_of_usage(mode: Mode) -> anyho
         ),
     ] {
         assert_eq!(
-            usage[field].as_u64(),
+            last[field].as_u64(),
             Some(expected),
             "`{field}` is not what the wire reported, in {event}"
+        );
+        assert_eq!(
+            breakdown["own"][field].as_u64(),
+            Some(expected),
+            "`{field}` of the turn's own calls, in {event}"
+        );
+        let parts: u64 = ["own", "side", "delegates"]
+            .iter()
+            .map(|part| breakdown[part][field].as_u64().unwrap_or_default())
+            .sum();
+        assert_eq!(
+            usage[field].as_u64(),
+            Some(parts),
+            "`{field}` of the turn is not the sum of its breakdown, in {event}"
         );
     }
 
