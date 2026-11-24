@@ -149,7 +149,7 @@
 | `permissions.ask` | 无 | 会话 | 照用 | 立即 | 先问再执行的规则,即使 allow 规则也覆盖它 |
 | `permissions.deny` | 无 | 会话 | 照用 | 立即 | 拒绝的规则,压过任何 allow 与 ask |
 | `permissions.prompt_timeout_secs` | `300` | 会话 | 只能收紧(只能更小(0 表示不限,最宽)) | 立即 | 权限提问没人答多久后拒绝;`0` 一直等(只有取消会话能打断) |
-| `permissions.client_may_loosen` | `false` | 项目与场景 | 只能收紧(只能设为 false) | 立即 | RPC 客户端能否经 `options.settings` 要求比这里更宽的设置;`false` 时更宽的值被夹到这里的值,并列在 `clamped_options` 里 |
+| `permissions.client_may_loosen` | `false` | 项目与场景 | 只能收紧(只能设为 false) | 立即 | RPC 客户端能否经 `options.settings` 要求比这里更宽的设置;`false` 时更宽的值被夹到这里的值,并列在 `clamped_options` 里;宿主工具条目上的 `permit: "allow"` 不归它管(只放行那一个宿主工具,见 `daemon_rpc_protocol.md` §6.3) |
 
 ### `files`
 
@@ -273,9 +273,16 @@
 
 | 键 | 缺省 | 作用域 | 未受信项目 | 改后 | 说明 |
 |---|---|---|---|---|---|
-| `plugins.enabled` | `true` | 会话 | 只能收紧(只能设为 false) | 立即 | 是否加载已安装的插件 |
-| `plugins.allow` | 无 | 会话 | 只能收紧(只能是下层的子集(空表示全部)) | 立即 | 非空时只加载列出名字的插件(白名单,不在其上的被拒) |
+| `plugins.enabled` | `true` | 会话 | 只能收紧(只能设为 false) | 立即 | 是否加载已安装的插件;会话层写 `false` 是这个会话没有插件,含宿主自带的包;下一次建引擎(新建、重建)时生效 |
+| `plugins.allow` | 无 | 会话 | 只能收紧(只能是下层的子集(空表示全部)) | 立即 | 非空时只加载列出名字的插件(白名单,不在其上的被拒);会话层(`options.settings`)写它是在池里实际启用的包中挑,在会话下一次建引擎(新建、重建)时生效,见下 |
 | `plugins.enable_on_install` | `false` | 进程 | 只能收紧(只能设为 false) | 立即 | `plugin.install` 装好后是否直接启用;`false` 时宿主读完安装返回的披露,再自己调 `plugin.enable`;`true` 时装完即启用 |
+
+`plugins.enabled` 与 `plugins.allow` 是会话作用域的键,会话层(`options.settings`)只能收紧:会话用的包 = 它的 `allow`
+(不写或空是全部)与池里**实际启用**的包取交集,再从这个池集合里补上它们的依赖。名单里池没有启用的名字不放开,
+报在 `clamped_options`;名字全不在时会话没有插件,不是「空表示全部」。不在集合里的包对这个会话、它的子 Agent 与团队成员
+不贡献脚本、命令、技能、agent 类型、函数、MCP server 与 `plugin:<名>` 场景。集合在建引擎时定下,之后才启用的包等重建
+才进来。设置文件里写的这两个键仍是部署级开关,管哪些包加载;单会话想收窄用 `options.settings`(见
+[`daemon_rpc_protocol.md`](daemon_rpc_protocol.md) §6.3)。
 
 ### `mcp`
 

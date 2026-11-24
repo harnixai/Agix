@@ -1,7 +1,7 @@
 # 升级到 0.4
 
 给建在 Agix 上的应用(经 JSON-RPC 连 `agixd` 的,或经 `agix` crate 嵌入的)看的:从 0.3.20 及更早升到 0.4.0
-要改什么。0.3.21 重排了设置文件,0.4.0 改了会话选项、协议与预算;两版都不做兼容,旧写法不再生效。
+要改什么,末尾有 0.4.2 的新增。0.3.21 重排了设置文件,0.4.0 改了会话选项、协议与预算;两版都不做兼容,旧写法不再生效。
 
 逐个类型、逐个函数的变化在 [`agix-sdk.md`](agix-sdk.md)「迁移说明」的 0.3.21、0.4.0 两条;协议的完整说明
 在 [`daemon_rpc_protocol.md`](daemon_rpc_protocol.md)。
@@ -213,3 +213,86 @@
   对 `base::interface::config_source::Tier` 穷举 `match` 的要补 `Cli` 与 `Session`。
 - 库式用法的 `load_daemon_config` 第二个参数是 `cli_settings: Option<serde_json::Value>`(原 `max_tokens: u32`),
   `Assembly::permission_prompt_timeout` 删掉,写进 `cli_settings`。
+
+## 0.4.2
+
+0.4.2 没有协议版本变化(仍是 5),新增四个能力位:`host_tool_permit`、`subagent_provider`、`task_model`、`session_plugins`
+(旧引擎把 `options.settings.plugins` 以 `INVALID_PARAMS` 退回)。用到的应用先查
+`daemon.ping` 的 `capabilities`。
+
+### 宿主工具自己放行(`permit`,#99)
+
+0.3 里宿主在 `session.create` 里给一条按工具名的 allow 规则,无人值守的会话就不再为自己的宿主工具发询问。0.4 起会话层
+只能收紧,`options.settings.permissions.allow` 被扣下(除非设置开了 `permissions.client_may_loosen`),这条路断了。
+现在宿主在工具条目上自己说:
+
+```json
+{"options": {"host_tools": [{"name": "HostEcho", "description": "...", "input_schema": {...}, "permit": "allow"}]}}
+```
+
+- `permit` 是 `"ask"`(缺省,按设置判)或 `"allow"`;只放行这一个工具,不放宽会话模式,不受 `client_may_loosen` 管。
+  `daemon.setHostTools` 的条目同样带。
+- 不认这个字段的旧引擎把整个 `options` 以 `INVALID_PARAMS` 退回:先查能力位 `host_tool_permit`。
+- 它算一条命中的 allow:`dontAsk` 与无人值守下免问。压过它的照旧:任何一层(含 managed)的 deny 与 ask 规则、宿主自带权限
+  策略、`PreToolUse` hook 的拦截、`plan` 模式只放行 `read_only` 的。遥测 `permission_decision` 的 `basis` 是
+  `host_declared`。
+- `daemon.setHostTools` 里的 `permit` 作用于这个 daemon 里此后建起的每个会话,不论哪条连接建的;已建好的引擎保留建起时
+  那份,直到下一次重建(`setPrompt`、`setModel` 的重建也算)。改回 `ask` 或撤回同样只对此后建起的引擎生效。
+- `options.host_tools` 的 `permit` 随 `options` 记进会话日志,恢复时取记下的那份。
+
+### 插件按会话收窄(#100,能力位 `session_plugins`)
+
+`options.settings.plugins.allow` 与 `plugins.enabled` 的作用域由进程改为会话(`plugins.enable_on_install` 仍是进程级),
+所以 0.4.1 里会让 `options.settings` 以 `INVALID_PARAMS` 失败的这两个键现在可以写。规矩是只能收紧:
+
+- 会话的集合 = 会话的 `allow` 与池里**实际启用**的包取交集,再从同一个池集合里补上这些包的依赖。名单不写或写 `[]` 是
+  池里的全部;`enabled: false` 是这个会话没有插件,宿主自带的包(`source: host`)也不例外;`enabled: true` 放不开池里的
+  `false`。
+- 名单里池没有启用的名字不放开,报在 `clamped_options`(`settings.plugins.allow`,`applied` 是留下的)。名字全不在时
+  `applied` 是 `[]`:会话没有插件,不是「空表示全部」。
+- 不在集合里的包对这个会话、它的子 Agent 与团队成员什么都不贡献:脚本不跑,命令、技能、agent 类型不列,函数不可见,
+  它的 MCP server 不交给会话,它的场景进不去。包占用的同名 agent 类型(如覆盖内置 `explore`)回落到内置或下层的那个。
+- `session.inspectContext` 多 `plugins`:会话实际用的包 `[{name, version, required_by?}]`,因依赖补进来的带 `required_by`。
+- `plugin.functions {session_id}` 只列会话集合里的包的函数;`plugin.call` 指定会话、函数属于集合外的包时以
+  `INVALID_PARAMS` 失败。不带 `session_id` 的照旧是池级。
+- 场景 `plugin:<name>`:包不在会话集合里时 `session.create`、恢复与重建以 `INVALID_PARAMS` 拒绝
+  (`invalid_options` 字段 `settings.plugins`);agent 类型的 `scene:` 指向这样的场景时,子 Agent 的派生报错,不退回父场景。
+- MCP:被排除的包声明的 server 仍由共享的 hub 连着(连接按 (项目, 场景) 共用),只是不交给这个会话。包与 settings 写了
+  同一个 MCP 键时,连上的是包的那个,所以排除这个包的会话两者都拿不到。
+- 收窄的会话在建引擎时定下集合:之后才启用的包要等重建(`session.setModel`、`session.setPrompt` 等)才进来;没有
+  设 `plugins` 的会话继续跟着池走。
+- 日志里最后一条会话规格读不出来时,会话不再退回更早的规格而放宽到池的全部插件;`plugins` 段读不出就是没有插件。
+
+### 子 Agent 的 provider(#101)与任务里的模型(#98)
+
+- `session.startAgent`、`Agent` 工具的输入、agent 类型 frontmatter 收可选的 `provider`(请求的压过类型的)。子 Agent
+  用一条自己的路由:那家排第一,其余照 `model.order`,健康与配额与父会话共用。没给 `provider` 但模型 id 有确定的归属
+  (某家的 `models` 列着它或把它作档位;只是「什么都收」的那家不算),且父会话的调用不会先去那里时,也从它的归属起;
+  这样 `model.order: ["ds","cc"]` 下点名 `cc` 的模型 id 真的会到 `cc`,不再换成 `ds` 的同档模型。档位名、`inherit`、
+  `opus` / `sonnet` 这类别名在没给 `provider` 时照旧按会话的路由解析。
+- `provider` 不在这一对 (项目, 场景) 的定义里:`startAgent` 以 `INVALID_PARAMS` 失败且不登记任务;`Agent` 工具是这次
+  调用的错误;agent 类型写错的记一条告警、当没写。能力位 `subagent_provider`。
+- 有自己路由的子 Agent 的 `provider_switched` 在它自己的事件里(经 `subagent_progress` 转出),不再算到父会话头上。
+- 宿主画任务树时:`session.tasks` 里 agent 与 teammate 任务的 `detail` 带 `model`、`provider`。`task_started` 里是预测,
+  第一次调用后可能被 `task_updated` 改写(路由回退后也会);`step_end` 带 `served: {provider, model}`(没经路由的调用
+  没有);侧链会话的 `session.get` 带 `model`、`provider`(父会话不在内存里、或已不记那件任务时没有)。能力位 `task_model`。
+
+### 其他
+
+- Anthropic 请求的 `cache_control` 不再带 `scope`(官方端点对 `{"type":"ephemeral","ttl":"1h","scope":"global"}` 回 400)。
+  只有 `type` 与 `ttl`;场景侧「静态、缓存一小时」的含义不变。
+
+### 嵌入(`agix` crate)
+
+- `base::provider::TaskRouting` 多三个**必须实现**的方法:`starting_at(provider) -> Result<Arc<dyn TaskRouting>, String>`、
+  `home_of(model) -> Option<String>`、`destination(task, model) -> Destination`;自己实现路由的宿主要补上。新类型
+  `base::provider::Destination { provider, model }`。
+- `ModelEvent::Served` 多 `model`(`#[serde(default)]`);`AgentEvent::StepEnd` 与 `StreamResult` 多 `served:
+  Option<Destination>`,对它们穷举 `match` 或按字段构造的要补。
+- `AgentTypeDefinition.provider`、`DelegateRequest.provider`:`Option<String>`。
+- `AgentTypeSource::Plugin` 由单元变体改为 `Plugin { plugin: String }`,类型不再是 `Copy`;`may_loosen`、`may_shadow`
+  取引用。
+- `SceneRegistry::narrowed(keep)` / `withholds(id)`,`McpManager::share_where(keep)`:会话收窄用的,自己装会话的宿主可以
+  照用。
+- `HostToolOption.permit: HostToolPermit`(`Ask` 缺省 / `Allow`),`agix::host_tools::HostToolPermit` 导出;构造
+  `HostToolOption` 的补 `permit`。

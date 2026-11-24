@@ -525,9 +525,9 @@ managed 为准。启动时对守护进程自己那一对
 自己的列表后面,守护进程自己项目层来的 provider(宿主改过的也是)、`files.extra_dirs` 之类不跨对。
 
 **会话覆盖层:按作用域收键,按未受信项目层的方向判。** 每个设置键在键表(`settings::keys`,见 §6.6)里有一个
-作用域:进程(`app`、`plugins`、
+作用域:进程(`app`、`plugins.enable_on_install`、
 `telemetry.otlp_endpoint`)、`(项目, 场景)` 对(`providers`、`model.order`、`model.tasks`、`mcp`、`hooks`、`recorder`、
-`scripts`、`permissions.client_may_loosen`——路由、MCP 连接、hook 来源都按绑定建),其余是会话。`options.settings`
+`scripts`、`permissions.client_may_loosen`——路由、MCP 连接、hook 来源都按绑定建),其余是会话(`plugins.allow`、`plugins.enabled` 也是,见 §3.2.7)。`options.settings`
 只收会话作用域的键,别的进 `invalid_options`。收下的键缺省按同一张表的信任列给的比较方向判:只许更严的键给宽了
 就留设置的值、报在 `clamped_options`,allow 规则扣下;设置开了 `permissions.client_may_loosen` 时照样放宽。信任列
 里的 `Withheld` 不用——会话能给什么由作用域定。这是安全缺省,不是
@@ -760,6 +760,10 @@ prompt hook)互不相干。子 Agent、压缩、
 调用不会先去那里时,`Delegator::own_route` 经 `TaskRouting::starting_at` 给它一条自己的路由:同一个
 `ProviderSet`、那家在前,自己的"上一次去了哪"与观察者,所以它的 `provider_switched` 在它自己的事件里,不算到父会话
 头上;它的压缩和它再起的子 Agent 也走这条。其余子 Agent 与父会话共用路由。
+任务登记时 `Delegator::placed` 用 `TaskRouting::destination` 预测子 Agent 去哪(`detail.model` / `detail.provider`),
+每次调用实际去了哪由 `ModelEvent::Served` 说,经 `StreamResult.served` 与 `AgentEvent::StepEnd.served` 到
+`note_on_task`,它只改写任务 `detail` 的这两个键;路由回退后下一帧 `task_updated` 就是新值。侧链的
+`session.get` 取父会话里那件任务的这两项。
 
 配额按 provider id 计,口径是未命中缓存的输入加缓存写入加输出,缓存命中不计;用量落在状态根的 `quota/`
 (§8),文件名就是 id 本身。所以 provider id 只能由小写 ASCII 字母、数字、`-`、`_` 组成(不区分大小写的文件系统上 `Ab` 与 `ab` 是同一个文件):别的 id 加载时整项忽略,
@@ -769,6 +773,24 @@ prompt hook)互不相干。子 Agent、压缩、
 
 信任:不受信项目的 `providers` 整段不生效,`model.order` 只能排全局 / 场景层定义的 provider(§6.6);所以项目写不出
 一个把流量或环境变量送到别处的 provider。
+
+### 3.2.7 会话用哪些插件
+
+插件的安装与启用是池级的(装在状态根的 `plugins/`,`plugin.enable` 改的是池的启用集),但一个包往会话里贡献什么,
+由会话自己的 `options.settings.plugins.allow` / `enabled` 再收一道,只能收紧。会话的集合是 `SessionPlugins`
+(`crates/assembly/src/plugins/session_set.rs`):会话名单与池**实际启用**的包取交集,再从同一个集合里补上这些
+包的依赖;不取绑定层设置里的值,因为包能不能用最终看池里实际装了什么。名单里池没有的名字报进 `clamped_options`,
+其余照用,名字全不在时集合为空而不是「全部」。会话的 `plugins` 段读不出、日志里的规格读不出,都收成空集合,
+不会因为读失败而放宽。集合每次建引擎时算一次(新建、重建、`plugin.call` 的临时引擎),挂在 `EngineSlot` 上;
+没设 `plugins` 的会话不收窄,`permits` 跟着池的变化走。
+
+包的每一种贡献都过 `SessionPlugins::permits`,共七处:脚本绑定与插件命令(含 `RunExt`)、agent 类型与技能
+(`ProjectModules` 除共享目录外,按会话集合各留一份收窄的目录,先过滤后覆盖,所以被排除的包占用的同名类型回落到
+下层;没有会话持有的收窄目录在下次取用或刷新时丢掉)、MCP server(会话的 `McpManager` 先 `share()`、再
+`share_where` 去掉被排除包的 server;连接仍由共享 hub 持有)、`plugin.functions` / `plugin.call` 带会话时的函数、
+`plugin:<名>` 场景(`EngineFactory` 建引擎时拒绝,会话拿到的 `SceneRegistry` 是 `narrowed` 过的副本,
+`withholds` 说得出哪些被扣下)。子 Agent 与团队成员经 `Builder::inherit` 继承这些已收窄的模块,不另算。
+`session.inspectContext` 的 `plugins` 报的就是这份集合。
 
 ### 3.3 Sidechain 会话
 
@@ -935,7 +957,7 @@ agent 类 hook 的子 Agent 由根会话的 delegator 起,子会话共用根会�
   server 名,不从工具名里解析(`DLG-5`)。
 - **子 Agent 没有定时任务**:子会话不注册 `Cron*`,也不起调度。
 - **宿主工具只给声明了 `subagents` 的**:它们不是模板里的内建工具,`build_delegate` 显式把父会话
-  `subagents:true` 的那几个交给子会话,再受子会话的 `ToolPolicy` 收窄;子会话的调用经
+  `subagents:true` 的那几个交给子会话,再受子会话的 `ToolPolicy` 收窄;子会话拿到的是 `AdmittedHostTools`——会话的工具登记完才填的、父会话实际登记进来的宿主工具(与场景或插件工具重名而没登记的连接工具不在其中),带着各自的 `permit`;子会话的调用经
   `DelegateHostCalls` 走父会话的通道,带上它的任务与侧链会话。
 
 `build()` 结束时检查工具表没有重名(重名时分发只认第一个):测试与 debug 构建里断言失败,
@@ -1007,6 +1029,17 @@ plan 模式的那一次调用)、`short_description`、`callable_from_code`、`c
 调用交给 `HostCalls`(`base::interface::host_call`),引擎自带的实现发 `AgentEvent::HostToolCall`、
 等 `InputMessage::HostToolResponse`,超时、取消、宿主不在都有确定的结局,一轮总能收尾。挂在会话
 而不挂在场景上:场景是 daemon 上所有连接共享的,工具是某个宿主连接的能力。
+
+宿主工具的放行(`HostToolDecl.permitted`,RPC 上是条目的 `permit: "allow"`)跟着声明走,不转成按名字的 allow 规则:
+`DeclaredHostTool` 的 `PermissionFacts.host_permits` 经 `ToolFacts.host_permits` 到 judge,在 `exact_allow` 之后、
+没有任何规则命中时才认它,`basis` 记 `host_declared`(遥测 `permission_decision`),与规则放行分得开。
+`ToolFacts::gather` 只对 `ToolOrigin::Host` 的工具留下这一位,且执行调用的会话再按它实际登记进来的宿主工具名
+**逐名核对**(`ToolPolicy` 记下这些名字、经 `ToolExecCtx` 交给 `authorize`),不是前缀匹配:插件或场景的工具自称宿主、
+名为 `mcp` 的宿主工具都沾不到光。压过它的:任何一层(含 managed)的 deny 与 ask 规则、宿主自带权限策略、`PreToolUse`
+hook、`plan` 模式的 `read_only` 要求;`dontAsk` 与无人值守下它算一条命中的 allow,`bypassPermissions` 本来就不问。
+它不经 `permissions.client_may_loosen`,因为放行的是宿主自己实现的那一个工具,不放宽会话的模式或别的规则。
+连接级工具(`daemon.setHostTools`)的 `permit` 同样随快照进建引擎,只对此后建起的引擎生效;`options.host_tools` 的
+`permit` 随 `options` 记进会话日志,恢复时取记下的那份。
 
 **连接级的工具与 hook(`daemon.setHostTools` / `daemon.setHooks`)。** 工具除了随会话声明,还能挂在
 宿主**连接**上:登记处是 `EngineFactory` 里的 `HostConnections`(`parts/hosts.rs`),按连接记下它提供的

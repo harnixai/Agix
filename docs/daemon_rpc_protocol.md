@@ -867,6 +867,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `session_settings` | `options.settings`:按会话给的设置覆盖层(形状同 settings.json,只收按会话决定的键,推理强度、思考开关与提示词都在这里),缺省只能收紧,放宽的被夹住并报在 `session.create` 的 `clamped_options`;`session.setModel` 的 `effort` / `thinking` 与 `session.setPrompt` 改的是同一层,被夹住的报在各自结果的 `clamped_options`;一轮的 token 预算与 `turn_complete.usage` 含子 Agent 与旁路调用,带 `usage_breakdown`(§4.8、§6.3、§7.2) |
 | `host_tool_progress` | 有 `session.reportToolProgress`,宿主工具的进度推成 `tool_progress`(§6.3、§7.3) |
 | `host_tool_provider` | 有 `daemon.setHostTools`,连接提供的工具,`host_tool_call` 一定发给提供者(§6.1、§7.4) |
+| `session_plugins` | `options.settings.plugins.allow` / `enabled`:按会话收窄插件(只能收紧,与池里启用的包取交集再补依赖);被排除的包不对会话贡献脚本、命令、技能、agent 类型、函数、MCP server 与 `plugin:<名>` 场景;`plugin.functions` / `plugin.call` 带 `session_id` 时按会话筛;`session.inspectContext` 带 `plugins`(§6.3) |
 | `host_tool_permit` | `options.host_tools` 与 `daemon.setHostTools` 的条目认 `permit`(`"ask"` / `"allow"`):`allow` 只放行这一个宿主工具的调用,规则与模式上限照旧压过它(§6.1、§6.3) |
 | `host_hooks` | 有 `daemon.setHooks` / `session.respondHook`,连接登记的 hook,`hook_call` 帧只发给登记者(§6.1、§7.6) |
 | `provider_tiers` | `config.setProvider` 接受 `tier`(`project` / `global`)与 `dry_run`,结果带 `tier`、`dry_run`(§6.4) |
@@ -1517,7 +1518,7 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 **`settings`——按会话给的设置。** 形状就是 settings.json 的形状(`{"turn": {...}, "permissions": {...},
 "agents": {...}, "sandbox": {...}, ...}`),叠在会话所在项目与场景合并好的设置之上,managed 层仍压在它上面。
 只收按会话决定的键:按项目与场景决定的(`providers`、`model.order`、`model.tasks`、`mcp`、`hooks`、`recorder`、
-`scripts`、`permissions.client_may_loosen`)、按进程决定的(`app`、`plugins`、`telemetry.otlp_endpoint`)写在这里
+`scripts`、`permissions.client_may_loosen`)、按进程决定的(`app`、`plugins.enable_on_install`、`telemetry.otlp_endpoint`)写在这里
 进 `invalid_options`,`field` 为 `settings.<键>`,`error` 写明它按什么决定;不认识的键、改过名的键、值不合
 设置的类型、程序专用的 `permissions.mode: "bubble"`、读不出来的规则串(`field` 带下标,如
 `settings.permissions.deny[0]`)、`model.thinking` 的 `on_budget` 小于 1024 同样。被拒时什么都不建、不跑。
@@ -1529,6 +1530,19 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 照加,与各层的规则并列。设置开了 `permissions.client_may_loosen: true` 时放宽照样生效,含 allow 规则,与
 `session.setPermissionMode` 的放宽同一个开关。这是安全缺省,不是安全边界:连得上 socket 的客户端本来就能
 `config.set` 改设置。`permissions.mode` 的夹紧见 §4.5;managed 层关了 `bypassPermissions` 时会话得不到它。
+
+**`settings.plugins`——会话用哪些插件。** `plugins.allow` 与 `plugins.enabled` 是会话键,也只能收紧:会话的集合是
+`allow`(不写或 `[]` 是全部)与池里**实际启用**的包取交集,再从这个池集合里补上这些包的依赖(版本要满足);
+`enabled: false` 是这个会话没有插件,宿主自带的包(`source: host`)也不例外,`enabled: true` 放不开池的 `false`。
+名单里池没有启用的名字不放开,`clamped_options` 报 `settings.plugins.allow`(`requested` 原样,`applied` 是留下的);
+名字全不在时 `applied` 是 `[]`,会话没有插件,不是「空表示全部」。`plugins` 段读不出(不是对象、`allow` 不是字符串
+列表、`enabled` 不是布尔)时同样没有插件。不在集合里的包对这个会话、它的子 Agent 与团队成员不贡献任何东西:脚本不跑,
+命令(含 `RunExt` 与 `commands.list {session_id}`)、技能、agent 类型不列,`plugin.functions {session_id}` 不列、
+`plugin.call` 拒绝它的函数;它的 MCP server 仍由共享的连接 hub 连着,但不交给这个会话(包与 settings 写了同一个键
+时连上的是包的那个,排除这个包的会话两者都没有);场景 `plugin:<包名>` 在包不在集合里时被拒绝:`session.create`、
+恢复与重建报 `INVALID_PARAMS`、`invalid_options` 字段 `settings.plugins`,agent 类型的 `scene:` 指向这样的场景时
+子 Agent 的派生报错而不退回父场景。收窄过的会话在每次建引擎时定下集合,之后才启用的包等重建才进来;没有设
+`plugins` 的会话跟着池走。`session.inspectContext` 的 `plugins` 报出集合。
 
 `options` 随会话记下,`settings` 不记判定结果:每次重建引擎都按这时的设置重新判,设置后来收紧了按设置,
 放宽了仍守着会话给的值。更早的会话在日志里记的旧形状恢复时按这一层读:`options` 的 `effort`、`thinking` /
@@ -1626,7 +1640,7 @@ hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(
 `session.fork` 都照原样再挂上:不带 `options` 恢复的会话,`permit` 取日志里记的那份。连接提供的工具(`daemon.setHostTools`,§6.1)是另一条路:不进这里,也不进会话日志,
 重建时取登记表当时的内容;会话自己的同名项优先。
 
-权限上它和 MCP 工具同一档:缺省模式下每次调用都先问(`prompt_type:"permission"`);无人值守的
+权限上它缺省和 MCP 工具同一档:缺省模式下每次调用都先问(`prompt_type:"permission"`);无人值守的
 会话(如没给 `attended` 的 `harnix`)里这样的询问直接被拒绝,宿主要自己回答就给 `attended:true`。
 想免问有两条路:
 
@@ -2704,6 +2718,7 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
                 "origin": "kernel",         // kernel | config | {"plugin":"…"} | {"script":"…"}
                 "tokens": 0, "text": "…" } ],
   "tools": [ { "name": "Bash", "source": "builtin", "schema_bytes": 0, "tokens": 0 } ],
+  "plugins": [],                            // 会话实际用的插件包 [{name, version, required_by?}];因别的包依赖而补进来的带 required_by
   "messages": { "count": 0, "tokens": 0 },  // 坐标同 session.history
   "total_tokens": 0,                        // 本地估算(与 BPE 分词相差约 ±12%)
   "compact_threshold": 0, "hard_cap": null }
@@ -3983,8 +3998,9 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 ] }
 ```
 
-启用着的包的全部 `[[function]]`。函数表是池级的:`session_id` / `cwd` 只检查目标在不在
-(会话不在 `SESSION_NOT_FOUND`,目录不在 `PROJECT_NOT_FOUND`),不改变列出的内容。
+启用着的包的全部 `[[function]]`。给 `cwd` 时函数表是池级的:只检查目录在不在(`PROJECT_NOT_FOUND`)。给
+`session_id` 时会话不在是 `SESSION_NOT_FOUND`,在则只列这个会话用得到的包的函数(会话层的 `plugins.allow` /
+`plugins.enabled` 收窄过的,见 §6.3 `options.settings.plugins`);会话不在内存里时按日志里记的规格算。
 
 #### `plugin.call`
 
@@ -4001,6 +4017,9 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 { "ok": true,  "value": <函数的返回值>, "logs": ["…"] }
 { "ok": false, "error": { "code": "…", "message": "…" }, "logs": ["…"] }
 ```
+
+`session_id` 指定的会话不用函数所属的包(被 `options.settings.plugins` 排除)时,`plugin.call` 以 `INVALID_PARAMS` 失败
+(`session … does not draw on plugin …`)。
 
 宿主调用作为一次内部工具调用 `PluginCall {function, input}` 走会话的整条工具管线——权限判定、
 `PreToolUse`、`tool.around`(看到的 `via` 是 `"host"`)、执行、`PostToolUse`、遥测——但不进

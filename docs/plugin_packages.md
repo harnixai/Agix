@@ -315,6 +315,25 @@ name = "xflow"
   跳过并记一条 warn,`register_host_plugin` 返回 `PLUGINS_DISABLED`。`plugins.allow` 白名单同样管宿主包,
   不在白名单里的列出来但不加载。
 
+## 会话只用其中一部分
+
+包启用是池级的,但宿主可以在 `session.create` 的 `options.settings.plugins.allow` / `enabled` 里让一个会话只用其中
+几个包(只能收紧,写法见 `daemon_rpc_protocol.md` §6.3 与 `settings.md` 的 `plugins`)。包作者要知道的:
+
+- **不在会话集合里的包,对这个会话什么都不贡献**,连同它的子 Agent 与团队成员:`[[script]]` 不跑,`[[command]]`、
+  `[[function]]`(`plugin.functions {session_id}` 不列、`plugin.call` 报 `INVALID_PARAMS`)、`[[agent]]`、skill 都不
+  出现,`[[mcp]]` 服务器不交给会话,`plugin:<包名>` 场景进不去(`session.create` 与子 Agent 的 `scene:` 都拒)。
+  宿主自带的包(`source: host`)同样受管。
+- **依赖会补进来。** 会话名单里写了 `a`,`a` 的 `[dependencies]` 里的包只要在池里启用着、版本满足,也进会话集合
+  (`session.inspectContext` 的 `plugins` 里带 `required_by`)。所以依赖别的包的函数或 skill 的包,在收窄的会话里
+  仍然拿得到它们;依赖没启用时它们不在,包不要假定依赖一定在。
+- **同名覆盖先过滤后覆盖。** 包 `b` 带了与内置 `explore` 同名的 agent 类型时,只允许 `a` 的会话里 `explore` 是内置的
+  那个。同名命令同理:排掉先到的包,另一个包的同名命令生效。
+- **MCP 服务器的连接不跟着会话走。** 被排除的包的服务器仍由共享的连接按 (项目, 场景) 连着,只是这个会话看不到它
+  的工具、resource 与 prompt。包声明的 MCP 键与 `settings.json` 的 `mcp.servers` 同名时连上的是包的那个,所以排除
+  这个包的会话两个都拿不到。
+- **集合在引擎建起来时定下。** 收窄过的会话里,包是后来才启用的要等会话重建才进来;没收窄的会话照旧随池的启停变化。
+
 ## 打包与安装
 
 压缩包就是插件目录的一个普通 zip,`plugin.toml` 在根上;`tests/runner/src/plugin_fixture.rs`
