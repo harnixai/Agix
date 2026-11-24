@@ -1,17 +1,17 @@
-//! 压缩：自动/手动/恢复三种触发、PreCompact 钩子、压缩后的恢复上下文与上报。
+//! 压缩：自动/手动/恢复三种触发、PreCompact 钩子与上报；压缩后放回的上下文在 `recovery`。
 
-use super::process::{hook_permission_mode, running_task_summary};
+use super::process::hook_permission_mode;
 use super::{holds_session_context, CompactSummary, CompactTrigger, NotCompacted, TurnError};
 use crate::agent::Agent;
 use base::context::Session;
 use base::event::AgentEvent;
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
-use std::collections::HashSet;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 mod backoff;
 mod manual;
+mod recovery;
 mod summary;
 use backoff::AutoCompactBackoff;
 pub(crate) use manual::CompactArgs;
@@ -162,6 +162,7 @@ impl Agent {
             self.commit_early_trim(early);
         }
         self.commit_stale_trim(stale);
+        self.release_reads_lost(&checkpoint.messages);
     }
 
     fn count(&self, messages: &[ModelMessage]) -> usize {
@@ -490,6 +491,7 @@ impl Agent {
                 "the compaction marker is not on disk yet; the next persist writes it"
             );
         }
+        self.release_reads_lost(&pre_compact);
         let summary = CompactSummary {
             strategy: format!("{:?}", result.strategy),
             messages_before,
@@ -640,69 +642,6 @@ impl Agent {
             return false;
         }
         true
-    }
-
-    /// What goes back in front of what a compaction `kept` of `pre_compact`:
-    /// the files whose reads it dropped, the skills invoked, the deferred
-    /// tools loaded, and — when it dropped turns — plan mode and the
-    /// background tasks still running.
-    pub(super) fn post_compact_recovery(
-        &self,
-        pre_compact: &[ModelMessage],
-        kept: &[ModelMessage],
-        drops_history: bool,
-    ) -> Vec<ModelMessage> {
-        let still_there: HashSet<(String, String)> =
-            compaction::compact::extract_recent_reads(kept)
-                .into_iter()
-                .collect();
-        let recent_files = compaction::compact::extract_recent_reads(pre_compact)
-            .into_iter()
-            .filter(|read| !still_there.contains(read))
-            .collect();
-        // Each invoked skill's *current* content is resolved here because the
-        // `compaction` crate does not depend on `skills`. A name that no
-        // longer resolves still gets a record, so it is mentioned by name.
-        let invoked_skills = self
-            .session_state
-            .ledger()
-            .invoked_skills
-            .clone()
-            .into_iter()
-            .map(|name| compaction::compact::InvokedSkillRecord {
-                content: self.tooling.skills().body(&name),
-                last_seq: self.tooling.skills().last_invoked_seq(&name),
-                name,
-            })
-            .collect();
-        let mut activated_tools: Vec<String> =
-            self.session_state.activated_tools().into_iter().collect();
-        activated_tools.sort();
-        compaction::compact::build_post_compact_recovery(&compaction::compact::PostCompactContext {
-            recent_files,
-            invoked_skills,
-            in_plan_mode: drops_history
-                && self.session_state.permission_mode() == base::permission::PermissionMode::Plan,
-            activated_tools,
-            running_tasks: if drops_history {
-                self.session_state
-                    .running_background_tasks()
-                    .iter()
-                    .map(|task| (task.task_id.clone(), running_task_summary(task)))
-                    .collect()
-            } else {
-                Vec::new()
-            },
-        })
-    }
-
-    /// What any compaction puts back whatever it drops — skills, plan mode,
-    /// tasks, loaded tools. Taken off the target, so that the recovery does
-    /// not carry the conversation straight back over the threshold. Files are
-    /// left out: one is re-attached only when its read was dropped, and the
-    /// read cost at least as much.
-    pub(super) fn recovery_reserve(&self) -> usize {
-        self.count(&self.post_compact_recovery(&[], &[], true))
     }
 
     pub(super) fn report_compaction(

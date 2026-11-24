@@ -809,7 +809,7 @@ fn invoked_skills_reminder(invoked_skills: &[InvokedSkillRecord]) -> Option<Mode
 
 /// Tool names whose results are file reads worth recovering after compaction.
 /// `Read` is `crates/tools/src/file_read.rs::FileReadTool::name()`.
-const FILE_READ_TOOLS: &[&str] = &["Read"];
+pub(crate) const FILE_READ_TOOLS: &[&str] = &["Read"];
 
 /// Extract recently read file paths from a set of messages, most recent first.
 /// Returns (path, content) pairs for file-read tool results found in the messages.

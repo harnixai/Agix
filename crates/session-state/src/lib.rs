@@ -332,6 +332,13 @@ impl SessionState {
         self.read_cache.forget(paths)
     }
 
+    /// The results of these `Read` calls are no longer in the model's
+    /// context — cleared, cut, or compacted away — so a repeat of one reads
+    /// the file again. `Edit` and `Write` still count the file as read.
+    pub fn release_reads(&self, tool_use_ids: &[String]) {
+        self.read_cache.release(tool_use_ids)
+    }
+
     /// Put back the durable state a rewind returned the log to: the todos
     /// and plan mode as they were then, or none of them when the log had
     /// recorded nothing yet. Outside plan mode the mode stays as it is.
@@ -660,8 +667,8 @@ impl Session for SessionState {
         self.notices.take()
     }
 
-    fn record_read_with_range(&self, path: &Path, offset: Option<usize>, limit: Option<usize>) {
-        self.read_cache.record_read(path, offset, limit)
+    fn record_read(&self, read: base::context::ReadRecord<'_>) {
+        self.read_cache.record_read(read)
     }
 
     fn record_write(&self, path: &Path) {
@@ -677,7 +684,7 @@ impl Session for SessionState {
         path: &Path,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> bool {
+    ) -> Option<base::context::HeldRead> {
         self.read_cache.check_dedup(path, offset, limit)
     }
 

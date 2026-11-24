@@ -555,12 +555,15 @@ fn earlier_summary(text: &str) -> Option<&str> {
 
 /// Truncate a rendered block at a character boundary. Byte slicing here would
 /// panic on any non-ASCII transcript.
+///
+/// The note says the cut is this request's: a summary that reports a tool
+/// result as "truncated" has the agent believe its own read came back cut.
 fn cap(s: &str) -> String {
     if s.len() <= MAX_RENDERED_BLOCK_CHARS {
         return s.to_string();
     }
     format!(
-        "{}… [{} bytes truncated]",
+        "{}… [{} more bytes the agent saw are left out of this summary request]",
         truncate_at_char_boundary(s, MAX_RENDERED_BLOCK_CHARS),
         s.len() - MAX_RENDERED_BLOCK_CHARS
     )

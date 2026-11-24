@@ -1601,6 +1601,43 @@ fn a_redacting_transformer_also_takes_the_structured_result_away() {
     );
 }
 
+/// A read whose text a transformer rewrote is not what the model holds of
+/// the file, so a repeat reads it again; an untouched one stays held.
+#[test]
+fn a_read_a_transformer_rewrote_is_read_again() {
+    use base::context::Session;
+    let mut ctx = test_exec_ctx(
+        Arc::new(base::tool::InMemoryToolRegistry::new()),
+        Arc::new(local_hook_runner(std::collections::HashMap::new())),
+    );
+    ctx.result_transformers =
+        Arc::new(vec![
+            Arc::new(base::interface::tool_result::TruncateText { max_bytes: 8 })
+                as Arc<dyn base::interface::tool_result::ToolResultTransformer>,
+        ]);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("notes.txt");
+    std::fs::write(&file, "notes").unwrap();
+    let held = |ctx: &ToolExecCtx, text: &str| {
+        ctx.session_state
+            .record_read(base::context::ReadRecord::whole(&file, &ctx.tool_use_id));
+        let answer = base::interface::tool_middleware::ToolAnswer {
+            text: text.into(),
+            new_messages: None,
+            reported_failure: false,
+            structured: None,
+            file_changes: Vec::new(),
+        };
+        let _ =
+            apply_result_transformers(ctx, "Read", &serde_json::json!({}), Ok(answer), Vec::new());
+        ctx.session_state
+            .check_read_dedup_with_range(&file, None, None)
+            .is_some()
+    };
+    assert!(held(&ctx, "short"));
+    assert!(!held(&ctx, "a result longer than eight bytes"));
+}
+
 #[test]
 fn a_redacting_transformer_leaves_the_file_change_without_its_diff() {
     let mut ctx = test_exec_ctx(

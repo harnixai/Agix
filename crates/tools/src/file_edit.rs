@@ -728,7 +728,8 @@ mod tests {
         let tool = FileEditTool;
         let ctx = ctx_in(dir.path());
         // Pre-populate read cache so staleness check passes
-        ctx.session.record_read_with_range(&p, None, None);
+        ctx.session
+            .record_read(base::context::ReadRecord::whole(&p, "toolu_read"));
         let r = tool
             .validate_input(
                 &json!({"file_path": p.to_string_lossy(), "edits": []}),

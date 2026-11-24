@@ -13,6 +13,41 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+/// One `Read` whose result went to the model.
+#[derive(Debug, Clone, Copy)]
+pub struct ReadRecord<'a> {
+    pub path: &'a Path,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+    /// The call whose result holds what was read.
+    pub tool_use_id: &'a str,
+    /// The result showed less of the range than was asked for: it stopped at
+    /// the default line count, or cut lines at their length cap.
+    pub cut_short: bool,
+}
+
+impl<'a> ReadRecord<'a> {
+    /// All of `path`, shown whole.
+    pub fn whole(path: &'a Path, tool_use_id: &'a str) -> Self {
+        Self {
+            path,
+            offset: None,
+            limit: None,
+            tool_use_id,
+            cut_short: false,
+        }
+    }
+}
+
+/// What the model holds of a file it read before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldRead {
+    /// All of the range it asked for.
+    Whole,
+    /// What a repeat of that read would show again, but not all of the range.
+    CutShort,
+}
+
 /// What the engine running a session derives from its settings and scene.
 /// Each engine brings its own, and attaching an engine replaces the
 /// session's whole.
@@ -223,10 +258,11 @@ pub trait Session: Send + Sync + std::fmt::Debug {
 
     fn take_notices(&self) -> Vec<String>;
 
-    /// Record that `Read` just read `path` over `offset`/`limit`, with its
-    /// mtime: a later read of the same range of an unchanged file is answered
-    /// from the cache, and `Edit`/`Write` know it was read and when.
-    fn record_read_with_range(&self, path: &Path, offset: Option<usize>, limit: Option<usize>);
+    /// Record what `Read` just showed the model, with the file's mtime: a
+    /// later read of the same range of an unchanged file is answered from the
+    /// cache while that result is still in the model's context, and
+    /// `Edit`/`Write` know the file was read and when.
+    fn record_read(&self, read: ReadRecord<'_>);
 
     /// Record that `Edit` / `Write` just changed `path`, so the next edit of
     /// it does not ask for a `Read` first or call the session's own change
@@ -241,14 +277,15 @@ pub trait Session: Send + Sync + std::fmt::Debug {
     /// - 文件已读但 mtime 不同 → 返回 "modified since read" 错误信息
     fn check_read_staleness(&self, path: &Path) -> Option<&'static str>;
 
-    /// Check read dedup with explicit offset/limit range.
-    /// Only deduplicates when both the mtime AND the exact offset/limit range match.
+    /// How the model still holds an earlier read of exactly this
+    /// `offset`/`limit` range of `path`, unchanged since; `None` when it does
+    /// not, and the file must be read again.
     fn check_read_dedup_with_range(
         &self,
         path: &Path,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> bool;
+    ) -> Option<HeldRead>;
 
     /// 给定路径是否与最近一次读取的文件一致。
     /// 仅检查路径相等；mtime 一致性由调用方通过 `check_read_dedup_with_range` 保证。

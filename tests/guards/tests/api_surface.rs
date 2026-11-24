@@ -428,6 +428,10 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
         "GitAccess",
         "what the engine's git may write; a security decision",
     ),
+    (
+        "HeldRead",
+        "how much of a file the model still holds; Read's repeat note matches it, and a new kind needs its own wording",
+    ),
     ("ImageSource", PROTOCOL),
     (
         "Initiator",

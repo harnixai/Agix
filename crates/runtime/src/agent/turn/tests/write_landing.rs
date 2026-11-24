@@ -99,7 +99,7 @@ async fn a_file_swapped_for_a_link_after_the_decision_does_not_take_an_edit_alon
         swap_for_link(target.clone(), s.outside.join("victim.txt")),
     );
     ctx.session_state
-        .record_read_with_range(&target, None, None);
+        .record_read(base::context::ReadRecord::whole(&target, "toolu_read"));
     let result = execute_tool_with_telemetry(
         &ctx,
         "Edit",
@@ -147,7 +147,10 @@ async fn a_link_in_the_project_is_written_through_as_before() {
     std::os::unix::fs::symlink("real", s.project.join("linked")).unwrap();
     let ctx = ctx_in(&s.project, || {});
     ctx.session_state
-        .record_read_with_range(&s.project.join("CLAUDE.md"), None, None);
+        .record_read(base::context::ReadRecord::whole(
+            &s.project.join("CLAUDE.md"),
+            "toolu_read",
+        ));
 
     execute_tool_with_telemetry(
         &ctx,

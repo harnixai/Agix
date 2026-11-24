@@ -126,17 +126,15 @@ impl Tool for FileReadTool {
 
         let path = resolve_path(&input.file_path, &ctx.cwd);
 
-        if !ctx.from_code
-            && ctx
-                .session
-                .check_read_dedup_with_range(&path, input.offset, input.limit)
-        {
-            let msg = if ctx.session.is_consecutive_read(&path) {
-                "[file unchanged] Use the previous content."
-            } else {
-                "[file unchanged] File unchanged since last read. Use the previous content."
-            };
-            return Ok(ToolResult::text(msg.to_string()));
+        let held = (!ctx.from_code)
+            .then(|| {
+                ctx.session
+                    .check_read_dedup_with_range(&path, input.offset, input.limit)
+            })
+            .flatten();
+        if let Some(held) = held {
+            let consecutive = ctx.session.is_consecutive_read(&path);
+            return Ok(ToolResult::text(unchanged_note(held, consecutive)));
         }
 
         // 全程包在 select! 里以 honor cancel
@@ -155,16 +153,21 @@ impl Tool for FileReadTool {
         ) => r};
 
         match result {
-            Ok(tool_result) if ctx.from_code => {
+            Ok(shown) if ctx.from_code => {
                 // The program saw the file and the model did not: Edit/Write may
                 // follow, but the model's next Read must not be answered from cache.
                 ctx.session.record_write(&path);
-                Ok(tool_result)
+                Ok(shown.result)
             }
-            Ok(tool_result) => {
-                ctx.session
-                    .record_read_with_range(&path, input.offset, input.limit);
-                Ok(tool_result)
+            Ok(shown) => {
+                ctx.session.record_read(base::context::ReadRecord {
+                    path: &path,
+                    offset: input.offset,
+                    limit: input.limit,
+                    tool_use_id: &ctx.tool_use_id,
+                    cut_short: shown.cut_short,
+                });
+                Ok(shown.result)
             }
             Err(ToolError::Execution(e)) if e.to_string().contains("not found") => {
                 let missing = format!("(no such file) {path}", path = path.display());
@@ -185,6 +188,21 @@ impl FileReadTool {
             .ok()
             .map(|i| i.file_path)
     }
+}
+
+fn unchanged_note(held: base::context::HeldRead, consecutive: bool) -> String {
+    match (held, consecutive) {
+        (base::context::HeldRead::CutShort, _) => {
+            "[file unchanged] File unchanged since last read. That result did not show all of \
+             it — it stopped at the default line count or cut long lines — and reading it the \
+             same way again would show the same. Use offset and limit to read the rest."
+        }
+        (base::context::HeldRead::Whole, true) => "[file unchanged] Use the previous content.",
+        (base::context::HeldRead::Whole, false) => {
+            "[file unchanged] File unchanged since last read. Use the previous content."
+        }
+    }
+    .to_string()
 }
 
 const ABSOLUTE_PATH_LINE: &str =
@@ -217,7 +235,7 @@ async fn read_file_to_text(
     max_bytes: u64,
     default_lines: usize,
     max_line_chars: usize,
-) -> Result<ToolResult, ToolError> {
+) -> Result<Shown, ToolError> {
     // Resolution doubles as the existence probe: a model naming a file that
     // is not there is the one failure this tool answers with prose.
     let metadata = fs
@@ -246,7 +264,9 @@ async fn read_file_to_text(
         ext.as_str(),
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
     ) {
-        return read_image(fs, path, &metadata, max_bytes).await;
+        return read_image(fs, path, &metadata, max_bytes)
+            .await
+            .map(Shown::from);
     }
 
     // PDF handling
@@ -259,7 +279,7 @@ async fn read_file_to_text(
             input.pages.as_deref(),
         )
         .await
-        .map(ToolResult::text);
+        .map(|text| ToolResult::text(text).into());
     }
 
     // Jupyter notebook handling
@@ -273,26 +293,71 @@ async fn read_file_to_text(
             max_line_chars,
         )
         .await
-        .map(ToolResult::text);
+        .map(|text| ToolResult::text(text).into());
     }
 
-    let content = read_utf8(fs, path, &metadata, max_bytes).await?;
+    read_text(fs, ctx, path, &metadata, input, max_bytes).await
+}
+
+async fn read_text(
+    fs: &dyn FileSystem,
+    ctx: &ToolContext,
+    path: &Path,
+    metadata: &Metadata,
+    input: &FileReadInput,
+    max_bytes: u64,
+) -> Result<Shown, ToolError> {
+    let content = read_utf8(fs, path, metadata, max_bytes).await?;
     if ctx.from_code {
-        return Ok(text_for_code(content, input.offset, input.limit));
+        return Ok(text_for_code(content, input.offset, input.limit).into());
     }
 
     if content.trim().is_empty() {
         return Ok(ToolResult::text(
             "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>",
-        ));
+        )
+        .into());
     }
 
-    Ok(ToolResult::text(format_with_line_numbers(
-        &content,
-        input.offset.unwrap_or(1).max(1),
-        input.limit.unwrap_or(default_lines),
-        max_line_chars,
-    )))
+    let limits = &ctx.config.file_limits;
+    let offset = input.offset.unwrap_or(1).max(1);
+    let limit = input.limit.unwrap_or(limits.default_read_lines);
+    let lines_cut = content
+        .lines()
+        .skip(offset - 1)
+        .take(limit)
+        .any(|line| line.chars().count() > limits.max_line_chars);
+    let stopped_early = input.limit.is_none()
+        && content
+            .lines()
+            .nth((offset - 1).saturating_add(limit))
+            .is_some();
+    Ok(Shown {
+        result: ToolResult::text(format_with_line_numbers(
+            &content,
+            offset,
+            limit,
+            limits.max_line_chars,
+        )),
+        cut_short: lines_cut || stopped_early,
+    })
+}
+
+/// What a read put in front of the model.
+struct Shown {
+    result: ToolResult,
+    /// Less of the range than was asked for: the default line count ran out
+    /// before the file did, or a line was cut at its length cap.
+    cut_short: bool,
+}
+
+impl From<ToolResult> for Shown {
+    fn from(result: ToolResult) -> Self {
+        Self {
+            result,
+            cut_short: false,
+        }
+    }
 }
 
 async fn read_utf8(
@@ -1075,6 +1140,57 @@ mod tests {
             t2.contains("file unchanged"),
             "dedup should trigger, got: {t2}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_repeat_of_a_read_that_stopped_short_says_so_and_points_at_offset() {
+        let dir = TempDir::new().unwrap();
+        let ctx = ctx_in(dir.path());
+        let lines = ctx.config.file_limits.default_read_lines + 5;
+        let long = dir.path().join("long.txt");
+        let body: String = (0..lines).map(|l| format!("row {l}\n")).collect();
+        tokio::fs::write(&long, body).await.unwrap();
+        let wide = dir.path().join("wide.txt");
+        let line = "x".repeat(ctx.config.file_limits.max_line_chars + 10);
+        tokio::fs::write(&wide, format!("{line}\n")).await.unwrap();
+        let short = dir.path().join("short.txt");
+        tokio::fs::write(&short, "one\ntwo\n").await.unwrap();
+
+        let read = |p: &Path, extra: serde_json::Value| {
+            let mut input = json!({"file_path": p.to_string_lossy()});
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().cloned().unwrap_or_default());
+            let ctx = ctx.clone();
+            async move {
+                match FileReadTool
+                    .call(input, ctx, ProgressSender::noop("t"))
+                    .await
+                    .unwrap()
+                    .content
+                {
+                    ToolResultContent::Text(t) => t,
+                    _ => panic!("expected text"),
+                }
+            }
+        };
+        for p in [&long, &wide] {
+            assert!(!read(p, json!({})).await.contains("[file unchanged]"));
+            let again = read(p, json!({})).await;
+            assert!(
+                again.contains("[file unchanged]") && again.contains("offset and limit"),
+                "{again}"
+            );
+        }
+        assert!(!read(&long, json!({"limit": 3}))
+            .await
+            .contains("[file unchanged]"));
+        let asked = read(&long, json!({"limit": 3})).await;
+        assert!(!asked.contains("offset and limit"), "{asked}");
+        read(&short, json!({})).await;
+        let whole = read(&short, json!({})).await;
+        assert!(!whole.contains("offset and limit"), "{whole}");
     }
 
     #[tokio::test]

@@ -426,3 +426,27 @@ fn a_task_stopped_outside_a_runtime_finishes_at_once() {
         .collect();
     assert_eq!(kinds, ["task_started", "task_finished"]);
 }
+
+#[test]
+fn a_read_whose_result_left_the_context_is_read_again_and_still_counts_for_an_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.txt"), dir.path().join("b.txt"));
+    std::fs::write(&a, "a\n").unwrap();
+    std::fs::write(&b, "b\n").unwrap();
+    let s = SessionState::for_tests(dir.path().into());
+    s.record_read(base::context::ReadRecord::whole(&a, "toolu_a"));
+    s.record_read(base::context::ReadRecord::whole(&b, "toolu_b"));
+    let held = |p: &std::path::Path| s.check_read_dedup_with_range(p, None, None);
+    assert_eq!(held(&a), Some(base::context::HeldRead::Whole));
+
+    s.release_reads(&["toolu_a".to_string()]);
+    assert_eq!(held(&a), None);
+    assert_eq!(s.check_read_staleness(&a), None);
+    assert_eq!(held(&b), Some(base::context::HeldRead::Whole));
+
+    s.record_read(base::context::ReadRecord {
+        cut_short: true,
+        ..base::context::ReadRecord::whole(&a, "toolu_a2")
+    });
+    assert_eq!(held(&a), Some(base::context::HeldRead::CutShort));
+}

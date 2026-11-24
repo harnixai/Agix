@@ -5,6 +5,7 @@ pub mod cached;
 pub mod compact;
 pub mod early_trim;
 pub mod grouping;
+pub mod held_reads;
 pub mod llm_summary;
 pub mod saved;
 pub mod time_based_mc;

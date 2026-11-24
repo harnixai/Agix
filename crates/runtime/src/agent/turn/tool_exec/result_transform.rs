@@ -3,6 +3,15 @@
 use super::super::tool_result::PendingToolImage;
 use super::ToolExecCtx;
 
+impl ToolExecCtx {
+    /// What this call read is not what the model is shown, so a repeat of the
+    /// read is not answered from the session's cache.
+    pub(in crate::agent::turn) fn release_read(&self) {
+        self.session_state
+            .release_reads(std::slice::from_ref(&self.tool_use_id));
+    }
+}
+
 /// Run the registered transformers over this call's outcome and the images
 /// it returned.
 ///
@@ -62,6 +71,9 @@ pub(in crate::agent::turn) fn apply_result_transformers(
     // has rewritten the text (a redaction, say), handing a program the
     // untouched structure would undo it.
     let untouched = (&draft.text, draft.is_error) == (&original.0, original.1);
+    if !untouched {
+        ctx.release_read();
+    }
     let structured = structured.filter(|_| untouched);
     let file_changes = withhold_diffs(ctx, &call, untouched, file_changes);
 

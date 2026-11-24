@@ -80,7 +80,7 @@ async fn a_write_leaves_a_pre_and_a_post_and_keeps_what_was_there() {
     std::fs::write(&target, "v1").unwrap();
     s.ctx
         .session_state
-        .record_read_with_range(&target, None, None);
+        .record_read(base::context::ReadRecord::whole(&target, "toolu_read"));
 
     execute_tool_with_telemetry(&s.ctx, "Write", write(&target, "v2"))
         .await
@@ -179,7 +179,7 @@ async fn a_write_whose_checkpoint_cannot_be_recorded_does_not_run() {
     std::fs::write(&target, "v1").unwrap();
     s.ctx
         .session_state
-        .record_read_with_range(&target, None, None);
+        .record_read(base::context::ReadRecord::whole(&target, "toolu_read"));
     let refused = execute_tool_with_telemetry(&s.ctx, "Write", write(&target, "v2"))
         .await
         .expect_err("refused");

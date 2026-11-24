@@ -954,3 +954,116 @@ async fn the_retry_after_a_size_refusal_drops_the_cache_edits_the_compaction_orp
         ]
     );
 }
+
+fn is_a_read(m: &base::interface::model::ModelMessage) -> bool {
+    use base::interface::model::ModelContentBlock;
+    m.content.iter().any(|b| match b {
+        ModelContentBlock::ToolUse { id, .. } => id.starts_with("toolu_read"),
+        ModelContentBlock::ToolResult { tool_use_id, .. } => tool_use_id.starts_with("toolu_read"),
+        _ => false,
+    })
+}
+
+/// `Read` `id` of a file in `dir` holding `content`, recorded with the
+/// session and answered in the transcript.
+fn read_into(
+    agent: &mut Agent,
+    dir: &std::path::Path,
+    id: &str,
+    content: &str,
+) -> std::path::PathBuf {
+    use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
+    let path = dir.join(format!("{id}.txt"));
+    std::fs::write(&path, content).unwrap();
+    agent.session.push_message(ModelMessage {
+        role: MessageRole::Assistant,
+        content: vec![ModelContentBlock::ToolUse {
+            id: id.into(),
+            name: "Read".into(),
+            input: serde_json::json!({"file_path": path.to_string_lossy()}),
+        }],
+    });
+    agent.session.push_message(ModelMessage {
+        role: MessageRole::User,
+        content: vec![ModelContentBlock::ToolResult {
+            tool_use_id: id.into(),
+            content: content.into(),
+            is_error: Some(false),
+        }],
+    });
+    agent
+        .session_state
+        .record_read(base::context::ReadRecord::whole(&path, id));
+    path
+}
+
+/// A compaction that drops the reads leaves a repeat of the long one to read
+/// the file again; the short one went back in whole and is still held.
+#[tokio::test]
+async fn a_compaction_forgets_the_reads_it_dropped_but_not_the_ones_it_reattached() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut agent = compacting_agent(
+        |m| !is_a_read(m) && !is_filler(m),
+        compaction::compact::CompactStrategy::Snip,
+    );
+    let long = read_into(
+        &mut agent,
+        dir.path(),
+        "toolu_read_long",
+        &"long line\n".repeat(2_000),
+    );
+    let short = read_into(&mut agent, dir.path(), "toolu_read_short", "short\n");
+    let held = |agent: &Agent, p: &std::path::Path| {
+        agent
+            .session_state
+            .check_read_dedup_with_range(p, None, None)
+    };
+    assert!(held(&agent, &long).is_some());
+    agent
+        .run_compaction(
+            1,
+            1,
+            crate::turn::CompactTrigger::Auto,
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("a compaction");
+    assert_eq!(held(&agent, &long), None);
+    assert_eq!(held(&agent, &short), Some(base::context::HeldRead::Whole));
+    assert_eq!(agent.session_state.check_read_staleness(&long), None);
+}
+
+/// The pass that keeps tool results inside their budget cuts a long read
+/// down to its head; the model no longer holds the file.
+#[tokio::test]
+async fn a_read_cut_down_to_the_tool_result_budget_is_read_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut agent, _rx, _tx) = Builder::new()
+        .scene(Arc::new(scene::code::spec(
+            scene::code::Interaction::Interactive,
+        )))
+        .model(Arc::new(DummyModel))
+        .settings(Arc::new({
+            let mut s = test_settings();
+            s.values.compaction.threshold_tokens = Some(10_000_000);
+            s
+        }))
+        .skip_warmup(true)
+        .build()
+        .expect("build should succeed");
+    let big = read_into(
+        &mut agent,
+        dir.path(),
+        "toolu_read_big",
+        &"x".repeat(60_000),
+    );
+    let small = read_into(&mut agent, dir.path(), "toolu_read_small", "small\n");
+    agent.fit_context(&CancellationToken::new()).await;
+    let held = |p: &std::path::Path| {
+        agent
+            .session_state
+            .check_read_dedup_with_range(p, None, None)
+    };
+    assert_eq!(held(&big), None);
+    assert!(held(&small).is_some());
+}

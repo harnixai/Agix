@@ -634,6 +634,52 @@ async fn a_compaction_with_nothing_to_drop_does_not_happen() -> anyhow::Result<(
     Ok(())
 }
 
+/// A file read before a compaction, too long to be re-attached whole after
+/// it, is read again in full when the model asks for it again: the summary
+/// took its text away, so the same `Read` is not answered with "unchanged".
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_read_before_a_compaction_is_read_in_full_after_it() -> anyhow::Result<()> {
+    const SUMMARY: &str = "You are compacting an AI coding agent's conversation";
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("reread-after-compact", &stub)
+        .settings(json!({ "compaction": { "keep_recent": 1 } }))
+        .start()
+        .await?;
+    let body: String = (0..300)
+        .map(|l| format!("line {l}: all values nominal\n"))
+        .collect();
+    let log = run.write_file("big.log", &body)?;
+    let read = |id: &str| Reply::calls(id, "Read", json!({ "file_path": log.to_string_lossy() }));
+    let session = run.session().await?;
+    stub.script([read("r1"), Reply::text("READ ONCE")]);
+    let first = run.turn(&session, "read big.log").await?;
+    let (_, shown, _) = result_of(&first, "Read").expect("the first Read");
+    assert!(shown.contains("line 299:"), "{shown}");
+    stub.script([Reply::text("NOTED")]);
+    run.turn(&session, "note that").await?;
+    stub.script_when(SUMMARY, [Reply::text("SUMMARY: big.log was read.")]);
+    let watcher = run.watch(&session, false).await?;
+    run.turn(&session, "/compact").await?;
+    let compactions = watcher.events("compact");
+    assert!(
+        compactions
+            .iter()
+            .any(|f| f["event"]["strategy"] == "FullCompact"),
+        "{compactions:?}"
+    );
+
+    stub.script([read("r2"), Reply::text("READ TWICE")]);
+    let again = run.turn(&session, "read big.log again").await?;
+    let (_, shown, _) = result_of(&again, "Read").expect("the second Read");
+    assert!(
+        shown.contains("line 299:") && !shown.contains("[file unchanged]"),
+        "{shown}"
+    );
+    drop(watcher);
+    run.finish().await;
+    Ok(())
+}
+
 /// The predictive pass blanks old tool results in the middle of a turn; the
 /// host is told, on the one frame that says why results vanished.
 #[tokio::test(flavor = "multi_thread")]

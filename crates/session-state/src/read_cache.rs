@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use base::context::{HeldRead, ReadRecord};
+
 /// 一次文件读取记录，包含读取时的 mtime。
 /// `FileEdit` / `FileWrite` 的 `validate_input` 用它做 staleness 检测。
 #[derive(Debug, Clone)]
@@ -16,10 +18,12 @@ pub(crate) struct FileReadEntry {
     /// 读取时的 limit（FileRead 的 limit 参数）。
     /// `None` 表示读至文件末尾。
     pub limit: Option<usize>,
-    /// Recorded by `Edit` / `Write` after they changed the file: the model
-    /// knows what is in it, but saw a diff rather than the text, so a later
-    /// `Read` still returns the content.
-    pub written: bool,
+    /// The `Read` call whose result holds the text in the model's context.
+    /// `None` once nothing there does: `Edit` / `Write` changed the file and
+    /// the model saw a diff, or that result was cleared or compacted away.
+    /// Only a held read answers a repeat from the cache.
+    pub held_by: Option<String>,
+    pub cut_short: bool,
 }
 
 #[derive(Debug, Default)]
@@ -29,14 +33,16 @@ pub(crate) struct ReadCache {
 }
 
 impl ReadCache {
-    pub(crate) fn record_read(&self, path: &Path, offset: Option<usize>, limit: Option<usize>) {
-        if self.remember_file(path, offset, limit, false) {
-            *self.last_path.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.to_path_buf());
+    pub(crate) fn record_read(&self, read: ReadRecord<'_>) {
+        let held_by = Some(read.tool_use_id.to_string());
+        if self.remember_file(read.path, read.offset, read.limit, held_by, read.cut_short) {
+            *self.last_path.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(read.path.to_path_buf());
         }
     }
 
     pub(crate) fn record_write(&self, path: &Path) {
-        self.remember_file(path, None, None, true);
+        self.remember_file(path, None, None, None, false);
     }
 
     fn remember_file(
@@ -44,7 +50,8 @@ impl ReadCache {
         path: &Path,
         offset: Option<usize>,
         limit: Option<usize>,
-        written: bool,
+        held_by: Option<String>,
+        cut_short: bool,
     ) -> bool {
         let Some(mtime) = std::fs::metadata(path).and_then(|m| m.modified()).ok() else {
             return false;
@@ -58,7 +65,8 @@ impl ReadCache {
                     mtime,
                     offset,
                     limit,
-                    written,
+                    held_by,
+                    cut_short,
                 },
             );
         true
@@ -88,22 +96,31 @@ impl ReadCache {
         path: &Path,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> bool {
-        let meta = match std::fs::metadata(path) {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        let current_mtime = match meta.modified() {
-            Ok(t) => t,
-            Err(_) => return false,
-        };
+    ) -> Option<HeldRead> {
+        let current_mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
         let cache = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        cache.get(path).is_some_and(|entry| {
-            !entry.written
-                && entry.mtime == current_mtime
-                && entry.offset == offset
-                && entry.limit == limit
+        let entry = cache.get(path)?;
+        let same = entry.held_by.is_some()
+            && entry.mtime == current_mtime
+            && entry.offset == offset
+            && entry.limit == limit;
+        same.then_some(match entry.cut_short {
+            true => HeldRead::CutShort,
+            false => HeldRead::Whole,
         })
+    }
+
+    pub(crate) fn release(&self, tool_use_ids: &[String]) {
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        for entry in entries.values_mut() {
+            if entry
+                .held_by
+                .as_ref()
+                .is_some_and(|by| tool_use_ids.contains(by))
+            {
+                entry.held_by = None;
+            }
+        }
     }
 
     pub(crate) fn forget(&self, paths: Option<&[PathBuf]>) {

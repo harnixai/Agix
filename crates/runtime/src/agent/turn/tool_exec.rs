@@ -677,6 +677,7 @@ async fn post_tool_use(
             .await;
         post_context(ctx, hooks::HookEvent::PostToolUse, &hook_result);
         if let Some(response) = hook_result.blocked() {
+            ctx.release_read();
             *outcome = Err(format!(
                 "Denied by PostToolUse hook: {}",
                 response.message.as_deref().unwrap_or("no reason given")
