@@ -75,8 +75,10 @@ JSON-RPC 与盘上的文件跟产品打交道，和下游二次开发的用法�
 | `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`） | Anthropic 兼容端点 |
 | `ANTHROPIC_MODEL`（`AGIX_LIVE_MODEL` 优先） | 会话的默认模型 |
 | `AGIX_LIVE_MODELS` | 逗号分隔的可用模型，给「每个子 agent 一个模型」的用例分配；缺省只有默认模型 |
-| `AGIX_LIVE_MAX_CALLS` | 一个用例最多调几次模型，默认 400；超出后代理直接回错误，不再花钱 |
+| `AGIX_LIVE_MAX_CALLS` | 一个用例最多调几次模型（两个代理各自计），默认 400，用例可用 `builder.max_calls(n)` 调低；超出后代理直接回错误，不再花钱 |
 | `AGIX_LIVE_TURN_TIMEOUT_SECS` | 一轮的上限，默认 900 |
+| `CLAUDE_BASE_URL`、`CLAUDE_API_KEY` | 第二个真实 provider（Anthropic）；两个都有，`run.second()` 才有第二个录制代理，跨 provider 的用例（`live_cross_provider.rs`）才跑，缺任何一个就打印原因后跳过 |
+| `AGIX_LIVE_SECOND_MODEL` | 第二个 provider 用的模型，缺省 `claude-sonnet-5-5`；Opus、Pro 名字一律报错 |
 | `AGIX_LIVE_ENV_FILE` | 换一个 `.env` |
 
 文件优先于进程环境，因为跑测试的那个 shell 很可能带着给别的工具用的 `ANTHROPIC_*`。
@@ -100,6 +102,7 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 |---|---|
 | `live_basics.rs` | Read / Write / Edit / Grep / Bash 改项目；`WebSearch` 是引擎的工具，经会话自己的模型让提供方搜索；`Monitor` 立即返回，日志里的 ERROR 在模型干活途中以通知送达、模型据此处理后用 `TaskStop` 停掉它，宿主边跑边看到那一行，并按 `task_progress` 帧的字节偏移拼出、再用 `session.taskOutput {from_byte}` 补齐的输出与整段输出一致；会话提示词与 resume；Plan 模式不改文件；模型用 `GoalCreate` 设目标后，自动轮一轮推进一步，直到它自己标完成；宿主用 `session.setGoal` 设的目标不需要再发消息就跑完；达不成的目标以 `blocked` 结束、之后不再开轮；带 `prompt_types` 开了提问的会话里，模型用 `AskUserQuestion` 问的问题经 `prompt` 帧到达宿主，宿主选的选项决定了写进文件的内容；`RunCode` 一个程序做完逐文件检索；另起进程的 `agixd`；宿主看着一个目标从设下到完成再到清除的每一帧 `goal_changed`，`Write` 调用的 `tool_args_delta` 拼起来就是它的 `input` |
 | `live_agents.rs` | 两个前台子 agent 各用自己类型指定的模型；前台子 agent 的询问在父会话这一轮里到达宿主（带这一轮的 `turn_id`），批准前它的任务是 `waiting`、批准后回到 `running`；后台子 agent 收宿主的消息、结束后通知父会话；`session.startAgent` 起的子 agent 交回满足 schema 的结构化输出，任务上的用量与代理记下的相等；类型 frontmatter 的 `allowed_tools: [Read]` 让子 agent 只看得到 Read、`max_turns: 2` 让它至多调两次模型；`relay` 子 agent 一层层往下交，到深度上限那一层不再有 `Agent`（`relay, relay, bottom`）；`agents.max_concurrent: 1` 下模型的第二个后台子 agent 被拒、宿主的 `session.startAgent` 得 `-32019`，空出来之后又能起 |
+| `live_cross_provider.rs` | 两个真实 provider（`ds` Flash、`cc` Sonnet，`model.order` 定先后）之间的子 Agent：类型 frontmatter 的 `provider:`、`session.startAgent` 的 `provider`、Agent 工具入参的 `provider` 各把子 Agent 送到 cc，cc 的代理看得到、ds 的代理看不到它的请求；任务 `detail.model` / `detail.provider` 与 `task_started` 帧、子会话的 `session.get` 一致；反过来父会话在 cc、子 Agent 去 ds，任务用量只含 ds 那一侧 |
 | `live_team.rs` | `TeamCreate` 两个阶段，后一阶段从团队记忆里拿前一阶段存的东西；同一阶段的两个成员经 `ListPeers` / `SendMessage` / `ReadMail` 传一个只有发送方读得到的词，宿主收到这一阶段 `started`、`completed` 两帧 `team_progress`，团队之后 `TeamList` 列得出、`TeamDelete` 后列不出 |
 | `live_extensions.rs` | 项目 skill；MCP server 的工具；`PreToolUse` hook 看到工具调用；`context: fork` 的 skill 在自己的上下文里干活，主对话只拿回答复；`allowed-tools` 的授权——项目 skill 写成列表的 `Bash(sh build.sh)` 不再询问，项目 skill 的整类 `Bash` 不算数，用户层 skill 的整类 `Bash` 算数；不写成列表的带空格授权（`Bash(sh build.sh)`）同样不询问；会话中途才建 `.agents/skills/` 写进去的 skill 下一轮就能用，会话中途加的 skill 下一轮发 `skills_changed` |
 | `live_multi_agent.rs` | 主控 + 三个不同模型的后台 worker，每个 worker 里多个后台任务；人为制造一个任务失败、一个 worker 故障，修复后重跑，主控汇总 |

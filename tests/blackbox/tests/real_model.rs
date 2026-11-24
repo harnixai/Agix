@@ -8,6 +8,7 @@ mod live_autonomy;
 mod live_basics;
 mod live_commands;
 mod live_context;
+mod live_cross_provider;
 mod live_extensions;
 mod live_forge;
 mod live_hooks;

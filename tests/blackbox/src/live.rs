@@ -52,7 +52,19 @@ pub struct LiveConfig {
     pub models: Vec<String>,
     pub max_calls: usize,
     pub turn_timeout: Duration,
+    /// A second real provider, for cases that cross providers.
+    pub second: Option<SecondEndpoint>,
 }
+
+/// Real Anthropic, reached with `CLAUDE_BASE_URL` / `CLAUDE_API_KEY`.
+#[derive(Clone)]
+pub struct SecondEndpoint {
+    pub base_url: String,
+    token: String,
+    pub model: String,
+}
+
+pub const DEFAULT_SECOND_MODEL: &str = "claude-sonnet-5-5";
 
 impl std::fmt::Debug for LiveConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -61,6 +73,7 @@ impl std::fmt::Debug for LiveConfig {
             .field("model", &self.model)
             .field("models", &self.models)
             .field("max_calls", &self.max_calls)
+            .field("second_model", &self.second.as_ref().map(|s| &s.model))
             .finish_non_exhaustive()
     }
 }
@@ -120,6 +133,21 @@ impl LiveConfig {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(DEFAULT_TURN_TIMEOUT_SECS),
         );
+        let second = match (get("CLAUDE_BASE_URL"), get("CLAUDE_API_KEY")) {
+            (Some(base_url), Some(token)) => {
+                let model =
+                    get("AGIX_LIVE_SECOND_MODEL").unwrap_or_else(|| DEFAULT_SECOND_MODEL.into());
+                if is_pro_model(&model) || model.to_ascii_lowercase().contains("opus") {
+                    anyhow::bail!("live tier never runs Opus or Pro, but `{model}` is configured");
+                }
+                Some(SecondEndpoint {
+                    base_url,
+                    token,
+                    model,
+                })
+            }
+            _ => None,
+        };
         Ok(Self {
             base_url,
             token,
@@ -127,7 +155,38 @@ impl LiveConfig {
             models,
             max_calls,
             turn_timeout,
+            second,
         })
+    }
+
+    /// The config the second provider's proxy runs on: its own endpoint,
+    /// credential and model, the same call budget and timeout.
+    pub fn second_config(&self) -> Option<LiveConfig> {
+        let second = self.second.as_ref()?;
+        Some(Self {
+            base_url: second.base_url.clone(),
+            token: second.token.clone(),
+            model: second.model.clone(),
+            models: vec![second.model.clone()],
+            max_calls: self.max_calls,
+            turn_timeout: self.turn_timeout,
+            second: None,
+        })
+    }
+
+    /// The second model's name, or `None` after printing why the case named
+    /// `case` is skipped.
+    pub fn second_model_or_skip(case: &str) -> anyhow::Result<Option<String>> {
+        match Self::load()?.second {
+            Some(second) => Ok(Some(second.model)),
+            None => {
+                eprintln!(
+                    "[live {case}] skipped: no second provider (CLAUDE_BASE_URL and \
+                     CLAUDE_API_KEY are not set)"
+                );
+                Ok(None)
+            }
+        }
     }
 
     /// A config for an endpoint the test runs itself — a
@@ -141,6 +200,7 @@ impl LiveConfig {
             models: vec![model.into()],
             max_calls: DEFAULT_MAX_CALLS,
             turn_timeout: Duration::from_secs(120),
+            second: None,
         }
     }
 
@@ -586,6 +646,7 @@ pub struct LiveRun {
     pub world: World,
     pub project: PathBuf,
     pub provider: LiveProvider,
+    second: Option<LiveProvider>,
     pub daemon: Daemon,
     pub client: DaemonRpcClient,
     name: String,
@@ -607,6 +668,7 @@ pub struct LiveRunBuilder {
     options: Option<OptionsFn>,
     before_start: Vec<BeforeStart>,
     trust: bool,
+    max_calls: Option<usize>,
 }
 
 impl LiveRunBuilder {
@@ -665,13 +727,23 @@ impl LiveRunBuilder {
         self
     }
 
+    /// A call budget for this case, in place of `AGIX_LIVE_MAX_CALLS`; it
+    /// applies to each provider's proxy separately.
+    pub fn max_calls(mut self, n: usize) -> Self {
+        self.max_calls = Some(n);
+        self
+    }
+
     /// The project is trusted, as its host would have trusted it: the runs
     /// are about what the engine does with a project's configuration.
     pub async fn start(self) -> anyhow::Result<LiveRun> {
-        let config = match self.config {
+        let mut config = match self.config {
             Some(config) => config,
             None => LiveConfig::load()?,
         };
+        if let Some(n) = self.max_calls {
+            config.max_calls = n;
+        }
         let world = World::new()?;
         let project = world.project(&self.name)?;
         let mut merged = LiveRun::base_settings();
@@ -702,6 +774,10 @@ impl LiveRunBuilder {
                 None => o,
             }
         });
+        let second = match config.second_config() {
+            Some(second) => Some(LiveProvider::start(second).await?),
+            None => None,
+        };
         let provider = LiveProvider::start(config).await?;
         let daemon = Daemon::start(
             &world,
@@ -720,6 +796,7 @@ impl LiveRunBuilder {
             world,
             project,
             provider,
+            second,
             daemon,
             client,
             name: self.name,
@@ -753,6 +830,7 @@ impl LiveRun {
             options: None,
             before_start: Vec::new(),
             trust: true,
+            max_calls: None,
         }
     }
 
@@ -813,6 +891,11 @@ impl LiveRun {
 
     pub fn config(&self) -> &LiveConfig {
         self.provider.config()
+    }
+
+    /// The recording proxy of the second provider, if one is configured.
+    pub fn second(&self) -> Option<&LiveProvider> {
+        self.second.as_ref()
     }
 
     pub fn write_file(&self, relative: &str, contents: &str) -> anyhow::Result<PathBuf> {
@@ -1043,7 +1126,17 @@ impl LiveRun {
             "[live {}] {calls} model calls, {input} input tokens, {output} output tokens",
             self.name
         );
-        self.provider.unanswered_prompts()
+        let mut unanswered = self.provider.unanswered_prompts();
+        if let Some(second) = &self.second {
+            let (calls, input, output) = second.spend();
+            eprintln!(
+                "[live {}] second provider: {calls} model calls, {input} input tokens, \
+                 {output} output tokens",
+                self.name
+            );
+            unanswered.extend(second.unanswered_prompts());
+        }
+        unanswered
     }
 }
 
