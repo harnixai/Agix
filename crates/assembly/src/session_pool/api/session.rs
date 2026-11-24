@@ -67,6 +67,12 @@ pub struct SessionDetail {
     /// and for a session whose scene is not known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<runtime::agent::ReasoningReport>,
+    /// A sidechain's model and provider, as its task in the parent session
+    /// last named them; absent when the parent is not in memory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
 }
 
 /// What one of the host's skill directories gives a session.

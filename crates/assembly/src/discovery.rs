@@ -280,6 +280,7 @@ pub fn capabilities() -> Vec<&'static str> {
     if cfg!(feature = "agents") {
         out.push("host_agents");
         out.push("subagent_provider");
+        out.push("task_model");
     }
     if cfg!(feature = "mcp-oauth-jwt") {
         out.push("mcp_oauth_jwt");

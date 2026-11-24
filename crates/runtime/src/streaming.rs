@@ -45,6 +45,8 @@ pub struct StreamResult {
     pub cancelled: bool,
     /// The provider never marked the reply's end ([`ModelEvent::Truncated`]).
     pub truncated: bool,
+    /// What the stream's [`ModelEvent::Served`] named.
+    pub served: Option<base::provider::Destination>,
 }
 
 impl StreamResult {
@@ -57,6 +59,7 @@ impl StreamResult {
             tool_calls: 0,
             cancelled: true,
             truncated: false,
+            served: None,
         }
     }
 }
@@ -145,6 +148,7 @@ struct StreamState<'a, F, G> {
     execute_tool: F,
     is_concurrency_safe: G,
     provenance: Option<String>,
+    served: Option<base::provider::Destination>,
     ended: Option<(String, Usage)>,
     has_tool_uses: bool,
     tool_calls: u32,
@@ -194,6 +198,7 @@ where
             execute_tool,
             is_concurrency_safe,
             provenance: provenance.map(str::to_owned),
+            served: None,
             ended: None,
             has_tool_uses: false,
             tool_calls: 0,
@@ -266,7 +271,10 @@ where
 
     async fn on_event(&mut self, event: ModelEvent) {
         match event {
-            ModelEvent::Served { provider } => self.provenance = Some(provider),
+            ModelEvent::Served { provider, model } => {
+                self.provenance = Some(provider.clone());
+                self.served = Some(base::provider::Destination { provider, model });
+            }
             ModelEvent::TextDelta { text } => {
                 close_thinking(
                     &mut self.pending_thinking,
@@ -566,6 +574,7 @@ where
             tool_calls: self.tool_calls,
             cancelled: self.cancelled,
             truncated: self.truncated,
+            served: self.served,
         })
     }
 }
@@ -957,12 +966,14 @@ mod tests {
     }
 
     /// A routed call's reasoning is stamped with the provider its own stream
-    /// names, not with anything the client says about itself.
+    /// names, not with anything the client says about itself, and the call's
+    /// result names it with the model it was asked for.
     #[tokio::test]
     async fn reasoning_is_stamped_with_the_provider_the_call_says_served_it() {
         let events: Vec<Result<ModelEvent, ModelError>> = vec![
             Ok(ModelEvent::Served {
                 provider: "ds".into(),
+                model: "ds-pro".into(),
             }),
             Ok(ModelEvent::ThinkingDelta {
                 text: "think".into(),
@@ -977,7 +988,7 @@ mod tests {
         let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
-        execute_stream(
+        let result = execute_stream(
             stream,
             &mut session,
             &tx,
@@ -991,6 +1002,13 @@ mod tests {
         )
         .await
         .expect("execute_stream should succeed");
+        assert_eq!(
+            result.served,
+            Some(base::provider::Destination {
+                provider: "ds".into(),
+                model: "ds-pro".into()
+            })
+        );
 
         let assistant = session
             .messages()

@@ -214,6 +214,7 @@ impl SessionPool {
             .ok()
         };
         let reasoning = self.reasoning_report(&info).await;
+        let (model, provider) = self.sidechain_destination(&info).await;
         Ok(api::SessionDetail {
             info,
             scene_active,
@@ -225,7 +226,32 @@ impl SessionPool {
             scripts: self.script_report(session_id).await,
             skill_dirs: self.skill_dir_report(session_id, core.as_deref()).await,
             reasoning,
+            model,
+            provider,
         })
+    }
+
+    async fn sidechain_destination(
+        &self,
+        info: &crate::session_pool::SessionInfo,
+    ) -> (Option<String>, Option<String>) {
+        let parent = match (&info.session_kind, &info.parent_session_id) {
+            (history::entry::SessionKind::Sidechain, Some(parent)) => parent,
+            _ => return (None, None),
+        };
+        let Some(state) = self.live_state(parent).await else {
+            return (None, None);
+        };
+        let Some(detail) = base::context::Session::task_infos(&*state)
+            .into_iter()
+            .rev()
+            .map(|task| task.detail)
+            .find(|detail| detail["agent_session_id"] == info.session_id.as_str())
+        else {
+            return (None, None);
+        };
+        let field = |name: &str| detail[name].as_str().map(str::to_string);
+        (field("model"), field("provider"))
     }
 
     /// `session.get`'s `reasoning`: the session's own settings over those of

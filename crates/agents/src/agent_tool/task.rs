@@ -41,12 +41,26 @@ pub(crate) fn open_inbox(task: Option<&base::context::RunningTask>, agent: &Agen
 
 pub(crate) const NOTIFIED_RESULT_BYTES: usize = 4 * 1024;
 
-/// What one of a sub-agent's events tells its task: a model call's cost, the
-/// structured output it handed in.
+pub(crate) fn place(detail: &mut Value, model: String, provider: Option<String>) {
+    detail["model"] = model.into();
+    if let Some(provider) = provider {
+        detail["provider"] = provider.into();
+    }
+}
+
+/// What one of a sub-agent's events tells its task: a model call's cost and
+/// where it went, the structured output it handed in.
 pub(crate) fn note_on_task(task: Option<&base::context::RunningTask>, event: &AgentEvent) {
     let Some(task) = task else { return };
     match event {
-        AgentEvent::StepEnd { usage, .. } => task.add_usage(*usage),
+        AgentEvent::StepEnd { usage, served, .. } => {
+            if let Some(to) = served {
+                let mut detail = task.detail.lock().unwrap_or_else(|e| e.into_inner());
+                place(&mut detail, to.model.clone(), Some(to.provider.clone()));
+            }
+            // Reports the task's update, the detail just placed with it.
+            task.add_usage(*usage);
+        }
         AgentEvent::TurnComplete {
             structured_output: Some(output),
             ..

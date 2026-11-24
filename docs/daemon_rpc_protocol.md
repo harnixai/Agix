@@ -849,6 +849,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `task_output_offsets` | 任务输出按字节偏移:`session.taskOutput` 接受 `from_byte`,应答带 `from_byte` / `next_byte` / `dropped` / `final`;`task_progress` 帧带 `from_byte` / `next_byte`;被停掉的任务等工作收尾才发 `task_finished`(§6.3、§7) |
 | `task_messages` | 有 `session.messageTask`,消息进运行中的后台子 Agent(§6.3) |
 | `host_agents` | 有 `session.startAgent`,宿主不经模型在会话下起子 Agent;子 Agent 任务带 `usage`、`structured_output`、`detail.tag`(§6.3) |
+| `task_model` | 子 Agent 与团队成员的任务 `detail` 带 `model` / `provider`(登记时是预测,每次调用后按实际改写,经 `task_updated` 推出);`step_end` 带 `served`;侧链的 `session.get` 带 `model` / `provider`(§6.3、§7) |
 | `subagent_provider` | 子 Agent 可以有自己的 provider:`session.startAgent`、`Agent` 工具与 agent 类型收 `provider`,有确定归属的模型 id 从它的归属起(§6.3) |
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
@@ -1725,6 +1726,10 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 `reasoning` 是这个会话下一次模型调用带的推理强度(`null` = 不发,交给端点)与思考开关,`*_source`
 为 `session`(会话自己那层设置的 `model.effort` / `model.thinking`,`options.settings` 或 `session.setModel` 设的)
 或 `settings`(会话绑定的项目与场景的,包括会话给了却被 managed 层压住的)。sidechain 与没记场景的老会话没有这个键。
+
+sidechain 另有 `model` / `provider`:取自父会话里 `detail.agent_session_id` 是它的那件任务(团队常驻成员取最近的一条消息的),
+与那件任务 `detail` 里的同值(见 `session.tasks`),口径同 `session.inspectContext` 的 `model` / `provider`:真正的模型 id
+与 provider id。父会话不在内存里、或它已经不记这件任务时没有这两个键。
 
 `scene` / `project_root` 与 `session.list` 的条目**同源**(都是那一条 `SessionInfo`),
 所以两个方法对同一个会话不会给出不同的答案。
@@ -2868,8 +2873,8 @@ Shell 命令与监视器,被 MCP server 转成任务的工具调用,以及安排
       "kind": "agent",      // agent | teammate | member | shell | monitor | cron | code | ext | mcp_task
       "status": "running",  // running | waiting | done | failed | stopped;定时任务总是 waiting;member 为 idle | running
       "started_ms": 0, "ended_ms": null,
-      "detail": { },        // agent:{agent_type,description,background,tool_use_id,agent_session_id,tag?,worktree?}
-                            // teammate / member:{team,member};shell:{command,tool_use_id}
+      "detail": { },        // agent:{agent_type,description,background,tool_use_id,agent_session_id,model,provider?,tag?,worktree?}
+                            // teammate:{team,member,agent_session_id,model,provider?};member:{team,member};shell:{command,tool_use_id}
                             // monitor:{command,description,persistent,tool_use_id}
                             // code:{description,background,tool_use_id}(RunCode 的程序,docs/ptc.md)
                             // ext:{description,command,background,tool_use_id}(RunExt 的命令,docs/runext.md;command 是带引号规整后的命令行,background 总是 false)
@@ -2882,6 +2887,11 @@ Shell 命令与监视器,被 MCP server 转成任务的工具调用,以及安排
       "error": "…" }        // 仅 failed
   ] }
 ```
+
+`model` / `provider` 是子 Agent(团队成员)的调用去的模型与 provider:`model` 是解析过的模型 id(档位名、`opus` /
+`sonnet` / `haiku`、`inherit` 都换成真正的 id),`provider` 是 provider id,会话没有路由时没有这个键。登记时
+(`task_started`)写的是预测:它的路由排在最前的那家,以及向那家要的模型;每次调用结束按这次实际接的那家与模型改写,
+变了的那次 `task_updated` 里就是新值(路由回退、`provider_switched`)。
 
 `agent_session_id` 是子 Agent 的侧链会话,任务登记时就定了,`task_started` 里已经有;
 侧链在子 Agent 建成后才落盘,之前 `session.history` 读它是 `SESSION_NOT_FOUND`。`tag`
@@ -4248,7 +4258,7 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 | `turn_start` | `{}` | 本轮开始,是本轮的第一帧 |
 | `step_start` | `{step}` | 本轮要调一次模型;`step` 从 0 计。同一个 `step` 再来一次,说明上一次调用失败、被恢复策略重发(§7 表下):这一步此前推过的 `text_delta` / `thinking_delta` 作废 |
 | `model_retry` | `{step,attempt,delay_ms,reason}` | 这一步的调用在流已经开始之后失败(断流、流中途空闲、流里的过载事件),等 `delay_ms` 毫秒后原样重发;随后是同一个 `step` 的 `step_start`。`attempt` 是这次调用的第几次重发,从 1 计;`reason` 是失败的说明文字。等待期间取消,这一轮照常以取消结束 |
-| `step_end` | `{step,stop_reason,tool_calls,usage,seq}` | 这次调用结束,它的回复和它要的工具结果都已落盘;`usage` 只是这一次调用的;`seq` 是此刻 transcript 的消息数(§5.6) |
+| `step_end` | `{step,stop_reason,tool_calls,usage,seq,served?}` | 这次调用结束,它的回复和它要的工具结果都已落盘;`usage` 只是这一次调用的;`seq` 是此刻 transcript 的消息数(§5.6);`served` 是 `{provider,model}`:这次调用实际接的 provider 与向它要的模型,没经路由的调用没有 |
 | `text_delta` | `{text}` | 模型输出增量 |
 | `thinking_delta` | `{text}` | 模型思考过程的增量,与正文分开,宿主可以折叠或不显示 |
 | `tool_use_start` | `{id,name}` | 模型开始写一次工具调用,参数还在流;同 `id` 的 `tool_use` 随后到达。界面可以先画出工具行 |
@@ -4265,7 +4275,7 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 | `subagent_progress` | `{agent_label,agent_session_id,agent_type,parent_turn,parent_tool_use_id,task_id,event}` | 子 Agent 事件镜像,`event` 是嵌套的本表结构(同样不带 `turn_id`;子 Agent 的事件本表里没有的,整帧不发);`parent_tool_use_id` 是父会话里发起它的那次 `Agent` 调用,不知道时为 `null`;`task_id` 是它在 `session.tasks` 里的任务 |
 | `team_progress` | `{team,team_id,stage,stage_index,stage_count,status,members,failed}` | 团队阶段生命周期 |
 | `skills_changed` | `{added,removed}` | 会话可用的 skill 与它上次看到的不同:skill 文件在两轮之间增删后,下一轮开始时发一次(同一份 skill 目录上的每个会话各发各的;宿主目录的改动只到列了它的会话)。缓存了 `commands.list` 的客户端该重取 |
-| `provider_switched` | `{from,to,reason,task}` | 这次模型调用去了与本会话上一次调用不同的 provider(`model.order`):`from` 配额用完、没有密钥、密钥被拒、连不上或重试用尽,`reason` 逐个说明排在 `to` 前面的为什么没接;或排在前面的又能用了。`task` 是调用的种类(`main`、`subagent`、`compact`、`memory`、`title`、`web_search`、`web_fetch`);子 Agent 的也报在父会话上 |
+| `provider_switched` | `{from,to,reason,task}` | 这次模型调用去了与本会话上一次调用不同的 provider(`model.order`):`from` 配额用完、没有密钥、密钥被拒、连不上或重试用尽,`reason` 逐个说明排在 `to` 前面的为什么没接;或排在前面的又能用了。`task` 是调用的种类(`main`、`subagent`、`compact`、`memory`、`title`、`web_search`、`web_fetch`);与父会话共用路由的子 Agent 的也报在父会话上,有自己路由的(`session.startAgent` / `Agent` 的 `provider`,§6.3)报在它自己的事件里,经 `subagent_progress` 转出;无论哪种,子 Agent 任务的 `detail.model` / `provider` 随下一帧 `task_updated` 更新 |
 | `notification` | `{message,status}` | 模型用 `PushNotification` 要用户回来看:宿主该把 `message` 以通知的形式送到用户面前(桌面通知、消息推送……)。`status` 是 `"proactive"`(模型主动发的)或 `null`;引擎自己的提醒(如 `permit_always` 的 `local` 没能写下)也走这一帧,`status` 为 `null`。同时触发 `Notification` hook,`reason` 即 `message` |
 | `compact` | `{strategy,messages_before,messages_after,tokens_before,tokens_after,dropped_rounds?,dropped_messages?,estimated_tokens_saved?,trim?}` | 上下文被压缩或修剪了(§7.1) |
 | `user_message_delivered` | `{message_id,content}` | 运行中送来的消息(`on_busy:"steer"`)已加进对话,模型下一次调用会读到 |
@@ -4274,7 +4284,7 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 | `turn_complete` | `{stop_reason,api_calls,tool_calls,seq,usage,usage_breakdown,last_call_usage,context?,structured_output?,message?,truncated?,persisted}` | 本轮结束,`persisted` 为 `true` 时 transcript 已落盘,`seq` 是此刻的消息数;最终响应随后到达 |
 | `error` | `{code,message,retryable,retry_after_ms,persisted}` | 本轮出错结束。只发给**发起这一轮之外**的订阅者 —— 发起者从 `run_turn` 的错误响应得知。`code`、`message`、`retryable`、`retry_after_ms` 与发起者收到的 `ENGINE_ERROR` 的 `data.kind`、`message`、`data.retryable`、`data.retry_after_ms` 相同(§9.1;字段叫 `code` 是因为帧里已经有 `kind:"error"`),`message` 同样是 "<kind>: <描述>";`persisted` 同 `turn_complete` 的(§7.2)。会话在这一轮中途被关闭或删除时 `code` 为 `session_closed`,引擎在一轮中途退出时为 `engine_stopped`,这两种 `persisted` 为 `false`(引擎没来得及报这一轮写到了哪里) |
 | `task_started` | `{task}` | 这个会话的一件任务开始了(`task` 同 `session.tasks` 的条目)。Shell 命令与监视器只在跑过 1 秒后才报,短命令不报;MCP 任务在 server 建任务时立即报;不属于任何一轮,`turn_id` 为 `null` |
-| `task_updated` | `{task}` | 一件报过开始、还没结束的任务变了:子 Agent 每调完一次模型(`task.usage`),有询问开始或结束等待(`task.status` 在 `waiting` 与 `running` 之间);`turn_id` 为 `null` |
+| `task_updated` | `{task}` | 一件报过开始、还没结束的任务变了:子 Agent 每调完一次模型(`task.usage`,以及这次调用实际去的 `detail.model` / `detail.provider`),有询问开始或结束等待(`task.status` 在 `waiting` 与 `running` 之间);`turn_id` 为 `null` |
 | `task_progress` | `{task_id,appended,skipped_bytes,from_byte,next_byte}` | 一件报过开始的 Shell 命令、监视器、`RunCode` 程序或 MCP 任务(状态行 `[<mcp_status>] <status_message>`,每次变化一行,不受每秒一帧限制)新打出来的输出,`appended` 是偏移 `from_byte..next_byte` 那段(偏移同 `session.taskOutput`)。每件任务每秒至多一帧,结束时在 `task_finished` 之前补最后一帧;一帧至多 8 KiB,多出的只发结尾,`skipped_bytes` 是跳过的字节数,恒等于本帧 `from_byte` 减上一帧 `next_byte`;漏帧或跳过的用 `session.taskOutput {from_byte}` 补;`turn_id` 为 `null` |
 | `task_finished` | `{task}` | 一件报过开始的任务结束了,`task.status` 是结局;此后没有它的 `task_progress`,输出不再长,`session.taskOutput` 的 `final` 为 `true`。被停掉的任务等工作收尾后才发(§6.3 `session.stopTask`);`turn_id` 为 `null` |
 | `goal_changed` | `{goal}` | 会话目标变了(`goal` 同 `session.goal`,清除后为 `null`);`turn_id` 为 `null` |

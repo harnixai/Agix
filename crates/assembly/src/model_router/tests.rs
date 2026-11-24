@@ -194,7 +194,7 @@ async fn a_provider_without_a_key_hands_its_calls_to_a_registered_protocol() {
         .await
         .expect("the second provider takes the call");
     match stream.next().await {
-        Some(Ok(ModelEvent::Served { provider })) => assert_eq!(provider, "mine"),
+        Some(Ok(ModelEvent::Served { provider, .. })) => assert_eq!(provider, "mine"),
         other => panic!("{other:?}"),
     }
     match stream.next().await {
@@ -361,7 +361,7 @@ async fn drain(
         .await?;
     let mut served = None;
     while let Some(item) = stream.next().await {
-        if let ModelEvent::Served { provider } = item? {
+        if let ModelEvent::Served { provider, .. } = item? {
             served = Some(provider);
         }
     }

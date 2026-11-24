@@ -381,6 +381,7 @@ impl Agent {
             tool_calls: stream_result.tool_calls,
             turn_id: self.current_turn_id.clone(),
             seq: self.session.messages().len() as u64,
+            served: stream_result.served.clone(),
         });
 
         // The only per-call figure: a cost can be computed from it, and it

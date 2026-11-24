@@ -214,7 +214,7 @@ async fn served_by(mut stream: ModelStream) -> Result<Option<String>, ModelError
     use futures::StreamExt;
     let mut served = None;
     while let Some(item) = stream.next().await {
-        if let ModelEvent::Served { provider } = item? {
+        if let ModelEvent::Served { provider, .. } = item? {
             served.get_or_insert(provider);
         }
     }

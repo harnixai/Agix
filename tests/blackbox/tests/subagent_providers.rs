@@ -2,7 +2,9 @@
 //! the host's `session.startAgent`, the model's `Agent` call and an agent
 //! type each pin it to `cc` with `provider`, a model id only `cc` lists
 //! takes it there without one, and a provider the pair does not define is
-//! refused. Without either it runs where its parent does.
+//! refused. Without either it runs where its parent does. Its task, and
+//! `session.get` on its sidechain, name the model and provider its calls
+//! went to, corrected by `task_updated` when a call falls back.
 
 use std::time::Duration;
 
@@ -94,6 +96,41 @@ async fn settled(
     }
 }
 
+/// What a sub-agent's task says its calls go to.
+fn placed(task: &Value) -> (String, String) {
+    let field = |name: &str| task["detail"][name].as_str().unwrap_or("").to_string();
+    (field("provider"), field("model"))
+}
+
+async fn sidechain_placed(client: &mut DaemonRpcClient, task: &Value) -> anyhow::Result<Value> {
+    let got = client
+        .call(
+            "session.get",
+            json!({"session_id": task["detail"]["agent_session_id"]}),
+        )
+        .await?;
+    let got = got.result.unwrap_or_default();
+    Ok(json!([got["provider"], got["model"]]))
+}
+
+/// The next `session.event` whose event satisfies `wanted`, skipping the rest.
+async fn event_where(
+    watcher: &mut DaemonRpcClient,
+    wanted: impl Fn(&Value) -> bool,
+) -> anyhow::Result<Value> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let frame = tokio::time::timeout(left, watcher.next_frame())
+            .await
+            .map_err(|_| anyhow::anyhow!("no such event within 20s"))??
+            .ok_or_else(|| anyhow::anyhow!("the connection closed"))?;
+        if frame["method"] == "session.event" && wanted(&frame["params"]["event"]) {
+            return Ok(frame["params"]["event"].clone());
+        }
+    }
+}
+
 /// Start a sub-agent with `extra` params, wait for it, and say where the
 /// calls carrying its prompt went.
 async fn run_started(
@@ -122,7 +159,7 @@ async fn a_host_started_agent_runs_on_the_provider_it_names() -> anyhow::Result<
         .session_with(json!({"options": {"auto_name": false}}))
         .await?;
     stub.script([Reply::text("ON-CC")]);
-    let (_, calls) = run_started(
+    let (task, calls) = run_started(
         &mut run,
         &stub,
         &session,
@@ -131,13 +168,19 @@ async fn a_host_started_agent_runs_on_the_provider_it_names() -> anyhow::Result<
     )
     .await?;
     assert_eq!(calls, [("cc".to_string(), "cc-special".to_string())]);
+    assert_eq!(placed(&task), calls[0], "{task}");
+    assert_eq!(
+        sidechain_placed(&mut run.client, &task).await?,
+        json!(["cc", "cc-special"])
+    );
 
     stub.script([Reply::text("ON-DS")]);
-    let (_, calls) = run_started(&mut run, &stub, &session, "CHILD-PLAIN", json!({})).await?;
+    let (task, calls) = run_started(&mut run, &stub, &session, "CHILD-PLAIN", json!({})).await?;
     assert_eq!(calls, [("ds".to_string(), "ds-balanced".to_string())]);
+    assert_eq!(placed(&task), calls[0], "{task}");
 
     stub.script([Reply::text("ON-CC-BY-MODEL")]);
-    let (_, calls) = run_started(
+    let (task, calls) = run_started(
         &mut run,
         &stub,
         &session,
@@ -146,6 +189,7 @@ async fn a_host_started_agent_runs_on_the_provider_it_names() -> anyhow::Result<
     )
     .await?;
     assert_eq!(calls, [("cc".to_string(), "cc-special".to_string())]);
+    assert_eq!(placed(&task), calls[0], "{task}");
     run.finish().await;
     Ok(())
 }
@@ -260,6 +304,82 @@ async fn the_models_agent_call_and_an_agent_type_pick_the_provider() -> anyhow::
     )
     .await?;
     assert_eq!(calls, [("ds".to_string(), "ds-balanced".to_string())]);
+
+    let listed = run
+        .client
+        .call("session.tasks", json!({ "session_id": session }))
+        .await?
+        .result
+        .unwrap_or_default();
+    let by_tool = listed["tasks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|t| t["detail"]["tool_use_id"] == "call-1")
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        placed(&by_tool),
+        ("cc".to_string(), "cc-sonnet".to_string()),
+        "{listed}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sub_agent_whose_provider_fails_is_reported_where_its_calls_went() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = ds_and_cc("subagent-fallback", &stub).start().await?;
+    let session = run
+        .session_with(json!({"options": {"auto_name": false}}))
+        .await?;
+    let mut watcher = run.daemon.connect().await?;
+    watcher.session_subscribe(&session).await?;
+    stub.inject_failures_when(
+        "\"model\":\"ds-balanced\"",
+        10,
+        Reply::status(
+            501,
+            r#"{"type":"error","error":{"type":"server_error","message":"down"}}"#,
+        ),
+    );
+    stub.script([Reply::text("SERVED-BY-CC")]);
+
+    let started = start_agent(
+        &mut run.client,
+        json!({"session_id": session, "prompt": "CHILD-FALLS-BACK review it"}),
+    )
+    .await?;
+    let begun = event_where(&mut watcher, |e| e["kind"] == "task_started").await?;
+    assert_eq!(begun["task"]["task_id"], started["task_id"], "{begun}");
+    assert_eq!(
+        placed(&begun["task"]),
+        ("ds".to_string(), "ds-balanced".to_string()),
+        "the prediction: {begun}"
+    );
+    let moved = event_where(&mut watcher, |e| {
+        e["kind"] == "task_updated" && e["task"]["detail"]["provider"] == "cc"
+    })
+    .await?;
+    assert_eq!(
+        placed(&moved["task"]),
+        ("cc".to_string(), "cc-sonnet".to_string()),
+        "{moved}"
+    );
+
+    let task_id = started["task_id"].as_str().unwrap_or_default();
+    let task = settled(&mut run.client, &session, task_id).await?;
+    let went: Vec<_> = calls_carrying(&stub, "CHILD-FALLS-BACK")
+        .into_iter()
+        .filter(|(provider, _)| provider == "cc")
+        .collect();
+    assert_eq!(went, [("cc".to_string(), "cc-sonnet".to_string())]);
+    assert_eq!(placed(&task), went[0], "{task}");
+    assert_eq!(
+        sidechain_placed(&mut run.client, &task).await?,
+        json!(["cc", "cc-sonnet"])
+    );
     run.finish().await;
     Ok(())
 }

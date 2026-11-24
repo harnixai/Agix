@@ -7854,6 +7854,13 @@
           "minimum": 0,
           "type": "integer"
         },
+        "model": {
+          "description": "A sidechain's model and provider, as its task in the parent session\nlast named them; absent when the parent is not in memory.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": [
             "string",
@@ -7873,6 +7880,12 @@
           ]
         },
         "project_root": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
           "type": [
             "string",
             "null"

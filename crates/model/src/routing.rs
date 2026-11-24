@@ -460,11 +460,19 @@ impl Model for RoutedModel {
             };
             let id = provider.config.id.clone();
             let tap = params.usage_tap.for_attempt();
-            match self.send(&provider, this, &params, &tap, &cancel).await {
+            let model = route.model_at(&provider, &params.model, self.tier);
+            match self
+                .send(&provider, this, &params, &model, &tap, &cancel)
+                .await
+            {
                 Ok(stream) => {
                     health.recovered(&id);
                     route.served(&id, &self.task, || switch_reason(&passed_over, &id));
-                    let named = futures::stream::iter([Ok(ModelEvent::Served { provider: id })]);
+                    let served = ModelEvent::Served {
+                        provider: id,
+                        model,
+                    };
+                    let named = futures::stream::iter([Ok(served)]);
                     let stream: ModelStream = Box::new(futures::StreamExt::chain(named, stream));
                     return Ok(tap.metered(stream, route.set.quota_meter(&provider)));
                 }
@@ -510,18 +518,18 @@ impl RoutedModel {
         (ready, passed_over)
     }
 
-    /// `request` to `provider`, asking for its model of the call's tier.
     async fn send(
         &self,
         provider: &RoutedProvider,
         request: Request,
         params: &StreamParams,
+        model: &str,
         tap: &UsageTap,
         cancel: &CancellationToken,
     ) -> Result<ModelStream, ModelError> {
         let mut params = params.clone();
         params.usage_tap = tap.clone();
-        params.model = self.route.model_at(provider, &params.model, self.tier);
+        params.model = model.to_string();
         if let Some(cap) = provider
             .config
             .model_spec(&params.model)

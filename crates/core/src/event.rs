@@ -285,6 +285,9 @@ pub enum AgentEvent {
         /// disk below it.
         #[serde(default)]
         seq: u64,
+        /// Where a routed call went; `None` when nothing routed it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        served: Option<crate::provider::Destination>,
     },
 
     /// A turn has completed.

@@ -471,11 +471,9 @@ impl ModelContentBlock {
     }
 }
 
-/// Stream of model events.
 pub type ModelStream =
     Box<dyn futures::Stream<Item = Result<ModelEvent, ModelError>> + Send + Unpin>;
 
-/// Events emitted by the model during streaming.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelEvent {
@@ -483,6 +481,8 @@ pub enum ModelEvent {
     /// was routed; the call's reasoning is stamped with it.
     Served {
         provider: String,
+        #[serde(default)]
+        model: String,
     },
     TextDelta {
         text: String,

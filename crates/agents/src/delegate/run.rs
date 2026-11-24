@@ -91,13 +91,16 @@ impl Delegator {
             .clone()
             .filter(|id| !id.is_empty())
             .unwrap_or_else(bg_task_id);
-        let detail = serde_json::json!({
-            "agent_type": spec.agent_type,
-            "description": description,
-            "background": false,
-            "tool_use_id": tool_use_id,
-            "agent_session_id": spec.session_id,
-        });
+        let detail = self.placed(
+            &spec,
+            serde_json::json!({
+                "agent_type": spec.agent_type,
+                "description": description,
+                "background": false,
+                "tool_use_id": tool_use_id,
+                "agent_session_id": spec.session_id,
+            }),
+        );
         let lease = self.lease(task_id, TaskType::Agent, &stop, detail);
         let task = lease.task().clone();
         let shot = OneShot {
@@ -141,12 +144,15 @@ impl Delegator {
                 return Err(e);
             }
         };
-        let mut detail = serde_json::json!({
-            "agent_type": spec.agent_type,
-            "description": description,
-            "background": true,
-            "agent_session_id": spec.session_id,
-        });
+        let mut detail = self.placed(
+            &spec,
+            serde_json::json!({
+                "agent_type": spec.agent_type,
+                "description": description,
+                "background": true,
+                "agent_session_id": spec.session_id,
+            }),
+        );
         if let Some(call) = &spec.called_from {
             detail["tool_use_id"] = call.tool_use_id.clone().into();
         }
@@ -209,11 +215,14 @@ impl Delegator {
             Err(e) => return Err(e),
         };
         let seat = spec.seat.as_ref();
-        let detail = serde_json::json!({
-            "team": seat.map(|s| s.team.clone()),
-            "member": seat.map(|s| s.member.clone()),
-            "agent_session_id": spec.session_id,
-        });
+        let detail = self.placed(
+            &spec,
+            serde_json::json!({
+                "team": seat.map(|s| s.team.clone()),
+                "member": seat.map(|s| s.member.clone()),
+                "agent_session_id": spec.session_id,
+            }),
+        );
         let lease = self.lease(bg_task_id(), TaskType::Teammate, &stop, detail);
         let task = lease.task().clone();
         let shot = OneShot {

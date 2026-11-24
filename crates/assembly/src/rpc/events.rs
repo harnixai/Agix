@@ -36,6 +36,8 @@ pub enum SessionEventPayload {
         tool_calls: u32,
         seq: u64,
         usage: Usage,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        served: Option<base::provider::Destination>,
     },
     TextDelta {
         text: String,
@@ -535,12 +537,14 @@ impl SessionEventPayload {
                 tool_calls,
                 turn_id: _,
                 seq,
+                served,
             } => Self::StepEnd {
                 step: *step,
                 stop_reason: stop_reason.clone(),
                 tool_calls: *tool_calls,
                 seq: *seq,
                 usage: *usage,
+                served: served.clone(),
             },
             AgentEvent::TurnComplete {
                 stop_reason,

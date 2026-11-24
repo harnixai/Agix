@@ -65,6 +65,25 @@ impl Delegator {
         }
     }
 
+    /// `detail` with where `spec`'s calls are expected to go: the head of its
+    /// route and the model asked there. The first call may correct it.
+    pub(crate) fn placed(&self, spec: &Spec, mut detail: Value) -> Value {
+        let def = spec
+            .agent_type
+            .as_deref()
+            .and_then(|t| self.agent_type_def(t));
+        let named = spec.model.clone().or_else(|| def.and_then(|d| d.model));
+        let model = self.delegate_model(spec.route.as_ref(), named.as_deref());
+        match self.router(spec.route.as_ref()) {
+            Some(router) => {
+                let to = router.destination(SUBAGENT, &model);
+                place(&mut detail, to.model, Some(to.provider));
+            }
+            None => place(&mut detail, model, None),
+        }
+        detail
+    }
+
     pub(crate) fn agent_type_def(&self, name: &str) -> Option<AgentTypeDefinition> {
         self.catalog.get(name)
     }

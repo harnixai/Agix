@@ -70,10 +70,14 @@ impl PersistentMessage {
 pub(crate) struct MemberInbox {
     tx: tokio::sync::mpsc::UnboundedSender<PersistentMessage>,
     unfinished: Arc<Mutex<Vec<Arc<RunningTask>>>>,
+    /// Each message's task starts with it.
+    detail: serde_json::Value,
 }
 
 impl MemberInbox {
-    fn open() -> (
+    fn open(
+        detail: serde_json::Value,
+    ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<PersistentMessage>,
     ) {
@@ -81,6 +85,7 @@ impl MemberInbox {
         let inbox = Self {
             tx,
             unfinished: Default::default(),
+            detail,
         };
         (inbox, rx)
     }
@@ -100,7 +105,6 @@ impl MemberInbox {
     fn deliver(
         &self,
         delegator: &Delegator,
-        seat: &TeamSeat,
         member_cancel: &CancellationToken,
         prompt: String,
         spend: Option<Arc<base::interface::budget_policy::SpendNode>>,
@@ -110,7 +114,7 @@ impl MemberInbox {
             bg_task_id(),
             TaskType::Teammate,
             member_cancel.child_token(),
-            serde_json::json!({"team": seat.team, "member": seat.member}),
+            self.detail.clone(),
         )
         .notifying(|task| task_notification(task, &DelegateEnd::Cancelled));
         let task_id = lease.task().task_id.clone();
@@ -194,7 +198,7 @@ impl Delegator {
         let key = (seat.team.clone(), seat.member.clone());
         self.reclaim_idle_members(Some(&key));
 
-        if let Some(started) = self.message_live_member(&key, &seat, &prompt, spec.spend.clone()) {
+        if let Some(started) = self.message_live_member(&key, &prompt, spec.spend.clone()) {
             return Ok(started);
         }
         let live = &self.members.live;
@@ -242,7 +246,6 @@ impl Delegator {
     fn message_live_member(
         &self,
         key: &(String, String),
-        seat: &TeamSeat,
         prompt: &str,
         spend: Option<Arc<base::interface::budget_policy::SpendNode>>,
     ) -> Option<Delegated> {
@@ -260,7 +263,7 @@ impl Delegator {
                     m.idle_seq.clone(),
                 )
             })?;
-        let Some(task_id) = inbox.deliver(self, seat, &cancel, prompt.to_string(), spend) else {
+        let Some(task_id) = inbox.deliver(self, &cancel, prompt.to_string(), spend) else {
             // Its loop has ended since; the caller spawns afresh under the same key.
             live.write().unwrap_or_else(|e| e.into_inner()).remove(key);
             return None;
@@ -310,7 +313,7 @@ impl Delegator {
         let prompt = self.opening_prompt(delegate.def.as_ref(), prompt, &start_context);
         let id = format!("member-{}", bg_task_id());
         tracing::debug!(team = %seat.team, member = %seat.member, %id, "spawning new persistent team member");
-        let (inbox, messages) = MemberInbox::open();
+        let (inbox, messages) = MemberInbox::open(self.member_detail(&seat, &spec));
         let cancel = self.env.parent.ended.child_token();
         let idle_since = Arc::new(AtomicI64::new(i64::MAX));
         let idle_seq = Arc::new(AtomicU64::new(u64::MAX));
@@ -327,7 +330,7 @@ impl Delegator {
             },
         );
         let task_id = inbox
-            .deliver(self, &seat, &cancel, prompt, spec.spend.clone())
+            .deliver(self, &cancel, prompt, spec.spend.clone())
             .ok_or_else(|| DelegateError::Build("the new member's inbox closed".into()))?;
         tokio::spawn(member_loop(MemberLoop {
             id,
@@ -349,6 +352,17 @@ impl Delegator {
             task_id,
             spec.session_id,
         )))
+    }
+
+    fn member_detail(&self, seat: &TeamSeat, spec: &Spec) -> serde_json::Value {
+        self.placed(
+            spec,
+            serde_json::json!({
+                "team": seat.team,
+                "member": seat.member,
+                "agent_session_id": spec.session_id,
+            }),
+        )
     }
 
     /// Stop a member, idle or mid-turn, and forget it, so a later message
