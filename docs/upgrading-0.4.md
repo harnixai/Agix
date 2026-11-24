@@ -323,3 +323,16 @@
 
 嵌入:`base::interface::delegate::Delegator` 多一个有缺省实现的 `check_agent_type(name) -> Result<(), DelegateError>`,
 包装别的 `Delegator` 的要转发它。
+
+### 发给 Anthropic 官方 API 的请求
+
+- 只做搜索的那次调用(`WebSearch`)不再对 Opus 5.5 起、Sonnet 5.5 起、Fable / Mythos 5.1 起发强制 `tool_choice`
+  (这些型号回 400),改发 `auto` 并在 system 里点名 `web_search`;更早的 Claude 型号与非 Claude 模型照旧强制。
+  模型没搜就作答时,`WebSearch` 返回工具错误 "the provider answered without searching the web",不再把那段话当成结果。
+- `WebSearch` 的结果不再以 "REMINDER: You MUST include the sources…" 结尾;列出来源的要求只在工具说明里。
+
+### 压缩或修剪之后再读文件
+
+压缩、按时间或缓存过期清工具结果、工具结果预算、提前修剪拿走或截短了某次 `Read` 的结果之后,再 `Read` 同一文件返回内容,
+不再答 "[file unchanged]"。压缩后原样放回的最近文件(5000 字符以内)仍按"未变"作答。`Read` 自己没给全(默认行数先到、
+有行被截长)时,重复同样的读仍答"未变",但写明上次没显示全,要用 `offset` / `limit` 读剩下的。
