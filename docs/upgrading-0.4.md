@@ -318,8 +318,8 @@
 - `session.startAgent` 的 `subagent_type`:`INVALID_PARAMS`,不登记任务。
 - 模型的 `Agent` 工具(含给团队常驻成员发消息)的 `subagent_type`、`TeamCreate` 成员的 `agent_type`:这次工具调用的错误,
   模型可以换个名字重试;`TeamCreate` 在任何成员起来之前就失败。`context: fork` 的 skill 的 `agent` 同样。
-- 不写类型(或 `null`)仍是通用子 Agent;`general-purpose` 是内置类型,照常可写。名字区分大小写:Claude Code 的
-  `Explore` / `Plan` 在这里是 `explore` / `plan`。
+- 不写类型(或 `null`)仍是通用子 Agent;`general-purpose` 是内置类型,照常可写。名字先按原样找;找不到时,
+  忽略大小写只对上一个类型的就用它(Claude Code 的 `Explore` / `Plan` 落到 `explore` / `plan`),对上多个仍报错。
 
 嵌入:`base::interface::delegate::Delegator` 多一个有缺省实现的 `check_agent_type(name) -> Result<(), DelegateError>`,
 包装别的 `Delegator` 的要转发它。

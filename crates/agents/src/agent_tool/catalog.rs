@@ -418,7 +418,37 @@ impl AgentCatalog {
 
     /// One type, cloned out from behind the lock: the watcher may swap the
     /// map at any moment, and a borrow into the old one would dangle.
+    /// The type named `name`; when no name matches exactly, the one name that
+    /// matches ignoring case (models trained on other harnesses write
+    /// `Explore` for `explore`). Two case-insensitive matches name none.
     pub(crate) fn get(&self, name: &str) -> Option<AgentTypeDefinition> {
+        self.get_exact(name).or_else(|| {
+            let mut folded = self
+                .names()
+                .into_iter()
+                .filter(|n| n.eq_ignore_ascii_case(name));
+            match (folded.next(), folded.next()) {
+                (Some(only), None) => self.get_exact(&only),
+                _ => None,
+            }
+        })
+    }
+
+    fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .types
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .keys()
+            .chain(self.session_types.keys())
+            .cloned()
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    fn get_exact(&self, name: &str) -> Option<AgentTypeDefinition> {
         let shared = self
             .types
             .read()
@@ -434,16 +464,7 @@ impl AgentCatalog {
 
     /// Why `name` cannot be started here, with the names that can.
     pub(crate) fn unknown(&self, name: &str) -> String {
-        let mut names: Vec<String> = self
-            .types
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .keys()
-            .chain(self.session_types.keys())
-            .cloned()
-            .collect();
-        names.sort();
-        names.dedup();
+        let names = self.names();
         let shown = names
             .iter()
             .take(LISTED_TYPES)

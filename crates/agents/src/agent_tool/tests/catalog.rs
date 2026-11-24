@@ -536,3 +536,39 @@ fn a_session_plugins_agent_types_sit_between_the_shared_catalog_and_the_disk() {
     assert_eq!(prompt("new").as_deref(), Some("plugin"));
     assert!(base::tool::Tool::description(&tool).contains("new"));
 }
+
+#[test]
+fn a_type_name_in_another_case_finds_the_one_type_it_can_mean() {
+    let def = |name: &str, prompt: &str| AgentTypeDefinition {
+        name: name.into(),
+        source: AgentTypeSource::User,
+        system_prompt: prompt.into(),
+        ..Default::default()
+    };
+    let shared: std::collections::HashMap<String, AgentTypeDefinition> = [
+        def("explore", "lower"),
+        def("Reviewer", "upper"),
+        def("reviewer", "lower"),
+        def("twin", "a"),
+        def("TWIN", "b"),
+    ]
+    .into_iter()
+    .map(|d| (d.name.clone(), d))
+    .collect();
+    let tools = Arc::new(InMemoryToolRegistry::new());
+    let tool = TestParent {
+        config: Arc::new(EngineConfig::defaults_for("test-model")),
+        tools: tools.clone(),
+        template: tools,
+        shared_types: Some(Arc::new(std::sync::RwLock::new(Arc::new(shared)))),
+        ..TestParent::new(Arc::new(DummyModel))
+    }
+    .agent_tool();
+
+    let prompt = |name: &str| tool.delegator.agent_type_def(name).map(|d| d.system_prompt);
+    assert_eq!(prompt("Explore").as_deref(), Some("lower"));
+    assert_eq!(prompt("Reviewer").as_deref(), Some("upper"));
+    assert_eq!(prompt("REVIEWER"), None, "two types it could mean");
+    assert_eq!(prompt("Twin"), None, "two types it could mean");
+    assert_eq!(prompt("nowhere"), None);
+}
