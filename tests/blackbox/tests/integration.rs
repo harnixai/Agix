@@ -42,6 +42,7 @@ mod plugin_functions;
 mod plugin_session_allow;
 mod project_state;
 mod project_trust_untrusted;
+mod prompt_cache_wire;
 mod provider_fallback;
 mod provider_tiers;
 mod sandbox_chain;

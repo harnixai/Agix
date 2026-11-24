@@ -133,11 +133,8 @@ fn system_blocks(prompt_blocks: Vec<PromptBlock>) -> Vec<SystemBlock> {
     prompt_blocks
         .into_iter()
         .map(|pb| match pb.cache_strategy {
-            Some(CacheStrategy::Ephemeral) => {
+            Some(CacheStrategy::Ephemeral | CacheStrategy::Global) => {
                 SystemBlock::text_cached(pb.content, CacheControl::ephemeral_1h())
-            }
-            Some(CacheStrategy::Global) => {
-                SystemBlock::text_cached(pb.content, CacheControl::ephemeral_1h_global())
             }
             None => SystemBlock::text(pb.content),
         })
@@ -1589,5 +1586,81 @@ mod call_failure_tests {
             .await
             .expect("the cancel was not honoured");
         assert!(matches!(answer, Err(e) if e.kind == ModelErrorKind::Cancelled));
+    }
+}
+
+#[cfg(test)]
+mod cache_control_wire_tests {
+    use super::*;
+    use crate::mock::MockAnthropicClient;
+    use crate::stream::StreamEvent;
+    use serde_json::{json, Value};
+
+    fn collect_cache_controls(v: &Value, out: &mut Vec<Value>) {
+        match v {
+            Value::Object(map) => {
+                for (k, child) in map {
+                    if k == "cache_control" {
+                        out.push(child.clone());
+                    } else {
+                        collect_cache_controls(child, out);
+                    }
+                }
+            }
+            Value::Array(items) => items.iter().for_each(|i| collect_cache_controls(i, out)),
+            _ => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn global_strategy_goes_out_as_plain_one_hour_ephemeral() {
+        let client = Arc::new(MockAnthropicClient::new());
+        client.push_turn(vec![StreamEvent::MessageStop]);
+        let model = AnthropicModel::new(client.clone());
+
+        let mut global = PromptBlock::system_cached("static prefix");
+        global.cache_strategy = Some(CacheStrategy::Global);
+        let blocks = vec![
+            global,
+            PromptBlock::system_cached("session prefix"),
+            PromptBlock::system("volatile"),
+        ];
+        let tools = vec![ToolDef::new("Bash", "run", json!({"type": "object"}))];
+        let messages = vec![ModelMessage {
+            role: MessageRole::User,
+            content: vec![ModelContentBlock::Text { text: "hi".into() }],
+        }];
+        let params = StreamParams {
+            model: "m".into(),
+            max_tokens: 100,
+            thinking_mode: ThinkingMode::Off,
+            effort: None,
+            cache_edits: Vec::new(),
+            origin: None,
+            input_map: None,
+            provider_search: None,
+            usage_tap: Default::default(),
+        };
+        let _ = model
+            .stream(blocks, tools, messages, params, CancellationToken::new())
+            .await
+            .expect("the request goes out");
+
+        let body = serde_json::to_value(client.nth_request(0).expect("one request")).unwrap();
+        let mut controls = Vec::new();
+        collect_cache_controls(&body, &mut controls);
+        assert!(
+            controls.len() >= 3,
+            "system, tools and messages carry breakpoints: {controls:?}"
+        );
+        for cc in &controls {
+            let mut keys: Vec<&str> = cc.as_object().unwrap().keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            assert_eq!(keys, ["ttl", "type"], "{cc}");
+        }
+        assert_eq!(
+            body["system"][0]["cache_control"],
+            json!({"type": "ephemeral", "ttl": "1h"})
+        );
     }
 }

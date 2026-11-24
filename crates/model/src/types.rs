@@ -445,8 +445,6 @@ pub enum CacheControl {
     Ephemeral {
         #[serde(skip_serializing_if = "Option::is_none")]
         ttl: Option<CacheTtl>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        scope: Option<CacheScope>,
     },
 }
 
@@ -454,19 +452,11 @@ impl CacheControl {
     pub fn ephemeral_5m() -> Self {
         Self::Ephemeral {
             ttl: Some(CacheTtl::FiveMin),
-            scope: None,
         }
     }
     pub fn ephemeral_1h() -> Self {
         Self::Ephemeral {
             ttl: Some(CacheTtl::OneHour),
-            scope: None,
-        }
-    }
-    pub fn ephemeral_1h_global() -> Self {
-        Self::Ephemeral {
-            ttl: Some(CacheTtl::OneHour),
-            scope: Some(CacheScope::Global),
         }
     }
 
@@ -489,12 +479,6 @@ pub enum CacheTtl {
     FiveMin,
     #[serde(rename = "1h")]
     OneHour,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-pub enum CacheScope {
-    #[serde(rename = "global")]
-    Global,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -557,10 +541,6 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&cc1).unwrap(),
             json!({"type": "ephemeral", "ttl": "1h"})
-        );
-        assert_eq!(
-            serde_json::to_value(CacheControl::ephemeral_1h_global()).unwrap(),
-            json!({"type": "ephemeral", "ttl": "1h", "scope": "global"})
         );
     }
 
