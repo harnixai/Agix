@@ -65,7 +65,7 @@ impl Model for AnthropicModel {
         params: StreamParams,
         cancel: CancellationToken,
     ) -> Result<ModelStream, ModelError> {
-        let system = system_blocks(prompt_blocks);
+        let mut system = system_blocks(prompt_blocks);
         let tap = params.usage_tap.clone();
 
         let mut message_params: Vec<MessageParam> = messages
@@ -89,12 +89,8 @@ impl Model for AnthropicModel {
 
         // A call that is only a search has nothing else to do, so it is told
         // to search rather than left to decide whether to.
-        let tool_choice =
-            (params.provider_search.is_some() && anthropic_tools.is_empty()).then(|| {
-                crate::types::ToolChoice::Tool {
-                    name: PROVIDER_SEARCH_TOOL.into(),
-                }
-            });
+        let tool_choice = (params.provider_search.is_some() && anthropic_tools.is_empty())
+            .then(|| told_to_search(&params.model, &mut system));
         let mut req = MessagesRequest {
             model: params.model,
             max_tokens: params.max_tokens,
@@ -183,6 +179,23 @@ fn provider_search_builtins(
         })
         .into_iter()
         .collect()
+}
+
+/// The search is forced where `model` takes a forced tool. Where it refuses
+/// one, the choice is left to the model and the prompt names the tool.
+fn told_to_search(model: &str, system: &mut Vec<SystemBlock>) -> crate::types::ToolChoice {
+    if crate::thinking::forced_tool_choice_taken(model) {
+        return crate::types::ToolChoice::Tool {
+            name: PROVIDER_SEARCH_TOOL.into(),
+        };
+    }
+    system.push(SystemBlock::text(format!(
+        "Search the web with the {PROVIDER_SEARCH_TOOL} tool before you answer. \
+         Do not answer from what you already know."
+    )));
+    crate::types::ToolChoice::Auto {
+        disable_parallel_tool_use: None,
+    }
 }
 
 fn wire_tools(tools: Vec<ToolDef>) -> Vec<crate::types::ToolDef> {
@@ -1313,6 +1326,14 @@ mod provider_search_tests {
         tools: Vec<ToolDef>,
         provider_search: Option<base::interface::model::ProviderSearch>,
     ) -> MessagesRequest {
+        sent_to("m", tools, provider_search).await
+    }
+
+    async fn sent_to(
+        model_name: &str,
+        tools: Vec<ToolDef>,
+        provider_search: Option<base::interface::model::ProviderSearch>,
+    ) -> MessagesRequest {
         let client = Arc::new(MockAnthropicClient::new());
         client.push_turn(vec![StreamEvent::MessageStop]);
         let model = AnthropicModel::new(client.clone());
@@ -1321,7 +1342,10 @@ mod provider_search_tests {
                 vec![],
                 tools,
                 vec![],
-                params(provider_search),
+                StreamParams {
+                    model: model_name.into(),
+                    ..params(provider_search)
+                },
                 CancellationToken::new(),
             )
             .await
@@ -1362,6 +1386,44 @@ mod provider_search_tests {
             req.tool_choice,
             Some(crate::types::ToolChoice::Tool { ref name }) if name == PROVIDER_SEARCH_TOOL
         ));
+    }
+
+    fn search_call_to(model: &str) -> impl std::future::Future<Output = MessagesRequest> + '_ {
+        sent_to(
+            model,
+            vec![],
+            Some(base::interface::model::ProviderSearch { max_uses: 3 }),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_search_call_to_a_model_that_refuses_a_forced_tool_names_the_tool_instead() {
+        for model in ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"] {
+            let req = search_call_to(model).await;
+            assert!(
+                matches!(req.tool_choice, Some(crate::types::ToolChoice::Auto { .. })),
+                "{model}: {:?}",
+                req.tool_choice
+            );
+            let said = serde_json::to_string(&req.system).unwrap();
+            assert!(said.contains(PROVIDER_SEARCH_TOOL), "{model}: {said}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_search_call_to_a_model_that_takes_a_forced_tool_is_forced() {
+        for model in ["claude-opus-4-8", "claude-sonnet-5", "deepseek-v4-pro"] {
+            let req = search_call_to(model).await;
+            assert!(
+                matches!(
+                    req.tool_choice,
+                    Some(crate::types::ToolChoice::Tool { ref name }) if name == PROVIDER_SEARCH_TOOL
+                ),
+                "{model}: {:?}",
+                req.tool_choice
+            );
+            assert!(req.system.is_empty(), "{model}: {:?}", req.system);
+        }
     }
 
     #[test]

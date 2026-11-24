@@ -117,8 +117,33 @@ impl SearchProvider for NativeSearchProvider {
                 _ => {}
             }
         }
+        if !items
+            .iter()
+            .any(|item| matches!(item, SearchOutputItem::Links(_)))
+        {
+            return Err(not_searched(&items));
+        }
         Ok(SearchOutput { items })
     }
+}
+
+/// What a search call that came back without searching is reported as: its
+/// text is the model's own knowledge, not something found on the web.
+fn not_searched(items: &[SearchOutputItem]) -> SearchError {
+    let said: String = items
+        .iter()
+        .filter_map(|item| match item {
+            SearchOutputItem::Text(text) => Some(text.trim()),
+            SearchOutputItem::Links(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut message =
+        "the provider answered without searching the web, so there are no results".to_string();
+    if !said.is_empty() {
+        message.push_str(&format!("; it said: {said}"));
+    }
+    SearchError::Other(anyhow::anyhow!(message))
 }
 
 #[cfg(test)]
@@ -239,6 +264,23 @@ mod tests {
         let origin = params.origin.as_ref().expect("attributed");
         assert_eq!(origin.session_id, "s-7");
         assert_eq!(origin.purpose(), Some(call_purpose::WEB_SEARCH));
+    }
+
+    #[tokio::test]
+    async fn an_answer_without_a_search_is_reported_as_no_search() {
+        let model = SearchingModel::answering(vec![
+            ModelEvent::TextDelta {
+                text: "Rust 1.80 came out in July.".into(),
+            },
+            end(),
+        ]);
+        let err = NativeSearchProvider::new(model, "m")
+            .search("rust", 5, "s")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("without searching the web"), "{err}");
+        assert!(err.contains("Rust 1.80 came out in July."), "{err}");
     }
 
     #[tokio::test]

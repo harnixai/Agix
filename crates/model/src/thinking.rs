@@ -1,7 +1,7 @@
-//! A call's thinking switch and effort as Anthropic's Messages API takes them.
-//! Which shape turns thinking off, and whether a fixed `budget_tokens` is
-//! accepted, differ by Claude model family; this is the one place that knows
-//! which family an id belongs to.
+//! What Anthropic's Messages API takes from each Claude model family: the
+//! shape that turns thinking off, whether a fixed `budget_tokens` is
+//! accepted, and whether a call may force a tool. This is the one place that
+//! knows which family an id belongs to.
 
 use base::interface::model::{Effort, StreamParams, ThinkingMode};
 
@@ -27,17 +27,16 @@ pub(crate) enum ThinkingRules {
     Legacy,
 }
 
-/// The family of `model`, read from the `claude-<family>-<major>-<minor>` in
-/// it, so a provider prefix (`us.anthropic.`), a date or a `@`/`-v1:0`
-/// snapshot suffix does not change the answer.
-pub(crate) fn rules_for(model: &str) -> ThinkingRules {
+/// The family and `(major, minor)` of `model`, read from the
+/// `claude-<family>-<major>-<minor>` in it, so a provider prefix
+/// (`us.anthropic.`), a date or a `@`/`-v1:0` snapshot suffix does not change
+/// the answer. `None` for an id that is not a Claude one.
+fn family_of(model: &str) -> Option<(String, (u32, u32))> {
     const MARK: &str = "claude-";
     let id = model.to_ascii_lowercase();
-    let Some(start) = id.find(MARK) else {
-        return ThinkingRules::Legacy;
-    };
+    let start = id.find(MARK)?;
     let mut parts = id[start + MARK.len()..].split(|c: char| !c.is_ascii_alphanumeric());
-    let family = parts.next().unwrap_or_default();
+    let family = parts.next().unwrap_or_default().to_string();
     // A date is eight digits; a version number is one or two.
     let numbers: Vec<u32> = parts
         .map_while(|p| (p.len() <= 2).then(|| p.parse().ok()).flatten())
@@ -46,7 +45,28 @@ pub(crate) fn rules_for(model: &str) -> ThinkingRules {
         numbers.first().copied().unwrap_or(0),
         numbers.get(1).copied().unwrap_or(0),
     );
-    match family {
+    Some((family, version))
+}
+
+/// Whether `tool_choice` may be `any` or `tool` on `model`. Opus and Sonnet
+/// 5.5, Fable and Mythos 5.1 and later refuse both with a 400; `auto` and
+/// `none` are taken everywhere.
+pub(crate) fn forced_tool_choice_taken(model: &str) -> bool {
+    match family_of(model) {
+        Some((family, version)) => match family.as_str() {
+            "opus" | "sonnet" => version < (5, 5),
+            "fable" | "mythos" => version < (5, 1),
+            _ => true,
+        },
+        None => true,
+    }
+}
+
+pub(crate) fn rules_for(model: &str) -> ThinkingRules {
+    let Some((family, version)) = family_of(model) else {
+        return ThinkingRules::Legacy;
+    };
+    match family.as_str() {
         "fable" | "mythos" => ThinkingRules::AlwaysOn,
         "opus" if version >= (5, 5) => ThinkingRules::AlwaysOn,
         "opus" if version >= (5, 0) => ThinkingRules::DisabledUpToHigh,
@@ -188,6 +208,41 @@ mod tests {
         ];
         for (id, rules) in cases {
             assert_eq!(rules_for(id), rules, "{id}");
+        }
+    }
+
+    #[test]
+    fn a_tool_is_forced_only_on_models_that_take_it() {
+        let refused = [
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-mythos-5-1",
+            "claude-mythos-5-2",
+            "claude-opus-5-5-20260401",
+            "us.anthropic.claude-sonnet-5-5-v1:0",
+            "claude-sonnet-5-5[1m]",
+            "claude-opus-6",
+        ];
+        for id in refused {
+            assert!(!forced_tool_choice_taken(id), "{id}");
+        }
+        let taken = [
+            "claude-opus-5",
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-sonnet-4-6",
+            "claude-fable-5",
+            "claude-mythos-preview",
+            "claude-haiku-5-5",
+            "claude-3-5-sonnet-20241022",
+            "deepseek-v4-pro",
+            "deepseek-chat",
+            "",
+        ];
+        for id in taken {
+            assert!(forced_tool_choice_taken(id), "{id}");
         }
     }
 

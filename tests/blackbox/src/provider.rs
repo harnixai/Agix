@@ -54,6 +54,9 @@ pub enum Block {
         name: String,
         input: serde_json::Value,
     },
+    /// The provider's own web search, as the `web_search_tool_result` it
+    /// streams: these `(title, url)` pages.
+    Searched(Vec<(String, String)>),
 }
 
 impl Block {
@@ -63,6 +66,15 @@ impl Block {
 
     pub fn thinking(s: impl Into<String>) -> Self {
         Self::Thinking(s.into())
+    }
+
+    pub fn searched(pages: &[(&str, &str)]) -> Self {
+        Self::Searched(
+            pages
+                .iter()
+                .map(|(title, url)| (title.to_string(), url.to_string()))
+                .collect(),
+        )
     }
 
     pub fn tool(id: impl Into<String>, name: impl Into<String>, input: serde_json::Value) -> Self {
@@ -897,6 +909,23 @@ fn sse_spending(blocks: &[Block], stop_reason: Option<&str>, usage: StubUsage) -
                         "delta": { "type": "input_json_delta", "partial_json": piece }
                     })));
                 }
+            }
+            Block::Searched(pages) => {
+                let results: Vec<serde_json::Value> = pages
+                    .iter()
+                    .map(|(title, url)| {
+                        serde_json::json!({ "type": "web_search_result", "title": title, "url": url })
+                    })
+                    .collect();
+                out.push_str(&event(&serde_json::json!({
+                    "type": "content_block_start",
+                    "index": index,
+                    "content_block": {
+                        "type": "web_search_tool_result",
+                        "tool_use_id": format!("srvtoolu_stub_{index}"),
+                        "content": results
+                    }
+                })));
             }
         }
         out.push_str(&event(&serde_json::json!({

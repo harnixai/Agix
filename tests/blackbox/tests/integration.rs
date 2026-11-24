@@ -46,6 +46,7 @@ mod prompt_cache_wire;
 mod provider_fallback;
 mod provider_tiers;
 mod sandbox_chain;
+mod search_tool_choice_wire;
 mod session_attended;
 mod session_boundaries;
 mod session_calls;
