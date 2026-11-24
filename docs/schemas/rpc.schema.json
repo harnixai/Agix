@@ -11132,6 +11132,30 @@
           ],
           "type": "object"
         },
+        "compact_ended": {
+          "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
+          "properties": {
+            "kind": {
+              "const": "compact_ended"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "compact_started": {
+          "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
+          "properties": {
+            "kind": {
+              "const": "compact_started"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
         "error": {
           "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
           "properties": {

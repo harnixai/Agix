@@ -272,6 +272,7 @@ pub const CAPABILITIES: &[&str] = &[
     "provider_tiers",
     "host_call_context",
     "config_explain",
+    "compact_events",
 ];
 
 /// [`CAPABILITIES`], plus those of the modules this build carries.

@@ -1,11 +1,12 @@
 //! A session's life with a real model, as a host drives it: interrupted in
 //! the middle of a command and carried on, interrupted while a background
 //! sub-agent keeps running, a second message refused, steered in and queued,
-//! its model switched between turns, cleared, compacted and renamed over
-//! RPC, exported and deleted with its sidechain, its goal paused, edited and
-//! cleared, resumed across a daemon restart that took a background task
-//! down, given attachments, a 200 KB message, Unicode everywhere, an empty
-//! message, and a turn of file edits rewound.
+//! its model switched between turns, cleared, compacted (announced before
+//! the summary lands) and renamed over RPC, exported and deleted with its
+//! sidechain, its goal paused, edited and cleared, resumed across a daemon
+//! restart that took a background task down, given attachments, a 200 KB
+//! message, Unicode everywhere, an empty message, and a turn of file edits
+//! rewound.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -353,6 +354,52 @@ async fn set_model_moves_the_next_turn_to_another_model_with_the_same_history() 
         !later.is_empty() && later.iter().all(|m| *m == second),
         "{later:?}"
     );
+    run.finish().await;
+    Ok(())
+}
+
+/// A compaction the host asks for is announced before the summary is
+/// written and ends with its `compact` frame, in that order, on the same
+/// estimate of the history.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_manual_compaction_is_announced_before_its_summary_lands() -> anyhow::Result<()> {
+    let mut run = LiveRun::builder("compact-frames").start().await?;
+    let session = run.session().await?;
+    run.write_file("notes.txt", &"a line of notes for the record\n".repeat(200))?;
+    run.turn(
+        &session,
+        "Read notes.txt with the Read tool and reply with its line count only.",
+    )
+    .await?;
+    run.turn(&session, "Reply OK and nothing else.").await?;
+    let watcher = run.watch(&session, false).await?;
+    let compacted = run
+        .client
+        .call("session.compact", json!({ "session_id": session }))
+        .await?;
+    assert!(compacted.error.is_none(), "{compacted:?}");
+    watcher
+        .wait_for("a compact frame", Duration::from_secs(30), |e| {
+            e["kind"] == "compact" || e["kind"] == "compact_ended"
+        })
+        .await?;
+    let frames: Vec<Value> = watcher
+        .frames()
+        .into_iter()
+        .map(|f| f["event"].clone())
+        .filter(|e| e["kind"].as_str().is_some_and(|k| k.starts_with("compact")))
+        .collect();
+    assert_eq!(frames.len(), 2, "{frames:?}");
+    let (started, ended) = (&frames[0], &frames[1]);
+    assert_eq!(started["kind"], "compact_started", "{frames:?}");
+    assert_eq!(started["trigger"], "manual", "{started}");
+    assert_eq!(ended["kind"], "compact", "{ended}");
+    assert_eq!(ended["strategy"], "FullCompact", "{ended}");
+    assert_eq!(
+        started["tokens_before"], ended["tokens_before"],
+        "{frames:?}"
+    );
+    drop(watcher);
     run.finish().await;
     Ok(())
 }

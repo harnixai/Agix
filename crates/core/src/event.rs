@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 
+mod compact;
+pub use compact::{CompactCause, CompactOutcome};
+
 /// How a turn's `usage` divides: its agent's own model calls, the calls made
 /// on its side (compaction, memory, web search and extraction), and its
 /// delegates' (sub-agents, team members, theirs included).
@@ -368,6 +371,27 @@ pub enum AgentEvent {
 
     /// System notification.
     System { message: String },
+
+    /// A compaction that rewrites the history is about to run, before its
+    /// `PreCompact` hooks. It ends in exactly one `CompactAction` (it went
+    /// through) or one `CompactEnded` (it did not). Trims send neither.
+    CompactStarted {
+        turn_id: String,
+        trigger: CompactCause,
+        /// The compactor's estimate of the history's size now.
+        tokens_before: usize,
+        /// Set only when the strategy is already fixed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        strategy: Option<String>,
+    },
+
+    /// The compaction a `CompactStarted` announced left the history as it was.
+    CompactEnded {
+        turn_id: String,
+        outcome: CompactOutcome,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 
     /// The history was compacted or trimmed.
     CompactAction {

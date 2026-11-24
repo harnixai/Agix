@@ -389,6 +389,8 @@ pub fn normalize_events(events: &[AgentEvent], placeholders: &Placeholders) -> S
             }
             AgentEvent::SystemInit { .. } => "SystemInit".to_string(),
             AgentEvent::System { message } => format!("System {:?}", first_line(message)),
+            AgentEvent::CompactStarted { trigger, .. } => format!("CompactStarted {trigger:?}"),
+            AgentEvent::CompactEnded { outcome, .. } => format!("CompactEnded {outcome:?}"),
             AgentEvent::CompactAction { strategy, .. } => format!("CompactAction {strategy}"),
             AgentEvent::SessionChanged { .. } => "SessionChanged".to_string(),
             AgentEvent::SessionPersisted { .. } => "SessionPersisted".to_string(),

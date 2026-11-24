@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 mod backoff;
+mod bracket;
 mod manual;
 mod recovery;
 mod summary;
@@ -106,6 +107,14 @@ struct PendingStaleTrim {
 struct PendingEarlyTrim {
     summary: CompactSummary,
     took: std::time::Duration,
+}
+
+/// A compaction applied to the history and not yet reported.
+struct Rewritten {
+    summary: CompactSummary,
+    strategy: compaction::compact::CompactStrategy,
+    projection: Option<compaction::compact::SnipProjection>,
+    started: std::time::Instant,
 }
 
 /// The transcript and the flags a compaction step changes, as they were
@@ -439,6 +448,40 @@ impl Agent {
         shape: &compaction::llm_summary::SummaryShape,
         cancel: &CancellationToken,
     ) -> Result<CompactSummary, NotCompacted> {
+        let bracket = bracket::Bracket::open(self, trigger, shape);
+        let rewritten = match self
+            .rewrite_history(target, keep, trigger, shape, cancel)
+            .await
+        {
+            Ok(rewritten) => rewritten,
+            Err(why) => {
+                bracket.not_compacted(&why);
+                return Err(why);
+            }
+        };
+        let Rewritten {
+            summary,
+            strategy,
+            projection,
+            started,
+        } = rewritten;
+        bracket.compacted();
+        self.report_compaction(&summary, projection.as_ref(), started);
+        self.reset_after_compaction(&summary, strategy, trigger);
+        self.fire_post_compact_hook(&summary, cancel).await;
+        Ok(summary)
+    }
+
+    /// Everything of a compaction up to the history being replaced; nothing
+    /// is reported yet.
+    async fn rewrite_history(
+        &mut self,
+        target: usize,
+        keep: usize,
+        trigger: CompactTrigger,
+        shape: &compaction::llm_summary::SummaryShape,
+        cancel: &CancellationToken,
+    ) -> Result<Rewritten, NotCompacted> {
         if !self.pre_compact_hooks_allow(target, trigger, cancel).await {
             return Err(NotCompacted::Declined);
         }
@@ -492,17 +535,18 @@ impl Agent {
             );
         }
         self.release_reads_lost(&pre_compact);
-        let summary = CompactSummary {
-            strategy: format!("{:?}", result.strategy),
-            messages_before,
-            messages_after,
-            tokens_before,
-            tokens_after,
-        };
-        self.report_compaction(&summary, result.projection.as_ref(), compact_start);
-        self.reset_after_compaction(&summary, result.strategy, trigger);
-        self.fire_post_compact_hook(&summary, cancel).await;
-        Ok(summary)
+        Ok(Rewritten {
+            summary: CompactSummary {
+                strategy: format!("{:?}", result.strategy),
+                messages_before,
+                messages_after,
+                tokens_before,
+                tokens_after,
+            },
+            strategy: result.strategy,
+            projection: result.projection,
+            started: compact_start,
+        })
     }
 
     fn reset_after_compaction(

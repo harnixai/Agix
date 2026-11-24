@@ -8,8 +8,8 @@ use crate::session_pool::api::{SessionEvent, SessionFrame};
 use base::context::goal::GoalView;
 use base::context::{TaskEvent, TaskInfo};
 use base::event::{
-    AgentEvent, ContextUsage, FailureKind, HostCallWithdrawal, PromptResolution, QueuedUserMessage,
-    TeamStageStatus, TurnFailure, WithdrawalReason,
+    AgentEvent, CompactCause, CompactOutcome, ContextUsage, FailureKind, HostCallWithdrawal,
+    PromptResolution, QueuedUserMessage, TeamStageStatus, TurnFailure, WithdrawalReason,
 };
 use base::interface::elicitation::ElicitOption;
 use base::interface::model::Usage;
@@ -165,6 +165,17 @@ pub enum SessionEventPayload {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         trim: bool,
     },
+    CompactStarted {
+        trigger: CompactCause,
+        tokens_before: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        strategy: Option<String>,
+    },
+    CompactEnded {
+        outcome: CompactOutcome,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
     UserMessageDelivered {
         message_id: String,
         content: String,
@@ -311,6 +322,8 @@ impl SessionEventPayload {
         "notification",
         "provider_switched",
         "compact",
+        "compact_started",
+        "compact_ended",
         "user_message_delivered",
         "user_message_refused",
         "user_messages_returned",
@@ -676,28 +689,9 @@ impl SessionEventPayload {
                 resolution: *resolution,
                 reason: *reason,
             },
-            AgentEvent::CompactAction {
-                strategy,
-                messages_before,
-                messages_after,
-                turn_id: _,
-                dropped_rounds,
-                dropped_messages,
-                estimated_tokens_saved,
-                tokens_before,
-                tokens_after,
-                trim,
-            } => Self::Compact {
-                strategy: strategy.clone(),
-                messages_before: *messages_before,
-                messages_after: *messages_after,
-                tokens_before: *tokens_before,
-                tokens_after: *tokens_after,
-                dropped_rounds: *dropped_rounds,
-                dropped_messages: *dropped_messages,
-                estimated_tokens_saved: *estimated_tokens_saved,
-                trim: *trim,
-            },
+            AgentEvent::CompactStarted { .. }
+            | AgentEvent::CompactEnded { .. }
+            | AgentEvent::CompactAction { .. } => Self::from_compaction(event)?,
             AgentEvent::SkillsChanged {
                 added,
                 removed,
@@ -815,5 +809,6 @@ impl<'a> SessionEventNotification<'a> {
     }
 }
 
+mod compact;
 #[cfg(test)]
 mod tests;

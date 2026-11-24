@@ -874,6 +874,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `provider_tiers` | `config.setProvider` 接受 `tier`(`project` / `global`)与 `dry_run`,结果带 `tier`、`dry_run`(§6.4) |
 | `host_call_context` | `host_tool_call` 与 `hook_call` 帧带 `cwd`(发起调用的会话的工作目录)与 `depth`(根会话 0,子 Agent 逐层加 1);hook 的 payload 带 `depth`(§7.4、§7.6) |
 | `config_explain` | 有 `config.explain`:一个设置键为什么是现在这个值,逐层列出值与结局(§6.4) |
+| `compact_events` | 每次改写历史的压缩都有首尾两帧:动手前一帧 `compact_started`,压成了以 `compact` 收尾,没压成以 `compact_ended` 收尾;子 Agent 的经 `subagent_progress` 转出(§7.1) |
 | `mcp_oauth_jwt` | 这个构建能用 `oauth.private_key_jwt`(feature `mcp-oauth-jwt`);没有这一项的构建,配了 `private_key_jwt` 的 MCP server 连接时报明确的错(`docs/mcp_auth.md`) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 | `runext` | 这个构建带插件命令:包的 `[[command]]` 经 `RunExt` 与 `/name args` 跑,`plugin.list` 带 `commands` / `command_conflicts`,`commands.list` 有 `kind:"ext"`,任务有 `kind:"ext"`(`docs/runext.md`) |
@@ -1937,8 +1938,8 @@ summary 为 `did not answer within 5s`,`session.get` 不再等它。
 就一定要摘要模型写摘要,没有摘要模型、摘要失败或找不到这一点时历史不变,正文说明原因。
 
 **不看阈值,现在就压。** 配了摘要模型时由它写全文摘要(`FullCompact`),否则按引擎的
-级联压到历史当前大小的一半左右。压了会推一帧 `compact`(§7.1),没什么可压时没有这
-一帧;两种情况都以 `turn_complete`(`stop_reason: "command_executed"`)结束,正文
+级联压到历史当前大小的一半左右。动手前推一帧 `compact_started`,压了会推一帧 `compact`
+(§7.1),没什么可压时没有这一帧、以 `compact_ended` 收尾;两种情况都以 `turn_complete`(`stop_reason: "command_executed"`)结束,正文
 里有一句结果说明。写摘要期间被 `session.interrupt` 中断时历史不变,以 `cancelled` 结束。
 会话正在跑 turn 时返回 `SESSION_BUSY`。
 
@@ -4314,7 +4315,9 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 | `skills_changed` | `{added,removed}` | 会话可用的 skill 与它上次看到的不同:skill 文件在两轮之间增删后,下一轮开始时发一次(同一份 skill 目录上的每个会话各发各的;宿主目录的改动只到列了它的会话)。缓存了 `commands.list` 的客户端该重取 |
 | `provider_switched` | `{from,to,reason,task}` | 这次模型调用去了与本会话上一次调用不同的 provider(`model.order`):`from` 配额用完、没有密钥、密钥被拒、连不上或重试用尽,`reason` 逐个说明排在 `to` 前面的为什么没接;或排在前面的又能用了。`task` 是调用的种类(`main`、`subagent`、`compact`、`memory`、`title`、`web_search`、`web_fetch`);与父会话共用路由的子 Agent 的也报在父会话上,有自己路由的(`session.startAgent` / `Agent` / agent 类型的 `provider`,或有确定归属的模型 id,§6.3)报在它自己的事件里,经 `subagent_progress` 转出;无论哪种,子 Agent 任务的 `detail.model` / `provider` 随下一帧 `task_updated` 更新 |
 | `notification` | `{message,status}` | 模型用 `PushNotification` 要用户回来看:宿主该把 `message` 以通知的形式送到用户面前(桌面通知、消息推送……)。`status` 是 `"proactive"`(模型主动发的)或 `null`;引擎自己的提醒(如 `permit_always` 的 `local` 没能写下)也走这一帧,`status` 为 `null`。同时触发 `Notification` hook,`reason` 即 `message` |
+| `compact_started` | `{trigger,tokens_before,strategy?}` | 一次改写历史的压缩开始了,`PreCompact` hook 之前发;随后恰好一帧 `compact`(压成了)或 `compact_ended`(没压成)。修剪不发(§7.1) |
 | `compact` | `{strategy,messages_before,messages_after,tokens_before,tokens_after,dropped_rounds?,dropped_messages?,estimated_tokens_saved?,trim?}` | 上下文被压缩或修剪了(§7.1) |
+| `compact_ended` | `{outcome,reason?}` | `compact_started` 宣布的那次压缩没压成,历史原样(§7.1) |
 | `user_message_delivered` | `{message_id,content}` | 运行中送来的消息(`on_busy:"steer"`)已加进对话,模型下一次调用会读到 |
 | `user_message_refused` | `{message_id,content,message}` | 运行中送来的消息被 `UserPromptSubmit` 拒收,不在 transcript 里;`message` 是 hook 给的理由,可为 `null` |
 | `user_messages_returned` | `{messages:[{message_id,content}]}` | 运行中送来、但本轮结束前没读到的消息,不在 transcript 里,交还客户端 |
@@ -4364,7 +4367,7 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 `AskUserQuestion` 问用户的,只发给在 `session.create` 的 `options.prompt_types` 里列了
 `question` 的会话(§6.3)。两种共用同一帧、同一回答方法与同一个超时。
 
-### 7.1 `compact`
+### 7.1 `compact`、`compact_started`、`compact_ended`
 
 ```jsonc
 { "kind":"compact", "strategy":"Snip",
@@ -4394,6 +4397,36 @@ hook。没有可丢的、或者丢掉的还不如压缩后补回去的提醒多�
 调用过的 skill、计划模式与后台任务的提醒)。
 
 后三项是策略相关的:给不出的策略就不带这三个键,不是带 `null`。
+
+**压缩有首尾两帧**(能力位 `compact_events`)。写摘要要调一次模型,可能要十几秒;这段时间里
+这一轮没有别的输出,开始帧让宿主知道引擎在压缩:
+
+```jsonc
+{ "kind":"compact_started", "trigger":"threshold",   // threshold | manual | overflow
+  "tokens_before":152000,                            // 引擎对历史大小的估算,口径同 compact 帧
+  "strategy":"FullCompact" }                         // 可选,只在动手前就定下来时出现
+{ "kind":"compact_ended", "outcome":"failed",        // declined | nothing_to_compact | failed | cancelled
+  "reason":"summarization failed: …" }               // 可选,failed 时说明原因
+```
+
+每次**压缩**(上面说的改写历史的那种,无论阈值逼出来的、`/compact` / `session.compact` 要的、
+还是请求因体积被拒后的压缩重发)在 `PreCompact` hook 之前先发一帧 `compact_started`,之后
+**恰好一帧**结束:压成了是 `compact`(不带 `trim`),没压成是 `compact_ended`。两帧之间可能
+夹着 `PreCompact` 的 `hook_call`、摘要请求的 `provider_switched` 之类,不会夹着另一对压缩帧。修剪是瞬间的,只发带 `trim` 的
+`compact`,不发开始帧,也不发 `compact_ended`。
+
+`trigger`:`threshold` 是上下文过了阈值,`manual` 是 `/compact` 或 `session.compact`,`overflow`
+是请求因体积被厂商拒绝、压缩后重发(交给 `PreCompact` 的 `trigger` 仍是 `auto`)。`strategy`
+只在带 `at` 的手动压缩上出现(一定是 `FullCompact`);别的压缩动手前还不知道会走哪一档,看结尾的
+`compact`。
+
+`outcome`:`declined` 是 `PreCompact` hook 拒了;`nothing_to_compact` 是没有可丢的,或丢掉的
+还不如补回去的多(上面说的不改、不发 `compact` 的那种);`failed` 是 compactor 或摘要失败
+(带 `at` 时摘要失败或没有摘要模型也是),`reason` 是说明文字;`cancelled` 是压缩途中被
+`session.interrupt` 中断。四种都不改历史。值的名单只会增加,不认识的按"没压成"处理。带 `at`
+却找不到那一点时还没开始压,这两帧都不发。
+
+子 Agent 侧链里的压缩同样有这两帧,和 `compact` 一样经 `subagent_progress` 转出。
 
 ### 7.2 `turn_complete`
 

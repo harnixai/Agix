@@ -4,6 +4,7 @@
 //! `cargo test -p blackbox --test integration daemon_surface::`.
 
 mod background_agents;
+mod compaction_frames;
 mod crash_recovery;
 mod daemon_surface;
 mod demo_plugins;

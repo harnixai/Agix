@@ -183,6 +183,22 @@ fn agent_samples() -> Vec<(&'static str, Value)> {
             json!({"kind": "compact_action", "strategy": "Summary", "messages_before": 40, "messages_after": 2, "turn_id": "inner", "dropped_rounds": null, "dropped_messages": null, "estimated_tokens_saved": null}),
         ),
         (
+            "compact_started",
+            json!({"kind": "compact_started", "turn_id": "inner", "trigger": "overflow", "tokens_before": 52000, "strategy": "FullCompact"}),
+        ),
+        (
+            "compact_started_bare",
+            json!({"kind": "compact_started", "turn_id": "inner", "trigger": "threshold", "tokens_before": 52000}),
+        ),
+        (
+            "compact_ended",
+            json!({"kind": "compact_ended", "turn_id": "inner", "outcome": "failed", "reason": "summarization failed: overloaded"}),
+        ),
+        (
+            "compact_ended_bare",
+            json!({"kind": "compact_ended", "turn_id": "inner", "outcome": "nothing_to_compact"}),
+        ),
+        (
             "session_changed",
             json!({"kind": "session_changed", "session_id": "s2"}),
         ),
@@ -242,6 +258,16 @@ fn agent_samples() -> Vec<(&'static str, Value)> {
             inner(
                 json!({"kind": "compact_action", "strategy": "Snip", "messages_before": 9, "messages_after": 3, "turn_id": "inner", "dropped_rounds": 1, "dropped_messages": 6, "estimated_tokens_saved": null}),
             ),
+        ),
+        (
+            "subagent_compact_started",
+            inner(
+                json!({"kind": "compact_started", "turn_id": "inner", "trigger": "manual", "tokens_before": 900}),
+            ),
+        ),
+        (
+            "subagent_compact_ended",
+            inner(json!({"kind": "compact_ended", "turn_id": "inner", "outcome": "cancelled"})),
         ),
         (
             "subagent_system_init",

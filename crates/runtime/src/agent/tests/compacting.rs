@@ -692,6 +692,73 @@ async fn an_interrupted_compaction_leaves_the_aged_tool_results_as_they_were() {
     assert_eq!(compact_frames(&mut rx), 0);
 }
 
+/// A compaction dropped half-way — its future let go while the summary is
+/// outstanding, not interrupted through its token — still ends what it
+/// started, as cancelled.
+#[tokio::test]
+async fn a_compaction_dropped_while_summarizing_still_ends_cancelled() {
+    use base::event::{CompactCause, CompactOutcome};
+    use base::interface::model::MessageRole;
+    let asked = Arc::new(tokio::sync::Notify::new());
+    let (mut agent, mut rx, _tx) = Builder::new()
+        .scene(Arc::new(scene::code::spec(
+            scene::code::Interaction::Interactive,
+        )))
+        .model(Arc::new(NeverAnswers {
+            asked: asked.clone(),
+        }))
+        .settings(Arc::new(test_settings()))
+        .skip_warmup(true)
+        .build()
+        .expect("build should succeed");
+    for i in 0..6 {
+        agent.session.push_message(text_message(
+            MessageRole::User,
+            &format!("question {i}: {}", "words ".repeat(60)),
+        ));
+        agent.session.push_message(text_message(
+            MessageRole::Assistant,
+            &format!("answer {i}: {}", "words ".repeat(60)),
+        ));
+    }
+    let cancel = CancellationToken::new();
+    {
+        let compacting = agent.compact_now(&cancel);
+        tokio::pin!(compacting);
+        tokio::select! {
+            _ = &mut compacting => panic!("the compaction finished without asking for a summary"),
+            _ = asked.notified() => {}
+        }
+    }
+    let frames: Vec<AgentEvent> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter(|e| {
+            matches!(
+                e,
+                AgentEvent::CompactStarted { .. }
+                    | AgentEvent::CompactEnded { .. }
+                    | AgentEvent::CompactAction { .. }
+            )
+        })
+        .collect();
+    assert!(
+        matches!(
+            frames.as_slice(),
+            [
+                AgentEvent::CompactStarted {
+                    trigger: CompactCause::Manual,
+                    ..
+                },
+                AgentEvent::CompactEnded {
+                    outcome: CompactOutcome::Cancelled,
+                    reason: None,
+                    ..
+                },
+            ]
+        ),
+        "{frames:?}"
+    );
+}
+
 /// Rewrites the first tool result in the budget pass and the first text in
 /// the predictive one, then fails the compaction itself.
 struct RewritesThenFails;
