@@ -273,7 +273,6 @@ pub const CAPABILITIES: &[&str] = &[
     "host_call_context",
     "config_explain",
     "compact_events",
-    "plugin_call_long",
 ];
 
 /// [`CAPABILITIES`], plus those of the modules this build carries.
@@ -299,6 +298,7 @@ pub fn capabilities() -> Vec<&'static str> {
         out.push("runext");
         out.push("runext_subcall_prompt");
         out.push("plugin_functions");
+        out.push("plugin_call_long");
     }
     out
 }
