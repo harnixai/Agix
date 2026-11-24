@@ -4,7 +4,9 @@
 //! takes it there without one, and a provider the pair does not define is
 //! refused. Without either it runs where its parent does. Its task, and
 //! `session.get` on its sidechain, name the model and provider its calls
-//! went to, corrected by `task_updated` when a call falls back.
+//! went to, corrected by `task_updated` when a call falls back. A provider
+//! outside the session's order is the host's alone to name; an untrusted
+//! project's agent type names none; a live team member keeps its own.
 
 use std::time::Duration;
 
@@ -15,13 +17,19 @@ use serde_json::{json, Value};
 const PARENT_MARK: &str = "PARENT-MARK";
 
 fn ds_and_cc(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
+    stubbed(name, stub).settings(two_providers(stub, &["ds", "cc"]))
+}
+
+fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
+    LiveRun::builder(name).config(LiveConfig::for_endpoint(
+        &stub.base_url(),
+        blackbox::ModelEndpoint::model(stub),
+    ))
+}
+
+fn two_providers(stub: &ProviderStub, order: &[&str]) -> Value {
     let at = |id: &str| format!("{}{id}/", stub.base_url());
-    LiveRun::builder(name)
-        .config(LiveConfig::for_endpoint(
-            &stub.base_url(),
-            blackbox::ModelEndpoint::model(stub),
-        ))
-        .settings(json!({
+    json!({
             "providers": [
                 {
                     "id": "ds",
@@ -39,9 +47,9 @@ fn ds_and_cc(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
                     "models": ["cc-opus", "cc-sonnet", "cc-haiku", "cc-special"],
                 },
             ],
-            "model": {"order": ["ds", "cc"]},
+            "model": {"order": order},
             "permissions": {"allow": ["Agent"]},
-        }))
+    })
 }
 
 /// Where each of a sub-agent's calls carrying `mark` went: its provider and
@@ -380,6 +388,250 @@ async fn a_sub_agent_whose_provider_fails_is_reported_where_its_calls_went() -> 
         sidechain_placed(&mut run.client, &task).await?,
         json!(["cc", "cc-sonnet"])
     );
+    run.finish().await;
+    Ok(())
+}
+
+fn agent_type(project: &std::path::Path, name: &str, provider: &str) -> anyhow::Result<()> {
+    let dir = project.join(".agix/agents");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join(format!("{name}.md")),
+        format!(
+            "---\ndescription: checks on another vendor\nprovider: {provider}\n---\nCheck it.\n"
+        ),
+    )?;
+    Ok(())
+}
+
+/// The `Agent` call's answer in `turn`: its text, and whether it was an error.
+fn agent_answer(turn: &rpc_client::TurnEvents) -> (String, bool) {
+    turn.tool_results
+        .iter()
+        .find(|(name, _, _)| name == "Agent")
+        .map(|(_, text, error)| (text.clone(), *error))
+        .unwrap_or_default()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_host_names_a_provider_outside_the_order() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("provider-outside-order", &stub)
+        .settings(two_providers(&stub, &["ds"]))
+        .before_start(|_world, project| agent_type(project, "cross-checker", "cc"))
+        .start()
+        .await?;
+    let session = run
+        .session_with(json!({"options": {"auto_name": false}}))
+        .await?;
+    stub.script_when(
+        PARENT_MARK,
+        [
+            Reply::Blocks(vec![Block::tool(
+                "call-1",
+                "Agent",
+                json!({"prompt": "CHILD-OUTSIDE check", "description": "check", "provider": "cc"}),
+            )]),
+            Reply::text("parent done"),
+        ],
+    );
+    stub.script([Reply::text("MODEL-CHILD-ON-CC")]);
+    let turn = run.turn(&session, "PARENT-MARK check on cc").await?;
+    let (answer, is_error) = agent_answer(&turn);
+    assert!(
+        is_error && answer.contains("not in this session's model.order"),
+        "{answer}"
+    );
+    assert!(calls_carrying(&stub, "CHILD-OUTSIDE").is_empty());
+
+    stub.script([Reply::text("TYPED-ON-DS")]);
+    let (_, calls) = run_started(
+        &mut run,
+        &stub,
+        &session,
+        "CHILD-TYPED",
+        json!({"subagent_type": "cross-checker"}),
+    )
+    .await?;
+    assert_eq!(calls, [("ds".to_string(), "ds-balanced".to_string())]);
+
+    stub.script([Reply::text("HOST-ON-CC")]);
+    let (_, calls) = run_started(
+        &mut run,
+        &stub,
+        &session,
+        "CHILD-HOST",
+        json!({"provider": "cc"}),
+    )
+    .await?;
+    assert_eq!(calls, [("cc".to_string(), "cc-sonnet".to_string())]);
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_untrusted_projects_agent_type_names_no_provider() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let providers = two_providers(&stub, &["ds", "cc"]);
+    let mut run = stubbed("untrusted-type-provider", &stub)
+        .untrusted()
+        .before_start(move |world, project| {
+            world.write_global_settings(&providers)?;
+            agent_type(project, "x", "cc")
+        })
+        .start()
+        .await?;
+    let status = run
+        .client
+        .call(
+            "project.status",
+            json!({ "project_root": run.project.to_string_lossy() }),
+        )
+        .await?
+        .result
+        .unwrap_or_default();
+    assert!(
+        status["requires_trust"]
+            .as_array()
+            .is_some_and(|needs| needs.contains(&json!("agents/x"))),
+        "{status}"
+    );
+    let session = run
+        .session_with(json!({"options": {"auto_name": false}}))
+        .await?;
+    stub.script([Reply::text("UNTRUSTED-ON-DS")]);
+    let (_, calls) = run_started(
+        &mut run,
+        &stub,
+        &session,
+        "CHILD-UNTRUSTED",
+        json!({"subagent_type": "x"}),
+    )
+    .await?;
+    assert_eq!(calls, [("ds".to_string(), "ds-balanced".to_string())]);
+
+    let trusted = run
+        .client
+        .call(
+            "project.trust",
+            json!({ "project_root": run.project.to_string_lossy(), "trusted": true }),
+        )
+        .await?;
+    anyhow::ensure!(trusted.error.is_none(), "{:?}", trusted.error);
+    let session = run
+        .session_with(json!({"options": {"auto_name": false}}))
+        .await?;
+    stub.script([Reply::text("TRUSTED-ON-CC")]);
+    let (_, calls) = run_started(
+        &mut run,
+        &stub,
+        &session,
+        "CHILD-TRUSTED",
+        json!({"subagent_type": "x"}),
+    )
+    .await?;
+    assert_eq!(calls, [("cc".to_string(), "cc-sonnet".to_string())]);
+    run.finish().await;
+    Ok(())
+}
+
+fn message_worker(id: &str, prompt: &str, extra: Value) -> Reply {
+    let mut input = json!({
+        "prompt": prompt, "description": "worker", "team_name": "crew", "name": "worker",
+    });
+    if let (Some(i), Some(e)) = (input.as_object_mut(), extra.as_object()) {
+        i.extend(e.clone());
+    }
+    Reply::Blocks(vec![Block::tool(id, "Agent", input)])
+}
+
+/// A `session.tasks` listing taken while a `teammate` task is running.
+async fn while_a_message_runs(
+    client: &mut DaemonRpcClient,
+    session: &str,
+) -> anyhow::Result<Value> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let listed = client
+            .call("session.tasks", json!({ "session_id": session }))
+            .await?
+            .result
+            .unwrap_or_default();
+        let tasks = listed["tasks"].as_array().cloned().unwrap_or_default();
+        let teammates = tasks.iter().filter(|t| t["kind"] == "teammate");
+        if teammates.clone().any(|t| t["status"] == "running") {
+            return Ok(listed);
+        }
+        anyhow::ensure!(
+            teammates.count() == 0 && tokio::time::Instant::now() < deadline,
+            "the message was never seen running: {listed}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A live member is `running` while one of its messages is, and keeps the
+/// provider it was started on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_member_keeps_its_provider() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut settings = two_providers(&stub, &["ds", "cc"]);
+    settings["team"] = json!({"enabled": true});
+    let mut run = stubbed("member-provider", &stub)
+        .settings(settings)
+        .start()
+        .await?;
+    let session = run
+        .session_with(json!({"options": {"auto_name": false}}))
+        .await?;
+    stub.script_when(
+        PARENT_MARK,
+        [
+            message_worker("w-1", "MEMBER-FIRST hello", json!({})),
+            Reply::text("sent"),
+        ],
+    );
+    stub.script_when(
+        "MEMBER-FIRST",
+        [Reply::delayed(
+            Duration::from_secs(3),
+            Reply::text("first done"),
+        )],
+    );
+    run.turn(&session, "PARENT-MARK message the worker").await?;
+    let busy = while_a_message_runs(&mut run.client, &session).await?;
+    let member = busy["tasks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|t| t["kind"] == "member")
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(member["status"], "running", "{busy}");
+    run.wait_tasks_settled(&session, Duration::from_secs(30))
+        .await?;
+    let first: Vec<_> = calls_carrying(&stub, "MEMBER-FIRST")
+        .into_iter()
+        .map(|(provider, _)| provider)
+        .collect();
+    assert_eq!(first, ["ds"]);
+
+    stub.script_when(
+        PARENT_MARK,
+        [
+            message_worker("w-2", "MEMBER-SECOND again", json!({"provider": "cc"})),
+            Reply::text("sent again"),
+        ],
+    );
+    let turn = run.turn(&session, "message it on cc").await?;
+    let (answer, is_error) = agent_answer(&turn);
+    assert!(
+        is_error && answer.contains("already runs on provider `ds`"),
+        "{answer}"
+    );
+    run.wait_tasks_settled(&session, Duration::from_secs(30))
+        .await?;
+    assert!(calls_carrying(&stub, "MEMBER-SECOND").is_empty());
     run.finish().await;
     Ok(())
 }

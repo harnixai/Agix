@@ -81,7 +81,9 @@ impl Delegator {
             .agent_type
             .as_deref()
             .and_then(|t| self.agent_type_def(t));
-        match self.own_route(req.provider.as_deref(), req.model.as_deref(), def.as_ref()) {
+        let by_host = matches!(req.mode, DelegateMode::Host { .. });
+        let provider = req.provider.as_deref();
+        match self.own_route(provider, by_host, req.model.as_deref(), def.as_ref()) {
             Ok(route) => Ok((worktree, route)),
             Err(e) => {
                 if let Some(worktree) = worktree {

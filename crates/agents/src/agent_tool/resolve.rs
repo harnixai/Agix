@@ -20,10 +20,13 @@ impl Delegator {
         }
     }
 
-    /// `None` shares the parent's route.
+    /// `None` shares the parent's route. A `provider` the host names may be
+    /// any the pair defines; one named by the model or an agent type must be
+    /// in the parent's route.
     pub(crate) fn own_route(
         &self,
         provider: Option<&str>,
+        named_by_host: bool,
         model: Option<&str>,
         def: Option<&AgentTypeDefinition>,
     ) -> Result<Option<Route>, String> {
@@ -36,17 +39,17 @@ impl Delegator {
             };
         };
         if let Some(id) = provider {
-            return parent.starting_at(id).map(Some);
+            return starting_at(parent, id, named_by_host).map(Some);
         }
         if let Some(def) = def {
             if let Some(id) = &def.provider {
-                match parent.starting_at(id) {
+                match type_route(parent, def, id) {
                     Ok(route) => return Ok(Some(route)),
                     Err(error) => tracing::warn!(
                         agent_type = %def.name,
                         provider = %id,
                         %error,
-                        "agent type names a provider this session does not define; ignoring it"
+                        "agent type names a provider it may not use here; ignoring it"
                     ),
                 }
             }
@@ -329,6 +332,24 @@ impl Delegator {
 }
 
 const SUBAGENT: &str = base::provider::TaskTiers::SUBAGENT;
+
+fn starting_at(parent: &Route, id: &str, any_defined: bool) -> Result<Route, String> {
+    let route = parent.starting_at(id)?;
+    if !any_defined && !parent.in_order(id) {
+        return Err(format!(
+            "provider `{id}` is not in this session's model.order; name a provider \
+             from it, or leave provider out to run where this session does"
+        ));
+    }
+    Ok(route)
+}
+
+fn type_route(parent: &Route, def: &AgentTypeDefinition, id: &str) -> Result<Route, String> {
+    if matches!(def.source, AgentTypeSource::Project { trusted: false }) {
+        return Err("the project is not trusted, so its agent type picks no provider".into());
+    }
+    starting_at(parent, id, false)
+}
 
 fn tier_named(name: &str) -> Option<base::provider::Tier> {
     base::provider::Tier::from_claude_alias(name).or_else(|| base::provider::Tier::from_name(name))

@@ -266,12 +266,20 @@
 ### 子 Agent 的 provider(#101)与任务里的模型(#98)
 
 - `session.startAgent`、`Agent` 工具的输入、agent 类型 frontmatter 收可选的 `provider`(请求的压过类型的)。子 Agent
-  用一条自己的路由:那家排第一,其余照 `model.order`,健康与配额与父会话共用。没给 `provider` 但模型 id 有确定的归属
+  用一条自己的路由:那家排第一,其余照父会话的路由(`model.order`,父会话指名了 provider 的连同它),健康与配额与父会话共用。没给 `provider` 但模型 id 有确定的归属
   (某家的 `models` 列着它或把它作档位;只是「什么都收」的那家不算),且父会话的调用不会先去那里时,也从它的归属起;
   这样 `model.order: ["ds","cc"]` 下点名 `cc` 的模型 id 真的会到 `cc`,不再换成 `ds` 的同档模型。档位名、`inherit`、
   `opus` / `sonnet` 这类别名在没给 `provider` 时照旧按会话的路由解析。
-- `provider` 不在这一对 (项目, 场景) 的定义里:`startAgent` 以 `INVALID_PARAMS` 失败且不登记任务;`Agent` 工具是这次
-  调用的错误;agent 类型写错的记一条告警、当没写。能力位 `subagent_provider`。
+- 只有宿主(`startAgent`)可以点名这一对 (项目, 场景) 定义了的任何一家;模型(`Agent` 工具)与 agent 类型(项目文件、
+  插件、用户目录的都算)点名的必须在父会话的路由里 —— `model.order`,加上父会话自己指名的 provider。定义了但不在里面的:
+  `Agent` 工具是这次调用的错误(说它不在这个会话的 `model.order` 里);agent 类型的记一条告警、当没写。有确定归属的模型
+  id 也只在路由里找归属。
+- 未受信项目的 agent 类型写的 `provider` 在项目受信前不生效,这样的类型列在 `project.status` 的 `requires_trust`
+  (`agents/<name>`)。
+- `provider` 不在这一对的定义里:`startAgent` 以 `INVALID_PARAMS` 失败且不登记任务;`Agent` 工具是这次调用的错误;
+  agent 类型写错的记一条告警、当没写。能力位 `subagent_provider`。
+- 给活着的团队常驻成员发消息时点名的 provider 与它在跑的那家不同:这次 `Agent` 调用的错误 —— 活着的成员保持它起来时的
+  provider;要换,先停掉它(`TaskStop` / `TeamDelete`)再发。
 - 有自己路由的子 Agent 的 `provider_switched` 在它自己的事件里(经 `subagent_progress` 转出),不再算到父会话头上。
 - 宿主画任务树时:`session.tasks` 里 agent 与 teammate 任务的 `detail` 带 `model`、`provider`。`task_started` 里是预测,
   第一次调用后可能被 `task_updated` 改写(路由回退后也会);`step_end` 带 `served: {provider, model}`(没经路由的调用
@@ -284,8 +292,8 @@
 
 ### 嵌入(`agix` crate)
 
-- `base::provider::TaskRouting` 多三个**必须实现**的方法:`starting_at(provider) -> Result<Arc<dyn TaskRouting>, String>`、
-  `home_of(model) -> Option<String>`、`destination(task, model) -> Destination`;自己实现路由的宿主要补上。新类型
+- `base::provider::TaskRouting` 多四个**必须实现**的方法:`starting_at(provider) -> Result<Arc<dyn TaskRouting>, String>`、
+  `in_order(provider) -> bool`、`home_of(model) -> Option<String>`、`destination(task, model) -> Destination`;自己实现路由的宿主要补上。新类型
   `base::provider::Destination { provider, model }`。
 - `ModelEvent::Served` 多 `model`(`#[serde(default)]`);`AgentEvent::StepEnd` 与 `StreamResult` 多 `served:
   Option<Destination>`,对它们穷举 `match` 或按字段构造的要补。

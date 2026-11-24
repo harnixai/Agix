@@ -151,20 +151,7 @@ impl ProviderSet {
     /// One session's router over these providers: `preferred` first in its
     /// order when given, and its own record of where its calls went.
     pub fn session(&self, preferred: Option<&str>) -> Result<SessionRouter, String> {
-        let mut order = (*self.order).clone();
-        if let Some(id) = preferred {
-            if self.find(id).is_none() {
-                return Err(format!("provider `{id}` is not configured"));
-            }
-            order.retain(|o| o != id);
-            order.insert(0, id.to_string());
-        }
-        Ok(SessionRouter(Arc::new(Route {
-            last: Mutex::new(order.first().cloned()),
-            order,
-            set: self.clone(),
-            observer: OnceLock::new(),
-        })))
+        SessionRouter::over(self.clone(), &self.order, preferred)
     }
 
     pub fn order(&self) -> &[String] {
@@ -256,6 +243,23 @@ struct Route {
 }
 
 impl SessionRouter {
+    fn over(set: ProviderSet, order: &[String], preferred: Option<&str>) -> Result<Self, String> {
+        let mut order = order.to_vec();
+        if let Some(id) = preferred {
+            if set.find(id).is_none() {
+                return Err(format!("provider `{id}` is not configured"));
+            }
+            order.retain(|o| o != id);
+            order.insert(0, id.to_string());
+        }
+        Ok(Self(Arc::new(Route {
+            last: Mutex::new(order.first().cloned()),
+            order,
+            set,
+            observer: OnceLock::new(),
+        })))
+    }
+
     pub fn order(&self) -> &[String] {
         &self.0.order
     }
@@ -292,7 +296,12 @@ impl TaskRouting for SessionRouter {
     }
 
     fn starting_at(&self, provider: &str) -> Result<Arc<dyn TaskRouting>, String> {
-        Ok(Arc::new(self.0.set.session(Some(provider))?))
+        let route = Self::over(self.0.set.clone(), &self.0.order, Some(provider))?;
+        Ok(Arc::new(route))
+    }
+
+    fn in_order(&self, provider: &str) -> bool {
+        self.0.order.iter().any(|id| id == provider)
     }
 
     fn home_of(&self, model: &str) -> Option<String> {

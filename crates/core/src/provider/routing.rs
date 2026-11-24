@@ -28,9 +28,12 @@ pub trait TaskRouting: Send + Sync {
     fn observe(&self, observer: Arc<dyn RouteObserver>);
 
     /// A route of its own over the same providers: `provider` first, the
-    /// rest in the pair's `model.order`, with its own record of where its
-    /// calls went and its own observer. `Err` when `provider` is not defined.
+    /// rest in this route's order, with its own record of where its calls
+    /// went and its own observer. `Err` when `provider` is not defined.
     fn starting_at(&self, provider: &str) -> Result<Arc<dyn TaskRouting>, String>;
+
+    /// Whether `provider` is in this route's order.
+    fn in_order(&self, provider: &str) -> bool;
 
     /// The first provider in the order that lists `model` or names it as a
     /// tier. One that only accepts any model is no home.

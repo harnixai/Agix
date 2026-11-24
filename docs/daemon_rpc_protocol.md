@@ -1743,7 +1743,8 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 
 sidechain 另有 `model` / `provider`:取自父会话里 `detail.agent_session_id` 是它的那件任务(团队常驻成员取最近的一条消息的),
 与那件任务 `detail` 里的同值(见 `session.tasks`),口径同 `session.inspectContext` 的 `model` / `provider`:真正的模型 id
-与 provider id。父会话不在内存里、或它已经不记这件任务时没有这两个键。
+与 provider id。父会话不在内存里、或它已经不记这件任务时没有这两个键;子 Agent 再起的子 Agent 的侧链也没有 —— 它的
+父会话是子 Agent,不是池里的会话。
 
 `scene` / `project_root` 与 `session.list` 的条目**同源**(都是那一条 `SessionInfo`),
 所以两个方法对同一个会话不会给出不同的答案。
@@ -2931,7 +2932,8 @@ worktree 与分支在子 Agent 结束时已删,不记。前台子 Agent 留下�
 不挡重建。
 
 `member` 是一个活着的常驻团队成员(`id` 形如 `member-…`):它交给的每条消息各是一个 `teammate`
-任务,其中一个在跑时它是 `running`,否则 `idle`;`started_ms` 是它建起的时刻。活着的成员会挡住重建
+任务,`detail` 与阶段成员的同形(`{team,member,agent_session_id,model,provider?}`,`agent_session_id` 是这个成员的
+侧链,各条消息相同),`team` / `member` 与它的一致的其中一个在跑时它是 `running`,否则 `idle`;`started_ms` 是它建起的时刻。活着的成员会挡住重建
 (`SESSION_BUSY`,`reason: "background_tasks"`),`session.stopTask` 拿它的 `id` 停掉它,之后它不再列出。
 
 正在跑的全列出,已经结束的保留最近 20 个。会话不存在 → `SESSION_NOT_FOUND`。
@@ -3047,11 +3049,17 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 
 - 父会话空闲、正在一轮里都能起,互不阻塞;不在内存里时先恢复,同 `session.run_turn`。
 - provider:给了 `provider`(或 agent 类型写了)时,子 Agent 有自己的一条路由:这个 provider 在前,其余照
-  这一对(项目、场景)的 `model.order`,健康与配额和父会话共用;档位名、`inherit` 按它解析,模型 id 不在它那里时
-  取它同一档的模型。不在这一对的 provider 定义里 → `INVALID_PARAMS`(agent 类型写错的只记一条告警、当没写)。
-  没给 provider 而 `model` 是一个有确定归属的模型 id —— 某个 provider 的 `models` 列着它,或把它作档位;只是
-  "什么模型都收"的 provider 不算 —— 且父会话的调用不会先去那里时,路由从它的归属起。都不是时子 Agent 与父会话
-  共用路由,同 `Agent` 工具不带这两项。`Agent` 工具的 `provider` 同此,写错的是这次工具调用的错误。
+  父会话的路由(这一对(项目、场景)的 `model.order`,父会话指名了 provider 的连同它),健康与配额和父会话共用;
+  档位名、`inherit` 按它解析,模型 id 不在它那里时取它同一档的模型。这里的 `provider` 可以是这一对定义了的任何
+  一家;不在定义里 → `INVALID_PARAMS`。
+  没给 provider 而 `model` 是一个有确定归属的模型 id —— 父会话路由里的某个 provider 的 `models` 列着它,或把它
+  作档位;只是"什么模型都收"的 provider 不算 —— 且父会话的调用不会先去那里时,路由从它的归属起。都不是时子 Agent
+  与父会话共用路由,同 `Agent` 工具不带这两项。
+- 只有宿主能点名父会话路由以外的 provider。`Agent` 工具的 `provider` 与 agent 类型的 `provider`(项目文件、插件、
+  用户目录的都算)必须在父会话的路由里:`Agent` 工具点名的不在定义里、或定义了但不在路由里,是这次工具调用的错误
+  (后者说它不在这个会话的 `model.order` 里);agent 类型的只记一条告警、当没写。未受信项目的 agent 类型写的
+  `provider` 在项目受信前不生效,这样的类型列在 `project.status` 的 `requires_trust`。给活着的团队常驻成员发消息时
+  点名的 provider(或类型、模型 id 的归属)与它在跑的那家不同,是这次 `Agent` 调用的错误:活着的成员保持它起来时的路由。
 - 子 Agent 随父会话的运行体结束:父会话被 `session.close` 或 `daemon.shutdown` 时,它被停下
   (`stopped`)。还有子 Agent 在跑的会话不会被驱逐。
 - 计入 `agents.max_concurrent`,也受委派深度限制;超了 → `TASK_LIMIT`,不排队。
@@ -4294,7 +4302,7 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 | `subagent_progress` | `{agent_label,agent_session_id,agent_type,parent_turn,parent_tool_use_id,task_id,event}` | 子 Agent 事件镜像,`event` 是嵌套的本表结构(同样不带 `turn_id`;子 Agent 的事件本表里没有的,整帧不发);`parent_tool_use_id` 是父会话里发起它的那次 `Agent` 调用,不知道时为 `null`;`task_id` 是它在 `session.tasks` 里的任务 |
 | `team_progress` | `{team,team_id,stage,stage_index,stage_count,status,members,failed}` | 团队阶段生命周期 |
 | `skills_changed` | `{added,removed}` | 会话可用的 skill 与它上次看到的不同:skill 文件在两轮之间增删后,下一轮开始时发一次(同一份 skill 目录上的每个会话各发各的;宿主目录的改动只到列了它的会话)。缓存了 `commands.list` 的客户端该重取 |
-| `provider_switched` | `{from,to,reason,task}` | 这次模型调用去了与本会话上一次调用不同的 provider(`model.order`):`from` 配额用完、没有密钥、密钥被拒、连不上或重试用尽,`reason` 逐个说明排在 `to` 前面的为什么没接;或排在前面的又能用了。`task` 是调用的种类(`main`、`subagent`、`compact`、`memory`、`title`、`web_search`、`web_fetch`);与父会话共用路由的子 Agent 的也报在父会话上,有自己路由的(`session.startAgent` / `Agent` 的 `provider`,§6.3)报在它自己的事件里,经 `subagent_progress` 转出;无论哪种,子 Agent 任务的 `detail.model` / `provider` 随下一帧 `task_updated` 更新 |
+| `provider_switched` | `{from,to,reason,task}` | 这次模型调用去了与本会话上一次调用不同的 provider(`model.order`):`from` 配额用完、没有密钥、密钥被拒、连不上或重试用尽,`reason` 逐个说明排在 `to` 前面的为什么没接;或排在前面的又能用了。`task` 是调用的种类(`main`、`subagent`、`compact`、`memory`、`title`、`web_search`、`web_fetch`);与父会话共用路由的子 Agent 的也报在父会话上,有自己路由的(`session.startAgent` / `Agent` / agent 类型的 `provider`,或有确定归属的模型 id,§6.3)报在它自己的事件里,经 `subagent_progress` 转出;无论哪种,子 Agent 任务的 `detail.model` / `provider` 随下一帧 `task_updated` 更新 |
 | `notification` | `{message,status}` | 模型用 `PushNotification` 要用户回来看:宿主该把 `message` 以通知的形式送到用户面前(桌面通知、消息推送……)。`status` 是 `"proactive"`(模型主动发的)或 `null`;引擎自己的提醒(如 `permit_always` 的 `local` 没能写下)也走这一帧,`status` 为 `null`。同时触发 `Notification` hook,`reason` 即 `message` |
 | `compact` | `{strategy,messages_before,messages_after,tokens_before,tokens_after,dropped_rounds?,dropped_messages?,estimated_tokens_saved?,trim?}` | 上下文被压缩或修剪了(§7.1) |
 | `user_message_delivered` | `{message_id,content}` | 运行中送来的消息(`on_busy:"steer"`)已加进对话,模型下一次调用会读到 |

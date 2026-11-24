@@ -505,7 +505,8 @@ fn member_task(
     let running = tasks.iter().any(|t| {
         t.kind == TaskType::Teammate
             && matches!(t.status, TaskStatus::Running | TaskStatus::Waiting)
-            && t.detail == detail
+            && t.detail["team"] == detail["team"]
+            && t.detail["member"] == detail["member"]
     });
     base::context::TaskInfo {
         task_id: member.id,

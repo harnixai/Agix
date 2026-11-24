@@ -89,7 +89,8 @@ pub struct AgentInput {
     #[serde(default)]
     pub model: Option<String>,
     /// The provider the sub-agent's calls go to first, over its type's; the
-    /// rest follow `model.order`.
+    /// rest follow `model.order`. Only a provider in this session's
+    /// `model.order`.
     #[serde(default)]
     pub provider: Option<String>,
     /// A JSON Schema the sub-agent's final answer must satisfy; the answer is

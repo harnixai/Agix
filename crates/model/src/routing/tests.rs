@@ -630,6 +630,36 @@ async fn a_route_starting_at_a_provider_sends_there_and_reports_its_own_switches
     assert!(parent.starting_at("nobody").is_err());
 }
 
+#[tokio::test]
+async fn a_route_starting_at_a_provider_falls_back_along_its_parents_route() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let own = provider(
+        "own",
+        &[],
+        [Some("own-strong"), Some("own-balanced"), Some("own-fast")],
+    );
+    let set = ProviderSet::new(
+        vec![
+            routed(ds(), Answer::Ok, &asked),
+            routed(claude(), Answer::Fail(ModelErrorKind::ServerError), &asked),
+            routed(own, Answer::Ok, &asked),
+        ],
+        vec!["ds".into(), "claude".into()],
+        TaskTiers::default(),
+    )
+    .unwrap();
+    let parent = set.session(Some("own")).unwrap();
+    let child = parent.starting_at("claude").unwrap();
+    let served = call(&child.model_for("subagent"), "").await.unwrap();
+    assert_eq!(served.as_deref(), Some("own"));
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["claude:sonnet", "own:own-balanced"]
+    );
+    assert!(child.in_order("own") && child.in_order("ds"));
+    assert!(!set.session(None).unwrap().in_order("own"));
+}
+
 #[test]
 fn a_model_has_a_home_only_where_it_is_listed_or_a_tier() {
     let asked = Arc::new(Mutex::new(Vec::new()));

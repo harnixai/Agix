@@ -453,7 +453,8 @@ allow without asking``,不写文件的把 `may write <writes>` 换成 `writes no
   每一次工具调用照常过权限规则。QuickJS 的限额限的是开销,不是恶意代码,所以包里的脚本
   能做什么由这份身份决定,而不是由虚拟机决定。
 - 包声明的 agent 类型带 `AgentTypeSource::Plugin`,它对 `permission_mode` / `max_turns` 的
-  覆盖被钳制——网上来的定义不能给子代理比会话本身更多。
+  覆盖被钳制——网上来的定义不能给子代理比会话本身更多;它写的 `provider` 必须在父会话的路由
+  (`model.order`)里,不在的当没写。
 - 包带的 skill 来源是 `SkillSource::Plugin`:`allowed-tools` 里只写工具名的整类授权不生效,
   要写成 `Tool(内容)`,而且内容要真正收窄,够得和整类授权一样远的也不生效:路径要解析到项目
   之内(`Write(src/**)` 生效,`Write(**)`、`Write(x/../../**)`、`Edit(/U*/**)`、`Write(/tmp/x/**)`

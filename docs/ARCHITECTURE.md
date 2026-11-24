@@ -758,8 +758,10 @@ prompt hook)互不相干。子 Agent、压缩、
 再取新 provider 里同一档的模型。子 Agent 点了 provider(`session.startAgent`、`Agent` 工具、agent 类型的
 `provider`),或点的模型 id 有确定的归属(某家的 `models` 列着它或把它作档位,不算"什么都收"的那家)而父会话的
 调用不会先去那里时,`Delegator::own_route` 经 `TaskRouting::starting_at` 给它一条自己的路由:同一个
-`ProviderSet`、那家在前,自己的"上一次去了哪"与观察者,所以它的 `provider_switched` 在它自己的事件里,不算到父会话
-头上;它的压缩和它再起的子 Agent 也走这条。其余子 Agent 与父会话共用路由。
+`ProviderSet`、那家在前、其余照父会话路由的顺序,自己的"上一次去了哪"与观察者,所以它的 `provider_switched` 在它自己的事件里,不算到父会话
+头上;它的压缩和它再起的子 Agent 也走这条。其余子 Agent 与父会话共用路由。只有宿主(`DelegateMode::Host`)
+可以点名父会话路由以外的 provider:模型与 agent 类型点名的要过 `TaskRouting::in_order`,未受信项目的 agent 类型
+的 `provider` 不生效 —— 这两样来自不受信的输入,而 provider 决定提示词与代码发往哪个端点。
 任务登记时 `Delegator::placed` 用 `TaskRouting::destination` 预测子 Agent 去哪(`detail.model` / `detail.provider`),
 每次调用实际去了哪由 `ModelEvent::Served` 说,经 `StreamResult.served` 与 `AgentEvent::StepEnd.served` 到
 `note_on_task`,它只改写任务 `detail` 的这两个键;路由回退后下一帧 `task_updated` 就是新值。侧链的

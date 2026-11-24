@@ -843,7 +843,7 @@ engine.shutdown().await;
 守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
 
 - **0.4.2**（相对 0.4.1；协议版本 5；详见 `upgrading-0.4.md`「0.4.2」）
-  - **子 Agent 的路由。** `base::provider::TaskRouting` 多三个必须实现的方法：`starting_at(provider) -> Result<Arc<dyn TaskRouting>, String>`（同一个 provider 集合、那家在前的一条自己的路由）、`home_of(model) -> Option<String>`、`destination(task, model) -> Destination`；自己实现路由的宿主要补上，`model::routing::SessionRouter` 是唯一的内置实现。新类型 `base::provider::Destination { provider, model }`。`AgentTypeDefinition.provider`、`DelegateRequest.provider` 是 `Option<String>`。
+  - **子 Agent 的路由。** `base::provider::TaskRouting` 多四个必须实现的方法：`starting_at(provider) -> Result<Arc<dyn TaskRouting>, String>`（同一个 provider 集合、那家在前、其余照这条路由的顺序的一条自己的路由）、`in_order(provider) -> bool`（那家在不在这条路由的顺序里；模型与 agent 类型点名的 provider 必须在）、`home_of(model) -> Option<String>`、`destination(task, model) -> Destination`；自己实现路由的宿主要补上，`model::routing::SessionRouter` 是唯一的内置实现。新类型 `base::provider::Destination { provider, model }`。`AgentTypeDefinition.provider`、`DelegateRequest.provider` 是 `Option<String>`。
   - **实际去了哪。** `ModelEvent::Served` 多 `model`（`#[serde(default)]`），`AgentEvent::StepEnd` 与 `StreamResult` 多 `served: Option<Destination>`；对它们穷举或按字段构造的要补。
   - **插件按会话收窄。** `AgentTypeSource::Plugin` 改为 `Plugin { plugin: String }`，类型不再是 `Copy`，`may_loosen`、`may_shadow` 改取引用；`SceneRegistry::narrowed(keep)` / `withholds(id)` 与 `McpManager::share_where(keep)` 是按会话去掉被排除的包的场景与 MCP server 用的；`SessionOptions.settings` 里的 `plugins.allow` / `plugins.enabled` 现在是会话键，`SessionPool::plugin_functions` 一类按会话筛的入口见协议文档 `plugin.functions`。
   - **宿主工具的放行。** `HostToolOption` 多 `permit: HostToolPermit`（`Ask` 缺省 / `Allow`），`agix::host_tools::HostToolPermit` 导出；构造 `HostToolOption` 的补这个字段。

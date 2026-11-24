@@ -196,9 +196,10 @@ pub fn merge_agent_types(
 }
 
 /// The project agent types that behave differently once the project is
-/// trusted: the ones that replace a type of the same name from elsewhere, or
+/// trusted: the ones that replace a type of the same name from elsewhere,
 /// may hand their sub-agent a looser mode or a higher call cap than
-/// `settings` give the session. As `agents/<name>`, for `project.status`.
+/// `settings` give the session, or name a provider. As `agents/<name>`, for
+/// `project.status`.
 pub fn project_agent_types_requiring_trust(
     settings: &LoadedSettings,
     plugin_types: &[AgentTypeDefinition],
@@ -217,6 +218,7 @@ pub fn project_agent_types_requiring_trust(
     .into_iter()
     .filter(|def| {
         below.contains_key(&def.name)
+            || def.provider.is_some()
             || def.permission_mode.is_some_and(|m| {
                 m.permissiveness() > settings.values.permissions.mode.permissiveness()
             })

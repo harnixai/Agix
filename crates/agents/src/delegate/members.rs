@@ -198,6 +198,7 @@ impl Delegator {
         let key = (seat.team.clone(), seat.member.clone());
         self.reclaim_idle_members(Some(&key));
 
+        self.live_member_keeps_its_provider(&key, &spec)?;
         if let Some(started) = self.message_live_member(&key, &prompt, spec.spend.clone()) {
             return Ok(started);
         }
@@ -239,6 +240,37 @@ impl Delegator {
             ..spec
         };
         self.spawn_member(key, seat, spec, prompt).await
+    }
+
+    /// `Err` when the member alive at `key` runs on another provider than
+    /// the one `spec`'s route starts at.
+    fn live_member_keeps_its_provider(
+        &self,
+        key: &(String, String),
+        spec: &Spec,
+    ) -> Result<(), DelegateError> {
+        let Some(asked) = spec.route.as_ref().map(|route| {
+            route
+                .destination(base::provider::TaskTiers::SUBAGENT, "")
+                .provider
+        }) else {
+            return Ok(());
+        };
+        let live = self.members.live.read().unwrap_or_else(|e| e.into_inner());
+        let runs_on = live
+            .get(key)
+            .and_then(|m| m.inbox.detail["provider"].as_str());
+        match runs_on {
+            Some(runs_on) if runs_on != asked => {
+                let (team, member) = key;
+                Err(DelegateError::Invalid(format!(
+                    "member `{member}` of team `{team}` already runs on provider `{runs_on}`, \
+                     and a live member keeps its provider. Message it without provider, or \
+                     stop it (TaskStop or TeamDelete) and message it again to start it on `{asked}`."
+                )))
+            }
+            _ => Ok(()),
+        }
     }
 
     /// `prompt` queued for the member alive at `key`, which counts as busy
