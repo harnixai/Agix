@@ -11,7 +11,7 @@ pub struct FunctionCall<'a> {
     pub function: PluginFunction,
     /// Whether it may write inside the function's `writes`.
     pub writes: bool,
-    /// At most [`time_limit`]; `None` is that.
+    /// At most [`time_limit`]; `None` is [`default_time`].
     pub time: Option<Duration>,
     /// The session it runs in, which the function is told; `None` for none.
     pub session_id: Option<String>,
@@ -29,6 +29,15 @@ pub struct FunctionCall<'a> {
 pub fn time_limit() -> Option<Duration> {
     #[cfg(feature = "ptc")]
     return Some(ptc::PluginCallTool::time_limit());
+    #[cfg(not(feature = "ptc"))]
+    None
+}
+
+/// How long a call runs when the host gives no time; `None` in a build that
+/// cannot run one.
+pub fn default_time() -> Option<Duration> {
+    #[cfg(feature = "ptc")]
+    return Some(ptc::PluginCallTool::default_time());
     #[cfg(not(feature = "ptc"))]
     None
 }

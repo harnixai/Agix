@@ -273,6 +273,7 @@ pub const CAPABILITIES: &[&str] = &[
     "host_call_context",
     "config_explain",
     "compact_events",
+    "plugin_call_long",
 ];
 
 /// [`CAPABILITIES`], plus those of the modules this build carries.

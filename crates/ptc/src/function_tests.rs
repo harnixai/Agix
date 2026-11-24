@@ -207,6 +207,26 @@ async fn the_time_given_is_the_limit_and_no_more_than_a_commands_can_be_given() 
     assert_eq!(r.structured_content.unwrap()["error"]["code"], "timeout");
 }
 
+#[test]
+fn a_host_call_may_be_given_ten_minutes_and_the_run_gets_what_it_was_given() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = function(dir.path(), "async function check() {}", None);
+    assert_eq!(PluginCallTool::time_limit(), Duration::from_secs(600));
+    let default = PluginCallTool::new(f.clone(), false).unwrap();
+    assert_eq!(default.limits().time, Duration::from_secs(120));
+    let long = PluginCallTool::new(f.clone(), false)
+        .unwrap()
+        .with_time(Duration::from_secs(600))
+        .unwrap();
+    assert_eq!(long.limits().time, Duration::from_secs(600));
+    assert_eq!(long.limits().time_with_agents, Duration::from_secs(600));
+    let mid = PluginCallTool::new(f, false)
+        .unwrap()
+        .with_time(Duration::from_secs(130))
+        .unwrap();
+    assert_eq!(mid.limits().time, Duration::from_secs(130));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cancelled_call_is_stopped_and_says_so() {
     let dir = tempfile::tempdir().unwrap();

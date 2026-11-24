@@ -857,6 +857,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `task_model` | 子 Agent 与团队成员的任务 `detail` 带 `model` / `provider`(登记时是预测,每次调用后按实际改写,经 `task_updated` 推出);`step_end` 带 `served`;侧链的 `session.get` 带 `model` / `provider`(§6.3、§7) |
 | `agent_token_budget` | `session.startAgent` 收 `token_budget`:子 Agent 自己的 token 上限,挂在会话的上限下面;用完时任务以 `failed`、`error: "budget_exceeded: …"` 结束(§4.8、§6.3) |
 | `subagent_provider` | 子 Agent 可以有自己的 provider:`session.startAgent`、`Agent` 工具与 agent 类型收 `provider`,有确定归属的模型 id 从它的归属起(§6.3) |
+| `plugin_call_long` | `plugin.call` 的 `timeout_ms` 至多 600000(缺省仍 120000),这次运行的时限就是宿主给的值;模型调的插件命令仍是两分钟(§6.3) |
 | `prompt_task` | 子 Agent 发起的 `prompt` 帧(三种 `prompt_type`)带 `task_id` 与 `agent_session_id`;子 Agent 里的权限询问带 `tool_use_id`(§7.3) |
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
@@ -4047,7 +4048,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
   "session_id": "…",                     // 在这个会话的环境里跑;不带会话时换成 "cwd": "/abs/project"(绝对路径),两者只给一个
   "writes": false,                       // 缺省 false
   "permission_rules": [ ],               // 写法见 §4.6
-  "timeout_ms": 30000,                   // 缺省并至多 120000
+  "timeout_ms": 30000,                   // 缺省 120000,至多 600000(能力位 `plugin_call_long`)
   "run_id": "gate-7" }                   // 可选:plugin.cancel 用它指这次调用,同一连接内唯一
 // ← result
 { "ok": true,  "value": <函数的返回值>, "logs": ["…"] }

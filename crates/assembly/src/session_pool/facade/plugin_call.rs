@@ -301,7 +301,7 @@ fn joined_result(
 fn time_of(call: &PluginCall) -> Result<Duration, PoolError> {
     let limit = runtime::plugin_call::time_limit().unwrap_or_default();
     match call.timeout {
-        None => Ok(limit),
+        None => Ok(runtime::plugin_call::default_time().unwrap_or_default()),
         Some(t) if t.is_zero() => Err(PoolError::InvalidRequest(
             "a plugin call's timeout is more than 0 ms".into(),
         )),

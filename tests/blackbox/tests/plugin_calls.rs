@@ -1287,3 +1287,52 @@ async fn a_timed_out_call_answers_without_waiting_for_its_wrap_up() -> anyhow::R
     embedded.shutdown().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_call_may_ask_for_ten_minutes_and_no_more() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_xflow("fn-long", &stub).await?;
+    let over = run
+        .client
+        .call(
+            "plugin.call",
+            in_dir(&run, "xflow.spin", json!({ "timeout_ms": 600001 })),
+        )
+        .await?;
+    let refused = over.error.map(|e| e.message).unwrap_or_default();
+    assert!(refused.contains("at most 600000 ms"), "{refused}");
+
+    let mut client = run.daemon.connect().await?;
+    let params = in_dir(
+        &run,
+        "xflow.wait",
+        json!({ "timeout_ms": 600000, "run_id": "long" }),
+    );
+    let call_id = client.send_request("plugin.call", params).await?;
+    let mut answered = None;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while answered.is_none() {
+        anyhow::ensure!(Instant::now() < deadline, "the call never ended");
+        let cancel_id = client
+            .send_request("plugin.cancel", json!({ "run_id": "long" }))
+            .await?;
+        let mut cancel_reply = None;
+        while cancel_reply.is_none() {
+            let frame = client
+                .next_frame()
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("closed"))?;
+            match frame["id"].as_i64() {
+                Some(id) if id == cancel_id => cancel_reply = Some(frame),
+                Some(id) if id == call_id => answered = Some(frame),
+                _ => {}
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let answered = answered.unwrap_or_default();
+    assert!(answered["error"].is_null(), "{answered}");
+    assert_eq!(error_of(&answered["result"]).0, "cancelled", "{answered}");
+    run.finish().await;
+    Ok(())
+}

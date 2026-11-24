@@ -73,7 +73,7 @@ pub struct PluginCallParams {
     /// Held after the session's or the scene's rules, for this call only.
     #[serde(default)]
     pub permission_rules: Vec<base::permission::PermissionRule>,
-    /// At most 120000.
+    /// Default 120000, at most 600000.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     /// What `plugin.cancel` names this call by, on this connection.

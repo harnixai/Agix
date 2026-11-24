@@ -5061,7 +5061,7 @@
         },
         "timeout_ms": {
           "default": null,
-          "description": "At most 120000.",
+          "description": "Default 120000, at most 600000.",
           "format": "uint64",
           "minimum": 0,
           "type": [

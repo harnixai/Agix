@@ -62,9 +62,19 @@ const FUNCTION_CALLS: Allowed = Allowed {
 };
 
 impl PluginCallTool {
-    /// The longest a call may be given to run.
-    pub fn time_limit() -> Duration {
+    /// How long a call runs when the host gives no time.
+    pub fn default_time() -> Duration {
         Limits::for_commands().time
+    }
+
+    /// The longest a call may be given to run: as long as `Bash`'s own.
+    pub fn time_limit() -> Duration {
+        Duration::from_secs(10 * 60)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn limits(&self) -> &Limits {
+        &self.limits
     }
 
     /// A call that may write inside the function's `writes` when `writes`,
