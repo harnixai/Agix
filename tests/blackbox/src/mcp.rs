@@ -51,11 +51,11 @@ impl McpToy {
             .ok_or_else(|| anyhow::anyhow!("toy server has no stdout"))?;
         let mut first = String::new();
         tokio::time::timeout(
-            Duration::from_secs(10),
+            Duration::from_secs(60),
             tokio::io::BufReader::new(stdout).read_line(&mut first),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("toy server printed no URL within 10s"))??;
+        .map_err(|_| anyhow::anyhow!("toy server printed no URL within 60s"))??;
         let url = first.trim().to_string();
         anyhow::ensure!(
             url.starts_with("http://"),

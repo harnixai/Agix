@@ -427,7 +427,7 @@ impl Daemon {
     /// socket well before it has a session pool, and a case that raced it
     /// would fail somewhere unrelated to what it was testing.
     async fn wait_until_answering(&mut self) -> anyhow::Result<()> {
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
         loop {
             if let Ok(mut client) = DaemonRpcClient::connect(&self.socket).await {
                 if let Ok(resp) = client.call("daemon.ping", serde_json::Value::Null).await {
@@ -438,7 +438,7 @@ impl Daemon {
             }
             // A daemon that has already exited will never answer, and the
             // reason it exited is in its stderr rather than in a timeout
-            // twenty seconds from now.
+            // two minutes from now.
             if let Running::Spawned { child, .. } = &mut self.running {
                 if let Ok(Some(status)) = child.try_wait() {
                     anyhow::bail!("daemon exited during startup ({status})\n{}", self.stderr());

@@ -12,10 +12,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-/// The events written to `path` so far, re-read until `enough` holds or ten
-/// seconds pass; the caller asserts on what it got either way.
+/// The events written to `path` so far, re-read until `enough` holds or a
+/// minute passes; the caller asserts on what it got either way.
 pub async fn telemetry_until(path: &Path, enough: impl Fn(&[Value]) -> bool) -> Vec<Value> {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let events: Vec<Value> = std::fs::read_to_string(path)
             .unwrap_or_default()

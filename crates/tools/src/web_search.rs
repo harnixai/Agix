@@ -402,7 +402,10 @@ mod tests {
         assert!(text.contains("Rust Lang"));
         assert!(text.contains("https://rust-lang.org"));
         assert!(text.contains("Crates.io"));
-        assert!(!text.contains("REMINDER"), "the sources rule lives in the guide: {text}");
+        assert!(
+            !text.contains("REMINDER"),
+            "the sources rule lives in the guide: {text}"
+        );
     }
 
     #[tokio::test]
