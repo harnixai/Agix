@@ -52,7 +52,7 @@ pub(super) async fn slot_and_state(
 
 pub(super) fn appending(text: &str) -> api::PromptChange {
     api::PromptChange {
-        append: Some(Some(text.to_string())),
+        append: Some(Some(text.into())),
         ..Default::default()
     }
 }
@@ -176,7 +176,7 @@ async fn a_prompt_set_on_a_session_out_of_memory_leaves_no_spec_behind() {
         .set_session_prompt(&sid, append())
         .await
         .unwrap_or_else(|_| panic!("a session out of memory takes the change"));
-    assert_eq!(answer.append.as_deref(), Some("Answer briefly."));
+    assert_eq!(answer.append, Some("Answer briefly.".into()));
     assert!(!pool.specs.contains(&sid));
     assert_eq!(
         pool.specs

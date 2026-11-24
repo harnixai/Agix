@@ -333,7 +333,10 @@ fn is_taken(name: &str) -> bool {
         names::CONFIG_PROMPT_APPEND,
         names::CONFIG_PROMPT_OVERRIDE,
     ];
-    name.starts_with(names::SCENE_PREFIX) || KERNEL.contains(&name)
+    [names::SCENE_PREFIX, names::HOST_PREFIX]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || KERNEL.contains(&name)
 }
 
 #[cfg(test)]
@@ -677,6 +680,7 @@ mod tests {
             names::CONFIG_PROMPT_OVERRIDE,
             names::SCENE_SKELETON,
             "scene.anything",
+            "host.anything",
         ] {
             let carrier = local(move |_| {
                 Ok(serde_json::json!({"name": taken, "order": 1, "content": "mine"}))

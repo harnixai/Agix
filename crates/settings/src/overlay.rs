@@ -379,6 +379,35 @@ mod tests {
     }
 
     #[test]
+    fn a_listed_append_replaces_the_settings_whole_and_a_list_that_does_not_hold_is_refused() {
+        use crate::{AppendBlock, PromptAppend};
+        let settings = loaded(|s| {
+            s.prompt.append = Some(PromptAppend::Blocks(vec![
+                AppendBlock::new("file", "F"),
+                AppendBlock::new("other", "O"),
+            ]))
+        });
+        let (out, held) = over(
+            &settings,
+            json!({"prompt": {"append": [{"name": "mine", "text": "M"}]}}),
+        );
+        assert!(held.is_empty(), "{held:?}");
+        assert_eq!(
+            out.values.prompt.append,
+            Some(PromptAppend::Blocks(vec![AppendBlock::new("mine", "M")]))
+        );
+        let (out, _) = over(&settings, json!({"prompt": {"append": "text"}}));
+        assert_eq!(out.values.prompt.append, Some("text".into()));
+
+        let twice = json!([{"name": "a", "text": "x"}, {"name": "a", "text": "y"}]);
+        let refused =
+            session_layer_problems(&json!({"prompt": {"append": twice}}), &Sections::none());
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert_eq!(refused[0].0, "prompt.append");
+        assert!(refused[0].1.contains("given twice"), "{refused:?}");
+    }
+
+    #[test]
     fn a_looser_value_is_held_to_the_settings_and_a_tighter_one_kept() {
         let settings = loaded(|s| s.turn.token_budget = Some(1000));
         let (out, held) = over(

@@ -62,8 +62,10 @@ pub mod names {
     pub const RULES: &str = "rules";
     /// Instructions contributed by connected MCP servers.
     pub const MCP_INSTRUCTIONS: &str = "mcp.instructions";
-    /// `settings.prompt.append`.
+    /// `settings.prompt.append` given as one text.
     pub const CONFIG_PROMPT_APPEND: &str = "config.prompt_append";
+    /// Prefix of each block of a `settings.prompt.append` list, by its name.
+    pub const HOST_PREFIX: &str = "host.";
     /// `settings.prompt.override`, which replaces everything else.
     pub const CONFIG_PROMPT_OVERRIDE: &str = "config.prompt_override";
 }
@@ -82,6 +84,8 @@ pub enum BlockOrigin {
     Plugin(String),
     /// Contributed by a script in this project, named by its path.
     Script(String),
+    /// An entry of a `settings.prompt.append` list, named as the host named it.
+    Host(String),
 }
 
 impl BlockOrigin {
@@ -94,7 +98,10 @@ impl BlockOrigin {
     /// opposed to something they installed. The distinction trust decisions
     /// will be made on.
     pub fn is_local(&self) -> bool {
-        matches!(self, Self::Kernel | Self::Config | Self::Script(_))
+        matches!(
+            self,
+            Self::Kernel | Self::Config | Self::Script(_) | Self::Host(_)
+        )
     }
 }
 
@@ -177,5 +184,6 @@ mod tests {
         assert_eq!(names::MCP_INSTRUCTIONS, "mcp.instructions");
         assert_eq!(names::CONFIG_PROMPT_APPEND, "config.prompt_append");
         assert_eq!(names::CONFIG_PROMPT_OVERRIDE, "config.prompt_override");
+        assert_eq!(names::HOST_PREFIX, "host.");
     }
 }

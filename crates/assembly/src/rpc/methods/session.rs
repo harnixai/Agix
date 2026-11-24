@@ -156,11 +156,11 @@ pub struct SkillDirsSet {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SetPromptParams {
     pub session_id: String,
-    /// A string sets it, `null` clears it back to the settings files', an
-    /// absent key leaves it.
+    /// A string or a list of `{name, text}` blocks sets it, `null` clears it
+    /// back to the settings files', an absent key leaves it.
     #[serde(default, deserialize_with = "Patch::present")]
-    #[schemars(with = "Option<String>")]
-    pub append: Patch<String>,
+    #[schemars(with = "Option<settings::PromptAppend>")]
+    pub append: Patch<settings::PromptAppend>,
     #[serde(default, rename = "override", deserialize_with = "Patch::present")]
     #[schemars(with = "Option<String>")]
     pub override_text: Patch<String>,

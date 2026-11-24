@@ -43,6 +43,8 @@ pub mod prompt {
     pub use ::base::prompt::BlockRole;
     pub use ::base::prompt::CacheStrategy;
     pub use ::base::prompt::PromptBlock;
+    pub use ::settings::AppendBlock;
+    pub use ::settings::PromptAppend;
 }
 
 pub mod rules {

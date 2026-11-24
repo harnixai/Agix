@@ -98,12 +98,6 @@ fn fold_system_blocks(blocks: Vec<PromptBlock>, separator: &str, name: &str) -> 
     out
 }
 
-fn appended(text: &str) -> PromptBlock {
-    PromptBlock::system(text.to_string())
-        .named(names::CONFIG_PROMPT_APPEND)
-        .from_origin(BlockOrigin::Config)
-}
-
 /// Builds the system prompt, merging in whatever registered a contribution.
 ///
 /// The kernel's own stages are registrations too — they are placed at the
@@ -136,7 +130,7 @@ fn assemble(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
             .named(names::CONFIG_PROMPT_OVERRIDE)
             .from_origin(BlockOrigin::Config);
         return std::iter::once(overridden)
-            .chain(managed_append.map(appended))
+            .chain(managed_append.iter().cloned())
             .collect();
     }
 
@@ -181,9 +175,11 @@ fn assemble(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
     }
 
     // 5. User append
-    if let Some(append) = prompt_append {
-        kernel.push((orders::CONFIG_PROMPT_APPEND, appended(append)));
-    }
+    kernel.extend(
+        prompt_append
+            .iter()
+            .map(|b| (orders::CONFIG_PROMPT_APPEND, b.clone())),
+    );
 
     // Registered contributions join the kernel's stages and the whole lot
     // sorts together. Stable, so blocks sharing an order keep the sequence

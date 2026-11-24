@@ -59,12 +59,6 @@ impl LoadedSettings {
             c.tool_results.inline_chars = chars;
         }
 
-        c.system_prompt = base::context::config::SystemPromptSettings {
-            append: settings.prompt.append.clone(),
-            override_text: settings.prompt.override_text.clone(),
-            ..c.system_prompt
-        };
-
         c
     }
 

@@ -1,12 +1,13 @@
 use super::*;
 use base::interface::scene::{FixedPrompt, TokenBudget};
+use settings::{AppendBlock, PromptAppend};
 use std::borrow::Cow;
 
 #[derive(Clone)]
 struct TestSettings {
-    prompt_append: Option<String>,
+    prompt_append: Option<PromptAppend>,
     prompt_override: Option<String>,
-    managed_append: Option<String>,
+    managed_append: Option<PromptAppend>,
     memory_enabled: bool,
 }
 
@@ -50,12 +51,14 @@ fn assemble_for_test(
     (skills_text, mcp_instructions): (Option<&str>, Option<&str>),
 ) -> Vec<PromptBlock> {
     let memory = settings.memory_enabled.then_some("memory instructions");
+    let blocks_of =
+        |a: &Option<PromptAppend>| a.as_ref().map(PromptAppend::blocks).unwrap_or_default();
     assemble(&AssemblyRequest {
         registry,
         scene,
         prompt_override: settings.prompt_override.as_deref(),
-        prompt_append: settings.prompt_append.as_deref(),
-        managed_append: settings.managed_append.as_deref(),
+        prompt_append: &blocks_of(&settings.prompt_append),
+        managed_append: &blocks_of(&settings.managed_append),
         memory_prompt: memory,
         ctx,
         rules,
@@ -126,6 +129,108 @@ fn the_managed_append_follows_an_override() {
     let contents: Vec<&str> = blocks.iter().map(|b| b.content.as_str()).collect();
     assert_eq!(contents, ["OVERRIDE", "MANAGED"]);
     assert_eq!(blocks[1].name.as_deref(), Some(names::CONFIG_PROMPT_APPEND));
+}
+
+fn host_blocks(entries: &[(&str, &str)]) -> PromptAppend {
+    PromptAppend::Blocks(
+        entries
+            .iter()
+            .map(|(name, text)| AppendBlock::new(*name, *text))
+            .collect(),
+    )
+}
+
+#[test]
+fn a_listed_append_is_one_block_per_entry_in_order_where_the_text_would_be() {
+    use base::interface::prompt_registry::{
+        orders, InMemoryPromptRegistry, PromptRegistry, RegisteredBlock,
+    };
+
+    let registry = InMemoryPromptRegistry::new();
+    let _before = registry.register_block(RegisteredBlock::system(
+        "mine.before",
+        orders::CONFIG_PROMPT_APPEND - 1,
+        "before",
+    ));
+    let _after = registry.register_block(RegisteredBlock::system(
+        "mine.after",
+        orders::CONFIG_PROMPT_APPEND + 1,
+        "after",
+    ));
+    let assembled = |append: PromptAppend| {
+        let mut settings = test_settings();
+        settings.prompt_append = Some(append);
+        assemble_for_test(
+            registry.as_ref(),
+            &test_scene(),
+            &settings,
+            &test_ctx(),
+            &[],
+            (Some("skills"), Some("mcp")),
+        )
+    };
+
+    let listed = assembled(host_blocks(&[("b", "second"), ("a", "first")]));
+    let named: Vec<(&str, &str, &BlockOrigin)> = listed
+        .iter()
+        .map(|b| (b.name.as_deref().unwrap(), b.content.as_str(), &b.origin))
+        .collect();
+    let at = named
+        .iter()
+        .position(|(n, ..)| *n == "mine.before")
+        .unwrap();
+    assert_eq!(
+        named[at..],
+        [
+            ("mine.before", "before", &BlockOrigin::Kernel),
+            ("host.b", "second", &BlockOrigin::Host("b".into())),
+            ("host.a", "first", &BlockOrigin::Host("a".into())),
+            ("mine.after", "after", &BlockOrigin::Kernel),
+        ]
+    );
+
+    let text = assembled("first\n\nsecond".into());
+    let one_at = text
+        .iter()
+        .position(|b| b.name.as_deref() == Some(names::CONFIG_PROMPT_APPEND))
+        .unwrap();
+    assert_eq!(one_at, at + 1);
+    assert_eq!(text[one_at].origin, BlockOrigin::Config);
+    let marks = |blocks: &[PromptBlock]| -> Vec<Option<CacheStrategy>> {
+        blocks.iter().map(|b| b.cache_strategy).collect()
+    };
+    let mut expected = marks(&text);
+    expected.insert(one_at, None);
+    assert_eq!(
+        marks(&listed),
+        expected,
+        "two blocks in place of one, and no breakpoint moves"
+    );
+}
+
+#[test]
+fn a_listed_managed_append_follows_an_override_block_by_block() {
+    let mut settings = test_settings();
+    settings.prompt_override = Some("OVERRIDE".into());
+    settings.managed_append = Some(host_blocks(&[("policy", "MANAGED")]));
+    let blocks = assemble_prompt(
+        &test_scene(),
+        &test_loaded(settings),
+        &test_ctx(),
+        None,
+        None,
+    );
+    let named: Vec<(Option<&str>, &str)> = blocks
+        .iter()
+        .map(|b| (b.name.as_deref(), b.content.as_str()))
+        .collect();
+    assert_eq!(
+        named,
+        [
+            (Some(names::CONFIG_PROMPT_OVERRIDE), "OVERRIDE"),
+            (Some("host.policy"), "MANAGED")
+        ]
+    );
 }
 
 /// Every block the kernel assembles must be addressable. An unnamed block

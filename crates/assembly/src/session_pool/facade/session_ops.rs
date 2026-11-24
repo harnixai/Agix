@@ -352,11 +352,17 @@ impl SessionPool {
         if !self.session_exists(session_id).await {
             return Err(PoolError::session_not_found(session_id));
         }
+        let append = change
+            .append
+            .map(|append| append.and_then(|a| serde_json::to_value(a).ok()));
+        let override_text = change
+            .override_text
+            .map(|text| text.map(serde_json::Value::String));
         let change = |spec: &mut SessionSpec| {
             spec.change_layer(|layer| {
-                for (key, text) in [(APPEND, change.append), (OVERRIDE, change.override_text)] {
-                    if let Some(text) = text {
-                        set_in_layer(layer, &dotted(key), text.map(serde_json::Value::String));
+                for (key, value) in [(APPEND, &append), (OVERRIDE, &override_text)] {
+                    if let Some(value) = value {
+                        set_in_layer(layer, &dotted(key), value.clone());
                     }
                 }
             });

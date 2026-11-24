@@ -383,6 +383,7 @@ fn block_view(block: &PromptBlock) -> SystemBlockView {
             BlockOrigin::Config => "config".to_string(),
             BlockOrigin::Plugin(id) => format!("plugin:{id}"),
             BlockOrigin::Script(path) => format!("script:{path}"),
+            BlockOrigin::Host(name) => format!("host:{name}"),
             other => format!("{other:?}").to_lowercase(),
         },
         text: block.content.clone(),

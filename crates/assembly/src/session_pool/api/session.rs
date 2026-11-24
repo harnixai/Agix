@@ -287,7 +287,7 @@ pub struct PromptChoice {
     pub session_id: String,
     /// The session's own `settings.prompt.append`; `None` follows the
     /// settings.
-    pub append: Option<String>,
+    pub append: Option<settings::PromptAppend>,
     /// The session's own `settings.prompt.override`.
     #[serde(rename = "override")]
     pub override_text: Option<String>,
@@ -303,7 +303,7 @@ pub struct PromptChoice {
 /// takes it back to the settings'.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptChange {
-    pub append: Option<Option<String>>,
+    pub append: Option<Option<settings::PromptAppend>>,
     pub override_text: Option<Option<String>>,
 }
 

@@ -214,6 +214,43 @@ async fn a_calls_system_blocks_are_what_the_model_was_sent() -> anyhow::Result<(
     Ok(())
 }
 
+/// A listed `prompt.append` reaches a call's system blocks one entry per block, each with its name and its host origin.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_listed_append_is_one_system_block_per_entry_in_the_call() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("calls-listed-append", &stub).start().await?;
+    stub.script([Reply::text("hello")]);
+    let mut extra = recorded(&run)?;
+    extra["options"]["settings"] = json!({ "prompt": { "append": [
+        { "name": "ext", "text": "EXT-BLOCK" },
+        { "name": "user", "text": "USER-BLOCK" },
+    ] } });
+    let session = run.session_with(extra).await?;
+    run.turn(&session, "hi").await?;
+    let list = until_calls(&mut run, &session, |r| !r.is_empty()).await?;
+    let index = conversation_rows(&list, &session)[0]["index"]
+        .as_u64()
+        .expect("index");
+    let detail = ok(run.client.session_call(&session, index).await?)?;
+    let hosted: Vec<(Value, Value, Value)> = detail["request"]["system"]
+        .as_array()
+        .expect("system")
+        .iter()
+        .filter(|b| b["source"].as_str().is_some_and(|s| s.starts_with("host.")))
+        .map(|b| (b["source"].clone(), b["origin"].clone(), b["text"].clone()))
+        .collect();
+    assert_eq!(
+        hosted,
+        [
+            (json!("host.ext"), json!("host:ext"), json!("EXT-BLOCK")),
+            (json!("host.user"), json!("host:user"), json!("USER-BLOCK")),
+        ],
+        "{detail}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
 /// Between two turns only the prompt append changes: the rows' digests tell which system block moved and that the tool table did not.
 #[tokio::test(flavor = "multi_thread")]
 async fn digests_tell_which_fixed_part_changed_between_two_turns() -> anyhow::Result<()> {

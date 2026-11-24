@@ -52,15 +52,16 @@ impl LoadedSettings {
         self
     }
 
-    /// The `prompt.append` of a managed layer that can be honoured.
-    pub fn managed_prompt_append(&self) -> Option<&str> {
-        self.managed
+    /// The blocks of the `prompt.append` of a managed layer that can be
+    /// honoured.
+    pub fn managed_prompt_append(&self) -> Vec<base::prompt::PromptBlock> {
+        let append = self
+            .managed
             .as_ref()
-            .filter(|m| m.error.is_none())?
-            .values
-            .get("prompt")?
-            .get("append")?
-            .as_str()
+            .filter(|m| m.error.is_none())
+            .and_then(|m| m.values.get("prompt")?.get("append"))
+            .and_then(|append| serde_json::from_value::<crate::PromptAppend>(append.clone()).ok());
+        append.map(|a| a.blocks()).unwrap_or_default()
     }
 
     /// `mode` held to the managed layer: no wider than the `permissions.mode`

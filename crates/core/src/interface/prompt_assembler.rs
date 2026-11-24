@@ -28,11 +28,11 @@ pub struct AssemblyRequest<'a> {
     pub scene: &'a SceneSpec,
     /// `settings.prompt.override`: when set, it is the whole prompt.
     pub prompt_override: Option<&'a str>,
-    /// `settings.prompt.append`.
-    pub prompt_append: Option<&'a str>,
-    /// The managed layer's `prompt.append`: appended under
+    /// The blocks of `settings.prompt.append`.
+    pub prompt_append: &'a [PromptBlock],
+    /// The blocks of the managed layer's `prompt.append`: appended under
     /// `prompt_override` too, which no lower layer can take away.
-    pub managed_append: Option<&'a str>,
+    pub managed_append: &'a [PromptBlock],
     /// The memory section, already rendered; `None` when memory is off.
     pub memory_prompt: Option<&'a str>,
     pub ctx: &'a ScenePromptContext<'a>,

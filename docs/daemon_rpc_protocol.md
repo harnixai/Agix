@@ -882,6 +882,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `host_call_context` | `host_tool_call` 与 `hook_call` 帧带 `cwd`(发起调用的会话的工作目录)与 `depth`(根会话 0,子 Agent 逐层加 1);hook 的 payload 带 `depth`(§7.4、§7.6) |
 | `config_explain` | 有 `config.explain`:一个设置键为什么是现在这个值,逐层列出值与结局(§6.4) |
 | `compact_events` | 每次改写历史的压缩都有首尾两帧:动手前一帧 `compact_started`,压成了以 `compact` 收尾,没压成以 `compact_ended` 收尾;子 Agent 的经 `subagent_progress` 转出(§7.1) |
+| `prompt_append_blocks` | `prompt.append`(`options.settings`、`session.setPrompt`、设置文件)也收 `[{"name","text"}]`:每项一个系统块 `host.<name>`,`session.inspectContext` 的 `origin` 为 `{"host":"<name>"}`、`tokens` 各算各的,`session.call` 的 `origin` 为 `host:<name>`(§6.3) |
 | `mcp_oauth_jwt` | 这个构建能用 `oauth.private_key_jwt`(feature `mcp-oauth-jwt`);没有这一项的构建,配了 `private_key_jwt` 的 MCP server 连接时报明确的错(`docs/mcp_auth.md`) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 | `runext` | 这个构建带插件命令:包的 `[[command]]` 经 `RunExt` 与 `/name args` 跑,`plugin.list` 带 `commands` / `command_conflicts`,`commands.list` 有 `kind:"ext"`,任务有 `kind:"ext"`(`docs/runext.md`) |
@@ -1390,7 +1391,7 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
       "permissions": { "mode": "default", "deny": ["Bash(rm:*)"] },
       "turn": { "token_budget": 2000000, "max_model_calls": 40 },
       "model": { "effort": "high", "thinking": "on" },  // low | medium | high | xhigh | max;auto | off | on | {"on_budget": N}(N ≥ 1024)
-      "prompt": { "append": "…" } },     // 系统提示词,见 session.setPrompt
+      "prompt": { "append": "…" } },     // 系统提示词:字符串,或 [{"name","text"}] 每项一块,见 session.setPrompt
     "recorder": { "mode":"replay", "name":"…", "dir":"/abs/recordings", "strict":true },
     "clock": { "start": "2026-10-28T09:00:00Z" },  // 可选,记下来的时间从这里起
     "telemetry": { "output":"/abs/path.jsonl" },
@@ -2163,7 +2164,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 ```jsonc
 // → params
 { "session_id": "…",
-  "append": "回答一律用中文。",   // 字符串 = 设置
+  "append": "回答一律用中文。",   // 字符串或 [{"name","text"}] = 设置
   "override": null }               // null = 清除,回到 settings 文件的值;省略 = 不变
 // ← result
 { "session_id": "…", "append": "回答一律用中文。", "override": null,   // 会话设置里的,null = 随设置
@@ -2171,6 +2172,17 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 ```
 
 `override` 替换整份系统提示(场景骨架、规则、MCP 说明都不再出现),`append` 接在最后。
+
+`append` 给成字符串是一个系统块 `config.prompt_append`;给成数组(能力位 `prompt_append_blocks`)
+是每项一块,名字 `host.<name>`、origin `{"host":"<name>"}`,按数组次序、整组在字符串那一块的位置,
+缓存断点不因此移动;`session.inspectContext` 逐块报 `tokens`。
+
+```jsonc
+"append": [ { "name": "harnix:review", "text": "…" },   // name:非空,字母数字与 _ . : -,组内不重复
+            { "name": "user", "text": "…" } ]           // text:非空;[] = 什么都不追加
+```
+
+数组整个替换下层的 `append`(字符串或数组都一样),不按项合并。
 从下一轮生效:空闲的会话立即按新提示重建,历史不变。和 `options` 一样记在会话日志里,
 重建、空闲回收后再用、daemon 重启后恢复都保留;settings 文件不被改动。和那一层的其他键一样,
 它派生的子 Agent 与团队成员拿到的也是这一层。
@@ -2178,7 +2190,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 有一轮正在跑、或有后台任务在跑时拒绝,`SESSION_BUSY`,`data` 同 `session.setModel`;重建时旧引擎
 没停下也是 `SESSION_BUSY`,提示词不变,会话被移出内存,同 `session.setModel`。上一轮的日志没写全、
 重建前补写又失败时是 `ENGINE_ERROR`(`kind: "persist_failed"`,§7.2),提示词不变,会话照旧。`append` 与 `override`
-都没给,或类型不对 → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`。
+都没给,或类型不对、数组里的 `name` / `text` 不合上面的规矩 → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`。
 
 #### `session.setPermissionMode`
 
@@ -2361,7 +2373,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 
 `request.system` 是组装好的系统块,按顺序、逐字是发出去的那份:`source` 是块名
 (`ARCHITECTURE.md` 的提示块名),`origin` 是谁放的(`kernel` / `config` / `plugin:<id>` /
-`script:<路径>`),`cache` 是缓存标记。`messages` 的元素是发给模型的消息;图片与文档的 base64 不给,
+`script:<路径>` / `host:<名>`),`cache` 是缓存标记。`messages` 的元素是发给模型的消息;图片与文档的 base64 不给,
 只留 `type`、`media_type` 与解码后的字节数 `bytes`。工具参数解析失败的调用,`tool_uses` 里那一项的
 `input` 是原始文本、带 `"malformed": true`。
 
@@ -2725,7 +2737,7 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
                  "thinking": "on", "thinking_source": "settings" },
   "system": [ { "name": "skills.catalog",   // 块名,见引擎的扩展点文档
                 "role": "user",             // system:进系统提示;user:作为对话开头的一条消息
-                "origin": "kernel",         // kernel | config | {"plugin":"…"} | {"script":"…"}
+                "origin": "kernel",         // kernel | config | {"plugin":"…"} | {"script":"…"} | {"host":"…"}
                 "tokens": 0, "text": "…" } ],
   "tools": [ { "name": "Bash", "source": "builtin", "schema_bytes": 0, "tokens": 0 } ],
   "plugins": [],                            // 会话实际用的插件包 [{name, version, required_by?}];因别的包依赖而补进来的带 required_by

@@ -165,8 +165,6 @@ impl Default for FileLimits {
 /// System-prompt assembly knobs sub-config.
 #[derive(Debug, Clone, Default)]
 pub struct SystemPromptSettings {
-    pub append: Option<String>,
-    pub override_text: Option<String>,
     /// Preferred response language. None = use the user's language/context.
     pub language: Option<String>,
     /// Enable Anthropic prompt-caching `scope: "global"` for the static system

@@ -26,6 +26,25 @@
         }
       ]
     },
+    "AppendBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Unique in the list; letters, digits and `_ . : -`.",
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "text"
+      ],
+      "type": "object"
+    },
     "AppendEntryParams": {
       "properties": {
         "event": {
@@ -235,6 +254,19 @@
           },
           "required": [
             "script"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An entry of a `settings.prompt.append` list, named as the host named it.",
+          "properties": {
+            "host": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "host"
           ],
           "type": "object"
         }
@@ -5788,14 +5820,33 @@
       ],
       "type": "object"
     },
+    "PromptAppend": {
+      "anyOf": [
+        {
+          "description": "One block, `config.prompt_append`.",
+          "type": "string"
+        },
+        {
+          "description": "One block per entry, `host.<name>`, in this order.",
+          "items": {
+            "$ref": "#/$defs/AppendBlock"
+          },
+          "type": "array"
+        }
+      ]
+    },
     "PromptChoice": {
       "properties": {
         "append": {
-          "description": "The session's own `settings.prompt.append`; `None` follows the\nsettings.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromptAppend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The session's own `settings.prompt.append`; `None` follows the\nsettings."
         },
         "applies": {
           "$ref": "#/$defs/Applies"
@@ -8425,11 +8476,15 @@
     "SetPromptParams": {
       "properties": {
         "append": {
-          "description": "A string sets it, `null` clears it back to the settings files', an\nabsent key leaves it.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromptAppend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A string or a list of `{name, text}` blocks sets it, `null` clears it\nback to the settings files', an absent key leaves it."
         },
         "override": {
           "type": [
