@@ -46,6 +46,14 @@ pub type PendingQuestions = Waiting<QuestionAnswer>;
 /// MCP servers' questions put to the host and not yet answered.
 pub type PendingMcpAnswers = Waiting<McpElicitationAnswer>;
 
+/// What an `Authorization` question is about.
+struct Authorizing {
+    tool_name: String,
+    paths: Vec<PathBuf>,
+    tool_use_id: Option<String>,
+    origin: Option<base::interface::elicitation::PromptOrigin>,
+}
+
 /// Asks over the session's event stream.
 pub struct ChannelElicitation {
     events: EventSender,
@@ -96,11 +104,16 @@ impl ChannelElicitation {
     async fn authorize(
         &self,
         request: ElicitRequest,
-        tool_name: String,
-        paths: Vec<PathBuf>,
-        tool_use_id: Option<String>,
+        asked: Authorizing,
         within: Option<Duration>,
     ) -> Option<ElicitOutcome> {
+        let Authorizing {
+            tool_name,
+            paths,
+            tool_use_id,
+            origin,
+        } = asked;
+        let permit_always = request.options.iter().any(|o| o.key == "permit_always");
         let (tx, rx) = tokio::sync::oneshot::channel();
         // Registered before emitting, so an answer that comes back instantly
         // still finds somewhere to land.
@@ -113,6 +126,8 @@ impl ChannelElicitation {
             turn_id: String::new(),
             tool_use_id,
             task_id: None,
+            origin,
+            permit_always,
         });
 
         Some(match open.wait(rx, within).await? {
@@ -160,9 +175,15 @@ impl ChannelElicitation {
                 tool_name,
                 paths,
                 tool_use_id,
+                origin,
             } => {
-                self.authorize(request, tool_name, paths, tool_use_id, within)
-                    .await
+                let asked = Authorizing {
+                    tool_name,
+                    paths,
+                    tool_use_id,
+                    origin,
+                };
+                self.authorize(request, asked, within).await
             }
             ElicitKind::Clarification {
                 header,
@@ -447,6 +468,7 @@ mod tests {
                 tool_name: "Bash".into(),
                 paths: vec![],
                 tool_use_id: None,
+                origin: None,
             },
             message: "run `rm -rf /`?".into(),
             options: ChannelElicitation::authorization_options(true),

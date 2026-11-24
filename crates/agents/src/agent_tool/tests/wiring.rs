@@ -728,6 +728,7 @@ fn authorization(id: &str, message: &str) -> base::interface::elicitation::Elici
             tool_name: "Bash".into(),
             paths: vec![],
             tool_use_id: Some("toolu_sub".into()),
+            origin: None,
         },
         message: message.into(),
         options: runtime::elicitation::ChannelElicitation::authorization_options(true),

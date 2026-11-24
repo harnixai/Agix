@@ -1,5 +1,5 @@
 // @ts-check
-// `notes [help] | list | peek | read-guarded | add <title> | escape`.
+// `notes [help] | list | peek | read-guarded | add <title> | pair <a> <b> | escape | stamp`.
 
 const USAGE = "usage: notes help | list | add <title> (body in input.body) | escape";
 
@@ -21,6 +21,21 @@ async function main(argv, input, ctx) {
       log(`wrote notes/${title}.md`);
       return { added: title };
     }
+    case "pair": {
+      const outcomes = [];
+      for (const title of rest) {
+        try {
+          await tools.Write({ file_path: `${ctx.projectRoot}/notes/${title}.md`, content: title });
+          outcomes.push(`${title}: written`);
+        } catch (e) {
+          outcomes.push(`${title}: ${e && e.message ? e.message : e}`);
+        }
+      }
+      return outcomes.join("\n");
+    }
+    case "stamp":
+      await tools.Bash({ command: `mkdir -p ${ctx.projectRoot}/notes && touch ${ctx.projectRoot}/notes/stamped.md` });
+      return "stamped";
     case "escape":
       await tools.Write({ file_path: `${ctx.projectRoot}/outside.txt`, content: "escaped" });
       return "wrote outside.txt";

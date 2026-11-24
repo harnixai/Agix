@@ -29,14 +29,18 @@ pub(crate) async fn collect_frozen(
 /// Calls a tool makes on its session's behalf, through the same dispatch as
 /// the model's own calls: a `RunCode` program's or a plugin command's
 /// sub-calls, and a skill's `` !`cmd` ``. Each runs under its own tool-use id derived from the
-/// caller's and cannot ask a person anything. Neither reports progress: the
-/// host never saw a `tool_use` under a derived id.
+/// caller's and cannot ask a person anything, except a plugin command's that
+/// the model or a person ran. None reports progress: the host never saw a
+/// `tool_use` under a derived id.
 pub(super) struct SubCallDispatcher {
     ctx: ToolExecCtx,
     prefix: String,
     next: std::sync::atomic::AtomicU64,
     /// The calls are made by a tool the host called: a plugin function.
     by_host: bool,
+    /// Who a plugin command's calls are put to: the model's or a person's
+    /// own asker, when one of them made the call this dispatches for.
+    asker: Option<Arc<dyn base::interface::elicitation::Elicitation>>,
 }
 
 impl SubCallDispatcher {
@@ -46,6 +50,8 @@ impl SubCallDispatcher {
     /// its task's.
     fn for_code(ctx: &ToolExecCtx) -> Self {
         let by_host = ctx.caller == Caller::Host;
+        let asker = matches!(ctx.caller, Caller::Model | Caller::Person)
+            .then(|| Arc::clone(&ctx.elicitation));
         let mut ctx = ctx.clone();
         ctx.elicitation = Arc::new(NoAsking);
         ctx.host_calls = None;
@@ -55,6 +61,7 @@ impl SubCallDispatcher {
         ctx.events = None;
         Self {
             by_host,
+            asker,
             ..Self::new(ctx)
         }
     }
@@ -76,6 +83,7 @@ impl SubCallDispatcher {
             ctx,
             next: std::sync::atomic::AtomicU64::new(1),
             by_host: false,
+            asker: None,
         }
     }
 
@@ -155,7 +163,12 @@ impl base::interface::tool_dispatch::ToolDispatch for SubCallDispatcher {
         scope: base::interface::tool_dispatch::CommandScope,
     ) -> Option<Arc<dyn base::interface::tool_dispatch::ToolDispatch>> {
         let mut ctx = self.ctx.clone();
-        ctx.caller = Caller::Command(Arc::new(CommandCalls::new(scope, &ctx.cwd, self.by_host)));
+        let asked_from = self.asker.as_ref().map(|_| self.prefix.as_str());
+        let calls = CommandCalls::new(scope, &ctx.cwd, self.by_host, asked_from);
+        if let (Some(asker), Some(_)) = (&self.asker, &calls.asks_as) {
+            ctx.elicitation = Arc::new(PermissionsOnly(Arc::clone(asker)));
+        }
+        ctx.caller = Caller::Command(Arc::new(calls));
         Some(Arc::new(Self::new(ctx)))
     }
 }
@@ -189,6 +202,50 @@ impl base::interface::elicitation::Elicitation for NoAsking {
     }
 }
 
+/// A plugin command's calls put permission questions to the person and
+/// nothing else: an MCP server's question or the nested-repository choice
+/// stays the model's to raise, as from a program.
+struct PermissionsOnly(Arc<dyn base::interface::elicitation::Elicitation>);
+
+impl PermissionsOnly {
+    fn passes(request: &base::interface::elicitation::ElicitRequest) -> bool {
+        matches!(
+            request.kind,
+            base::interface::elicitation::ElicitKind::Authorization { .. }
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl base::interface::elicitation::Elicitation for PermissionsOnly {
+    async fn ask(
+        &self,
+        request: base::interface::elicitation::ElicitRequest,
+    ) -> base::interface::elicitation::ElicitOutcome {
+        if Self::passes(&request) {
+            self.0.ask(request).await
+        } else {
+            NoAsking.ask(request).await
+        }
+    }
+
+    async fn ask_within(
+        &self,
+        request: base::interface::elicitation::ElicitRequest,
+        within: Option<std::time::Duration>,
+    ) -> Option<base::interface::elicitation::ElicitOutcome> {
+        if Self::passes(&request) {
+            self.0.ask_within(request, within).await
+        } else {
+            Some(NoAsking.ask(request).await)
+        }
+    }
+
+    fn can_clarify(&self) -> bool {
+        false
+    }
+}
+
 /// Whether anyone can be asked about a call the session makes. The one place
 /// that reads `unattended` to decide it.
 pub(crate) fn attendance_of(
@@ -204,6 +261,11 @@ pub(crate) fn attendance_of(
     }
     match caller {
         Caller::Model | Caller::Person | Caller::Host => Attendance::Attended,
+        Caller::Command(calls) if calls.asks() => Attendance::Attended,
+        Caller::Command(calls) if calls.was_refused() => Attendance::NoOneToAsk(
+            "the user already refused a call of this plugin command run, so its other calls \
+             are not put to them",
+        ),
         Caller::Code => Attendance::NoOneToAsk(
             "this call needs the user's approval, which a program cannot ask for — make this \
              call directly instead of from code",

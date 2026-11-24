@@ -157,7 +157,7 @@ pub(super) async fn authorize(
             reason: reason.clone(),
         },
         Answer::Cancelled { .. } => {
-            PermissionOutcome::deny(Stage::Attendance, "the session closed while asking")
+            PermissionOutcome::deny(Stage::Attendance, "the call was cancelled while asking")
         }
     };
     record_permission_decision(ctx, tool, name, input, &concluded, started);
@@ -196,7 +196,7 @@ pub(super) async fn authorize(
                         elapsed_ms: waited_ms,
                     },
                 ));
-            return Err("permission request cancelled: session closing".into());
+            return Err("permission request cancelled before it was answered".into());
         }
     };
     fire_ctx_lifecycle_hook(ctx, hooks::HookEvent::PermissionDenied, |i| {
@@ -377,8 +377,13 @@ async fn ask(
         reason: asked,
         ..
     } = asked;
-    let refused =
-        |refusal: Refusal| Answer::Refused(Reason::new(asked.stage, &refusal.reason), refusal);
+    let refused = |refusal: Refusal| {
+        if let Caller::Command(calls) = &ctx.caller {
+            calls.note_refusal();
+        }
+        Answer::Refused(Reason::new(asked.stage, &refusal.reason), refusal)
+    };
+    let offers_always = ctx.permission.grants.is_some() && always_would_count(ctx, &asked);
     let waited = std::time::Instant::now();
     announce_prompt(ctx, name, input).await;
     let prompt_timeout = ctx.config.permission_prompt_timeout_secs;
@@ -389,11 +394,10 @@ async fn ask(
                 tool_name: name.to_string(),
                 paths,
                 tool_use_id: Some(ctx.tool_use_id.clone()),
+                origin: ctx.caller.origin(),
             },
             message,
-            options: crate::elicitation::ChannelElicitation::authorization_options(
-                ctx.permission.grants.is_some(),
-            ),
+            options: crate::elicitation::ChannelElicitation::authorization_options(offers_always),
         },
         (prompt_timeout > 0).then(|| std::time::Duration::from_secs(prompt_timeout)),
     );
@@ -419,14 +423,34 @@ async fn ask(
             return Answer::Cancelled { waited_ms: waited.elapsed().as_millis() as u64 };
         }
     };
-    let permitted = Answer::Decided(permitted_by_person(facts, tool_ctx));
+    match take_answer(ctx, name, facts, outcome, offers_always).await {
+        Ok(()) => Answer::Decided(permitted_by_person(facts, tool_ctx)),
+        Err(refusal) => refused(refusal),
+    }
+}
+
+/// What the person's answer comes to: let through, or refused and why.
+async fn take_answer(
+    ctx: &ToolExecCtx,
+    name: &str,
+    facts: &base::interface::permission::ToolFacts,
+    outcome: base::interface::elicitation::ElicitOutcome,
+    offers_always: bool,
+) -> Result<(), Refusal> {
     match outcome.answer_as::<crate::agent::PermissionDecision>() {
-        Some(crate::agent::PermissionDecision::Permit) => permitted,
-        Some(crate::agent::PermissionDecision::PermitAlways { scope }) => {
+        Some(crate::agent::PermissionDecision::Permit) => Ok(()),
+        Some(crate::agent::PermissionDecision::PermitAlways { scope }) if offers_always => {
             grant_always(ctx, name, facts.subject.content(), scope).await;
-            permitted
+            Ok(())
         }
-        Some(crate::agent::PermissionDecision::Deny { reason }) => refused(Refusal::denied(reason)),
+        Some(crate::agent::PermissionDecision::PermitAlways { .. }) => {
+            tracing::debug!(
+                tool_name = %name,
+                "answered permit_always, which this question did not offer: allowed once"
+            );
+            Ok(())
+        }
+        Some(crate::agent::PermissionDecision::Deny { reason }) => Err(Refusal::denied(reason)),
         // Declined, or answered with something that is not a decision: the
         // decliner's own words are what the model is told.
         None => {
@@ -434,12 +458,21 @@ async fn ask(
                 .decline_reason()
                 .unwrap_or("the answer to the permission prompt was not a decision")
                 .to_string();
-            refused(Refusal {
+            Err(Refusal {
                 error: reason.clone(),
                 reason,
             })
         }
     }
+}
+
+/// Whether an "always allow" for this question would ever be consulted. A
+/// rule that asks is asked before any kept allow is looked at, so under one
+/// the next call would be asked again; and a plugin command's calls are its
+/// run's, not the model's to inherit.
+fn always_would_count(ctx: &ToolExecCtx, asked: &base::interface::permission::Reason) -> bool {
+    use base::interface::permission::Stage;
+    !matches!(asked.stage, Stage::Rule | Stage::ManagedRule) && !ctx.caller.is_code()
 }
 
 fn permitted_by_person(

@@ -287,6 +287,7 @@ pub fn capabilities() -> Vec<&'static str> {
     }
     if runtime::PTC_ENABLED && cfg!(feature = "plugin-packages") {
         out.push("runext");
+        out.push("runext_subcall_prompt");
         out.push("plugin_functions");
     }
     out

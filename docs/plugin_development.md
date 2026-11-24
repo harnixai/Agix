@@ -263,7 +263,8 @@ examples/plugins/quickjs/
    一行恰好像结构。几个变更改同一份数据时,记下写增量那一刻的哈希,合并前核对,别让后合并的
    悄悄覆盖先合并的;合并先核对完再动手写,中途失败的能重跑。
 5. **远端**。`callTool("mcp__<server>__items_query", …)` 调会话里配好的 MCP 服务,连接与登录由
-   引擎管。命令里的 MCP 调用询问即失败,要用户给这几个工具 allow 规则。
+   引擎管。命令里的 MCP 调用按会话的判定问(无人值守、从程序里跑时直接失败),要用户给这几个工具
+   allow 规则。
 6. **守卫与规矩**。`scripts/guard.js` 在 `tool.around` 上看 `via`:模型与 `RunCode` 对 `forge/`
    的直接读写拒绝并说该用哪条命令,`RunExt:forge` 放行;`scripts/rules.js` 在 `prompt.block` 加
    一行规矩。两者都只靠 `agix.path` 这类纯函数。守卫是给合作的模型的提醒,不是边界——shell

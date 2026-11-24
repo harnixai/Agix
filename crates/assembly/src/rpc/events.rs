@@ -239,6 +239,10 @@ pub enum PromptPayload {
         paths: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_use_id: Option<String>,
+        /// The plugin command run whose sub-call this is.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        origin: Option<base::interface::elicitation::PromptOrigin>,
+        permit_always: bool,
     },
     Question {
         prompt_id: String,
@@ -452,12 +456,16 @@ impl SessionEventPayload {
                 turn_id: _,
                 tool_use_id,
                 task_id: _,
+                origin,
+                permit_always,
             } => Self::Prompt(PromptPayload::Permission {
                 prompt_id: prompt_id.clone(),
                 tool_name: tool_name.clone(),
                 message: message.clone(),
                 paths: paths.iter().map(|p| p.display().to_string()).collect(),
                 tool_use_id: tool_use_id.clone(),
+                origin: origin.clone(),
+                permit_always: *permit_always,
             }),
             AgentEvent::QuestionPrompt {
                 prompt_id,

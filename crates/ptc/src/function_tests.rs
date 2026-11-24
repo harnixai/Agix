@@ -129,6 +129,7 @@ async fn the_function_gets_input_and_ctx_and_its_value_comes_back_structured() {
         *fake.scopes.lock().unwrap(),
         vec![CommandScope {
             command: "xflow.check".into(),
+            line: "xflow.check".into(),
             plugin: "xflow".into(),
             read_only: true,
             writes: Vec::new(),

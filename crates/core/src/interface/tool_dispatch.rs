@@ -35,6 +35,8 @@ pub struct SubCallAnswer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandScope {
     pub command: String,
+    /// The command line as run, for a question about one of its sub-calls.
+    pub line: String,
     pub plugin: String,
     pub read_only: bool,
     pub writes: Vec<String>,
@@ -49,7 +51,8 @@ pub trait ToolDispatch: Send + Sync {
     fn concurrency_safe(&self, name: &str, input: &Value) -> bool;
 
     /// Run one sub-call. A call that would need a person's approval is
-    /// refused rather than asked.
+    /// refused rather than asked, except one of a plugin command that the
+    /// model or a person ran in a session someone attends.
     async fn call(
         &self,
         name: &str,

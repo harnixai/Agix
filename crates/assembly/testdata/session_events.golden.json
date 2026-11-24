@@ -314,6 +314,7 @@
             "paths": [
               "/tmp/x"
             ],
+            "permit_always": true,
             "prompt_id": "p1",
             "prompt_type": "permission",
             "tool_name": "Bash",
@@ -346,6 +347,7 @@
             "paths": [
               "/tmp/x"
             ],
+            "permit_always": true,
             "prompt_id": "p1",
             "prompt_type": "permission",
             "tool_name": "Bash",
@@ -365,6 +367,7 @@
             "kind": "prompt",
             "message": "write?",
             "paths": [],
+            "permit_always": true,
             "prompt_id": "p2",
             "prompt_type": "permission",
             "tool_name": "Write"
@@ -390,9 +393,80 @@
             "kind": "prompt",
             "message": "write?",
             "paths": [],
+            "permit_always": true,
             "prompt_id": "p2",
             "prompt_type": "permission",
             "tool_name": "Write"
+          },
+          "session_id": "s1",
+          "turn_id": "t1"
+        }
+      }
+    },
+    {
+      "between_turns": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "kind": "prompt",
+            "message": "write?",
+            "origin": {
+              "command": "notes add a",
+              "tool_use_id": "toolu_x",
+              "via": "RunExt:notes"
+            },
+            "paths": [
+              "/p/notes/a.md"
+            ],
+            "permit_always": false,
+            "prompt_id": "p3",
+            "prompt_type": "permission",
+            "tool_name": "Write",
+            "tool_use_id": "toolu_x.1"
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      },
+      "case": "permission_prompt_from_a_command",
+      "event": {
+        "kind": "permission_prompt",
+        "message": "write?",
+        "origin": {
+          "command": "notes add a",
+          "tool_use_id": "toolu_x",
+          "via": "RunExt:notes"
+        },
+        "paths": [
+          "/p/notes/a.md"
+        ],
+        "permit_always": false,
+        "prompt_id": "p3",
+        "tool_name": "Write",
+        "tool_use_id": "toolu_x.1",
+        "turn_id": "inner"
+      },
+      "in_turn": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "kind": "prompt",
+            "message": "write?",
+            "origin": {
+              "command": "notes add a",
+              "tool_use_id": "toolu_x",
+              "via": "RunExt:notes"
+            },
+            "paths": [
+              "/p/notes/a.md"
+            ],
+            "permit_always": false,
+            "prompt_id": "p3",
+            "prompt_type": "permission",
+            "tool_name": "Write",
+            "tool_use_id": "toolu_x.1"
           },
           "session_id": "s1",
           "turn_id": "t1"
@@ -1860,6 +1934,7 @@
               "kind": "prompt",
               "message": "ok?",
               "paths": [],
+              "permit_always": true,
               "prompt_id": "p3",
               "prompt_type": "permission",
               "tool_name": "Bash"
@@ -1904,6 +1979,7 @@
               "kind": "prompt",
               "message": "ok?",
               "paths": [],
+              "permit_always": true,
               "prompt_id": "p3",
               "prompt_type": "permission",
               "tool_name": "Bash"

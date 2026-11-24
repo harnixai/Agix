@@ -71,6 +71,10 @@ fn agent_samples() -> Vec<(&'static str, Value)> {
             json!({"kind": "permission_prompt", "prompt_id": "p2", "tool_name": "Write", "message": "write?", "paths": [], "turn_id": "inner"}),
         ),
         (
+            "permission_prompt_from_a_command",
+            json!({"kind": "permission_prompt", "prompt_id": "p3", "tool_name": "Write", "message": "write?", "paths": ["/p/notes/a.md"], "turn_id": "inner", "tool_use_id": "toolu_x.1", "origin": {"via": "RunExt:notes", "tool_use_id": "toolu_x", "command": "notes add a"}, "permit_always": false}),
+        ),
+        (
             "question_prompt",
             json!({"kind": "question_prompt", "prompt_id": "toolu_q", "question": "which?", "header": "Pick", "options": [{"key": "a", "label": "A"}], "turn_id": "inner", "tool_use_id": "toolu_q", "task_id": "a1"}),
         ),

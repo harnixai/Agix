@@ -165,6 +165,7 @@ impl PluginCallTool {
     fn scope(&self) -> CommandScope {
         CommandScope {
             command: self.call_name.clone(),
+            line: self.call_name.clone(),
             plugin: self.function.plugin.clone(),
             read_only: !self.writes,
             writes: if self.writes {

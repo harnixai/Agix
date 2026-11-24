@@ -193,6 +193,7 @@ impl RunExtTool {
         let Some(dispatch) = ctx.dispatch.as_ref().and_then(|d| {
             d.for_command(CommandScope {
                 command: command.name.clone(),
+                line: parsed.line.clone(),
                 plugin: command.plugin.clone(),
                 read_only: parsed.read_only,
                 writes: if parsed.read_only {

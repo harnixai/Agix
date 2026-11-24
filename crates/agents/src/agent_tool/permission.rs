@@ -153,10 +153,13 @@ impl ParentElicitation {
         request: ElicitRequest,
         within: Option<std::time::Duration>,
     ) -> Option<ElicitOutcome> {
-        let (tool_name, paths) = match &request.kind {
+        let (tool_name, paths, origin) = match &request.kind {
             ElicitKind::Authorization {
-                tool_name, paths, ..
-            } => (tool_name, paths),
+                tool_name,
+                paths,
+                origin,
+                ..
+            } => (tool_name, paths, origin),
             ElicitKind::McpServer { .. } => return self.put_mcp(request, within).await,
             _ => {
                 return Some(ElicitOutcome::declined(
@@ -188,6 +191,8 @@ impl ParentElicitation {
             turn_id: String::new(),
             tool_use_id: None,
             task_id: self.task.as_ref().map(|task| task.task_id.clone()),
+            origin: origin.clone(),
+            permit_always: request.options.iter().any(|o| o.key == "permit_always"),
         };
         if events.send(prompt).is_err() {
             return Some(ElicitOutcome::declined(format!(

@@ -7,8 +7,9 @@
 //! Sub-calls go through the session's own dispatch (`ToolContext::dispatch`):
 //! the same validation, hooks, middleware, telemetry and permission checks as
 //! a call the model makes directly, except that one needing approval fails
-//! instead of asking. A program is a running task of kind `code`, a command
-//! one of kind `ext`.
+//! instead of asking — unless it is a command's that the model or a person ran
+//! in an attended session, which is asked about as the model's own call is.
+//! A program is a running task of kind `code`, a command one of kind `ext`.
 
 mod bytecode;
 mod calls;

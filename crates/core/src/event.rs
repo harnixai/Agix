@@ -128,6 +128,13 @@ pub enum AgentEvent {
         /// question outlives the turn it happened to arrive during.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task_id: Option<String>,
+        /// The plugin command whose sub-call this is; `None` for the model's own.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<crate::interface::elicitation::PromptOrigin>,
+        /// Whether `permit_always` is among the answers: an "always" that
+        /// would never be consulted is not offered.
+        #[serde(default = "logged")]
+        permit_always: bool,
     },
 
     /// The model asked the user something (`AskUserQuestion`) and waits for

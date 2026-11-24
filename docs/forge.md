@@ -202,8 +202,8 @@ flow:
 `callTool` 交回 MCP 工具的结构化结果（`structuredContent`）；工具只给了文本时，forge 从文本里取
 JSON。
 
-命令里的 MCP 调用按会话的判定走、询问即失败（`runext.md` §6），所以用 `mcp` 后端要给这三个工具
-一条 allow 规则：
+命令里的 MCP 调用按会话的判定走（`runext.md` §6）：有人值守时每次都问，无人值守或从程序里跑
+时直接失败，所以用 `mcp` 后端要给这三个工具一条 allow 规则：
 
 ```json
 "permissions": {

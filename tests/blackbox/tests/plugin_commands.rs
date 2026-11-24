@@ -12,7 +12,7 @@ use test_runner::plugin_fixture::{
     file_url, package_dir, package_ext, zip_with_entries, Entry, EXT_PACKAGE, EXT_PACKAGE_VERSION,
 };
 
-fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
+pub(crate) fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
     LiveRun::builder(name).config(LiveConfig::for_endpoint(
         &stub.base_url(),
         blackbox::ModelEndpoint::model(stub),
@@ -37,7 +37,11 @@ async fn install(
     })
 }
 
-async fn with_notes(name: &str, stub: &ProviderStub, settings: Value) -> anyhow::Result<LiveRun> {
+pub(crate) async fn with_notes(
+    name: &str,
+    stub: &ProviderStub,
+    settings: Value,
+) -> anyhow::Result<LiveRun> {
     let mut run = stubbed(name, stub)
         .settings(settings)
         .before_start(|world, project| {
@@ -63,7 +67,7 @@ fn turn_calls(stub: &ProviderStub) -> Vec<SeenRequest> {
         .collect()
 }
 
-fn result_of<'a>(
+pub(crate) fn result_of<'a>(
     events: &'a rpc_client::TurnEvents,
     tool: &str,
 ) -> Vec<&'a (String, String, bool)> {
@@ -127,6 +131,13 @@ async fn install_discloses_the_command_and_plugin_list_and_commands_list_show_it
     let capabilities = ping.result.unwrap_or_default()["capabilities"].clone();
     assert!(
         capabilities.as_array().unwrap().contains(&json!("runext")),
+        "{capabilities}"
+    );
+    assert!(
+        capabilities
+            .as_array()
+            .unwrap()
+            .contains(&json!("runext_subcall_prompt")),
         "{capabilities}"
     );
     run.finish().await;
@@ -635,7 +646,7 @@ fn config_writer(out: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
     Ok(package_dir(src.path(), out, "cfgw")?.0)
 }
 
-fn tool_result_text(stub: &ProviderStub, tool_use_id: &str) -> Option<(String, bool)> {
+pub(crate) fn tool_result_text(stub: &ProviderStub, tool_use_id: &str) -> Option<(String, bool)> {
     stub.calls().into_iter().find_map(|c| {
         let block = c.body["messages"]
             .as_array()?

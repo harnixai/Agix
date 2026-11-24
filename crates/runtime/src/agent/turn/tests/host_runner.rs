@@ -44,6 +44,7 @@ impl PluginCall {
     fn calling(tool: &'static str, read_only: bool) -> Self {
         let scope = CommandScope {
             command: "xflow.check".into(),
+            line: "xflow.check".into(),
             plugin: "xflow".into(),
             read_only,
             writes: Vec::new(),

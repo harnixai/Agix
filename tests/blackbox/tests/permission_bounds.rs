@@ -330,6 +330,41 @@ async fn permit_always_local_holds_for_the_next_session() -> anyhow::Result<()> 
     Ok(())
 }
 
+/// An ask rule is asked before any kept allow is looked at, so a question
+/// it raised does not offer "always": the answer would never be consulted.
+/// What the mode asks about offers it.
+#[tokio::test(flavor = "multi_thread")]
+async fn always_is_offered_only_where_it_would_be_consulted() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("always-offered", &stub)
+        .settings(json!({ "permissions": {"mode": "default", "ask": ["Bash(echo ruled*)"]} }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let watcher = run
+        .watch_with(&session, |_| Some(Answer::permit_always("session")))
+        .await?;
+    stub.script([
+        bash("r1", "echo ruled > r.txt"),
+        bash("r2", "echo ruled > r.txt"),
+        bash("m1", "echo moded > m.txt"),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "three").await?;
+    let offered: Vec<Value> = watcher
+        .asked()
+        .iter()
+        .map(|a| a.prompt["event"]["permit_always"].clone())
+        .collect();
+    assert_eq!(
+        offered,
+        [json!(false), json!(false), json!(true)],
+        "the rule's question is asked each time and never offers always"
+    );
+    run.finish().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn permit_always_for_the_session_is_not_written_down() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;

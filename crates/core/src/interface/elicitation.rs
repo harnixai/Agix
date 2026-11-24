@@ -43,6 +43,8 @@ pub enum ElicitKind {
         paths: Vec<PathBuf>,
         /// The `tool_use` block asking, when the asker knows it.
         tool_use_id: Option<String>,
+        /// The plugin command whose call it is; `None` for the model's own.
+        origin: Option<PromptOrigin>,
     },
     /// The model wants something clarified before it continues. The answer is
     /// either one of the request's option keys or free text, as a JSON string.
@@ -68,6 +70,18 @@ pub enum ElicitKind {
         /// The engine cut the server's message down to fit.
         limited: bool,
     },
+}
+
+/// The `RunExt` call a sub-call belongs to: what a host answering for the
+/// command, not for the model, judges by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PromptOrigin {
+    /// `RunExt:<command>`, as `tool.around` is told.
+    pub via: String,
+    /// The `RunExt` call's own `tool_use` id.
+    pub tool_use_id: String,
+    /// The command line it ran.
+    pub command: String,
 }
 
 /// What an MCP server's question wants back.
@@ -294,6 +308,7 @@ mod tests {
                 tool_name: "Bash".into(),
                 paths: vec![],
                 tool_use_id: None,
+                origin: None,
             },
             ElicitKind::Clarification {
                 header: None,

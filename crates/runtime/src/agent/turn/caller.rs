@@ -60,6 +60,14 @@ impl Caller {
         }
     }
 
+    /// The plugin command run a question about this call comes from.
+    pub(crate) fn origin(&self) -> Option<base::interface::elicitation::PromptOrigin> {
+        match self {
+            Self::Command(calls) => calls.asks_as.clone(),
+            _ => None,
+        }
+    }
+
     /// The package whose command made the call, as `tool.around` is told.
     pub(crate) fn plugin(&self) -> Option<String> {
         match self {
@@ -83,13 +91,36 @@ pub(crate) struct CommandCalls {
     pub writes: permissions::write_scope::WriteScope,
     pub grants: Vec<base::permission::PermissionRule>,
     pub by_host: bool,
+    /// What a question about one of its calls says it came from; `None`
+    /// where nobody can be asked about them: the run came from a program or
+    /// the host, not from the model or a person.
+    pub asks_as: Option<base::interface::elicitation::PromptOrigin>,
+    /// A person refused one of this run's calls, or let the question lapse:
+    /// the rest are not put to them.
+    refused: Refused,
 }
 
+/// Not part of what a run is held to: two runs of the same scope are the
+/// same caller whatever was refused in either.
+#[derive(Debug, Default)]
+struct Refused(std::sync::atomic::AtomicBool);
+
+impl PartialEq for Refused {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Refused {}
+
 impl CommandCalls {
+    /// `asked_from` is the `RunExt` call's `tool_use` id when the model or a
+    /// person ran it, so its calls can be asked about.
     pub(crate) fn new(
         scope: base::interface::tool_dispatch::CommandScope,
         root: &std::path::Path,
         by_host: bool,
+        asked_from: Option<&str>,
     ) -> Self {
         let (writes, dropped) = permissions::write_scope::WriteScope::new(&scope.writes, root);
         if !dropped.is_empty() {
@@ -100,15 +131,41 @@ impl CommandCalls {
                  directory inside it"
             );
         }
+        let asks_as =
+            asked_from
+                .filter(|_| !by_host)
+                .map(|id| base::interface::elicitation::PromptOrigin {
+                    via: format!("RunExt:{}", scope.command),
+                    tool_use_id: id.to_string(),
+                    command: scope.line.clone(),
+                });
         Self {
             grants: writes.grants(),
+            asks_as,
             command: scope.command,
             plugin: scope.plugin,
             read_only: scope.read_only,
             declared: scope.writes,
             writes,
             by_host,
+            refused: Refused::default(),
         }
+    }
+
+    /// Whether its calls are put to a person: the model or a person ran it,
+    /// and nobody has refused one of its calls yet.
+    pub(crate) fn asks(&self) -> bool {
+        self.asks_as.is_some() && !self.refused.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub(crate) fn was_refused(&self) -> bool {
+        self.refused.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub(crate) fn note_refusal(&self) {
+        self.refused
+            .0
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn kind(&self) -> &'static str {

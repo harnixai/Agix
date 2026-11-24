@@ -201,15 +201,35 @@ async function main(argv, input, ctx) {
   `.husky/` 里的钩子、`.vscode/tasks.json`、`Makefile`、`package.json` 的 scripts——不是配置路径，
   `writes` 写进来就能写；`.envrc` 例外，它对任何写入都受保护（不论谁写都被拒，除非
   `files.allow_write` 放开）。装包时看 `writes`，要把这类路径当作"能让别的程序执行代码"来看。
-- 项目内的读取照常允许；其它工具（`Bash`、`WebFetch`、MCP 工具）按会话的判定走，询问即失败。
+- 项目内的读取照常允许；其它工具（`Bash`、`WebFetch`、MCP 工具）按会话的判定走。
   所以 `writes` 是文件工具的边界，不是命令能做什么的边界：会话里有 `Bash` 的 allow 规则（或场景
   不问就放行的命令），命令经 `Bash` 能写的就不限于 `writes`；沙箱照常约束那条命令。
 - 只读调用里的写入一律失败：子调用写文件，或跑一条不是只读的命令，就失败——声明了只读的子
   命令写了文件，是插件的缺陷，不是授权问题。其它工具（MCP 工具等）在只读调用里照常按会话的
   判定走（走远端后端的只读子命令，如 `forge req list`，不该因此被拦），plan 模式下由 plan 模式拦下。
 
+**子调用要问的时候**：会话有人值守、这次 `RunExt` 是模型或用户（`/name args`）发起的，子调用里
+会话要问的——命中 ask 规则的写入、`default` 模式下会改东西的 `Bash`、MCP 工具——照常发
+`prompt_type:"permission"` 的提问，和模型自己调用时一样（子 Agent 里经父会话的宿主问）：
+
+- 提问帧带 `origin`：`{"via": "RunExt:<命令名>", "tool_use_id": <这次 RunExt 的>, "command": <命令行>}`，
+  宿主可以按命令而不是按模型来判。
+- 不提供"总是允许"（`permit_always: false`），答了 `permit_always` 也只放行这一次、什么都不记：
+  这份允许是这次命令的，不该变成模型自己的调用也能用的 allow。
+- 拒绝或超时，这个子调用失败，命令拿到错误；这次运行之后的子调用不再问，要问的直接失败——
+  命令不能靠捕获错误再问一遍来磨过一次"不"。等待算在这次 `RunExt` 的时限里，时限到了或这一轮
+  被打断，提问撤回（`prompt_resolved`）。
+- 只转权限提问。子调用里的 MCP server 提问（`mcp_elicitation`）、嵌套仓库要不要挪开这类问题照旧
+  不送到宿主，和程序里一样。`PermissionRequested` 与 `Notification` hook 照常触发，前者可以像对
+  模型的调用那样批准。
+- 上面列的直接失败的情形（`writes` 之外、配置路径、只读调用里的写入）和 deny 规则在提问之前
+  判定，不会被问到。
+
+无人值守的会话照旧询问即失败，宿主经 `plugin.call` 调的函数（§12）也一样。宿主从 `daemon.ping`
+的 `runext_subcall_prompt` 能力位看出引擎支持这一条。
+
 从 `RunCode` 里调 `RunExt` 时，那次 `RunExt` 调用本身也是程序的子调用：会写的子命令要询问就
-失败，要有 `RunExt(...)` 的 allow 规则或 `acceptEdits`。
+失败，要有 `RunExt(...)` 的 allow 规则或 `acceptEdits`；它的子调用同样不问，询问即失败。
 
 `PreToolUse` / `PostToolUse` hook、`tool.around` 脚本、中间件、遥测看得到每一次子调用。
 `tool.around` 的输入带 `via`：`"model"`、`"RunCode"` 或 `"RunExt:<命令名>"`，`via` 是后者时

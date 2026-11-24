@@ -525,6 +525,11 @@ bypass(`permissions.disable_bypass`)时,请求 `bypassPermissions` 的会话按 
 `permit_always` 放行的是这一次调用的原文:`touch *.rs` 不会放行 `touch other.rs`。`local` 写下的是
 `{"tool": "Bash(touch *.rs)", "action": "allow", "match": "exact"}`,`match: "exact"` 让之后的会话
 同样按原文比对。会话的权限不记放行时(嵌入方给了 `without_grants`),嵌入方的 `Elicitation` 收到的选项里没有 `permit_always`。
+ask 规则问的(含 managed 层的、宿主策略问的)和插件命令子调用的提问也不提供:ask 规则排在记下的放行之前判定,
+记下了下次也照样问;子调用的放行是那次命令的,不留给模型。这些提问帧上 `permit_always` 为 `false`,答了
+`permit_always` 只放行这一次,什么都不记。不看这个字段的宿主照旧会摆出"总是允许",选了也只放行这一次;
+以前在 ask 规则底下选 `local` 会写进 `settings.local.json` 的那条精确放行,现在不写——它只在那条 ask 规则
+被删掉之后才会生效。
 `local` 写不下去时——项目未信任(它的 `settings.local.json` 下次加载会被扣下,先 `project.trust`)、
 项目层目录是全局或场景目录、项目层目录是指到项目之外(如另一个项目的 `.agix`)的符号链接(与 `config.set` 等写项目层的
 方法同一个判定)、写盘失败——放行只在本会话有效,会话收到一帧 `notification`
@@ -867,6 +872,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `mcp_oauth_jwt` | 这个构建能用 `oauth.private_key_jwt`(feature `mcp-oauth-jwt`);没有这一项的构建,配了 `private_key_jwt` 的 MCP server 连接时报明确的错(`docs/mcp_auth.md`) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 | `runext` | 这个构建带插件命令:包的 `[[command]]` 经 `RunExt` 与 `/name args` 跑,`plugin.list` 带 `commands` / `command_conflicts`,`commands.list` 有 `kind:"ext"`,任务有 `kind:"ext"`(`docs/runext.md`) |
+| `runext_subcall_prompt` | 有人值守的会话里,模型或用户跑的插件命令的子调用要问时照常发 `permission` 提问,帧上带 `origin`(`docs/runext.md` §6);没有这一位的引擎上这类子调用直接失败 |
 | `plugin_functions` | 有 `plugin.functions` / `plugin.call` / `plugin.cancel`:宿主按名字调包的 `[[function]]`,拿回结构化结果(§6.5、`docs/runext.md` §12) |
 
 #### `daemon.status`
@@ -4222,7 +4228,7 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 | `tool_use` | `{id,name,input}` | 模型发起工具调用,参数已完整。参数不是完整 JSON 的(多半被输出上限截断)`input` 为 `{}`,不执行,随后的 `tool_result` 是说明这一点的错误 |
 | `tool_progress` | `{tool_use_id,name,message,progress?,total?,dropped}` | 运行中的工具调用报的进度,`tool_use_id` 是那次 `tool_use` 的 `id`;每次调用每秒至多一帧,`dropped` 是上一帧以来合并掉的条数。不进 transcript,不保证送达(§7.3) |
 | `tool_result` | `{id,name,content,is_error,file_changes?}` | 工具返回。`Write` / `Edit` / `NotebookEdit` 带 `file_changes`(§7.5),其余没有这个键 |
-| `prompt` | `permission`:`{prompt_type,prompt_id,tool_name,message,paths[],tool_use_id?}`;`question`:`{prompt_type,prompt_id,tool_use_id,question,header,options:[{key,label}]}`;`mcp_elicitation`:`{prompt_type,prompt_id,server,mode,message,requested_schema?,url?,url_host?,tool_use_id?}` | 需宿主回答,用 `session.respondToPrompt`;`tool_use_id` 是被问的那次 `tool_use`(`question` 的 `prompt_id` 就是它)。`question` 的 `header` 可为 `null`,`options` 为空表示自由回答。`mcp_elicitation` 的 `mode` 为 `form`(带 `requested_schema`)或 `url`(带 `url` 与它的主机 `url_host`,只有 `https` 和本机的 `http` 会推到宿主,别的直接回 server `decline`);`message`、`requested_schema`、`url` 都是 **MCP server 写的**,宿主要标明来自 `server`、显示完整 URL 与 `url_host`、不自动打开 —— Agix 自己从不打开它 |
+| `prompt` | `permission`:`{prompt_type,prompt_id,tool_name,message,paths[],tool_use_id?,origin?,permit_always}`;`question`:`{prompt_type,prompt_id,tool_use_id,question,header,options:[{key,label}]}`;`mcp_elicitation`:`{prompt_type,prompt_id,server,mode,message,requested_schema?,url?,url_host?,tool_use_id?}` | 需宿主回答,用 `session.respondToPrompt`;`tool_use_id` 是被问的那次 `tool_use`(`question` 的 `prompt_id` 就是它)。`permission` 的 `origin` 只在插件命令的子调用上出现:`{via:"RunExt:<命令名>",tool_use_id,command}`,`tool_use_id` 是那次 `RunExt` 的、`command` 是它的命令行,子调用自己的 `tool_use_id` 是 `<RunExt 的>.<n>`(子 Agent 里的提问不带 `tool_use_id`,只看 `origin`;`docs/runext.md` §6);`permit_always` 为 `false` 时不提供"总是允许"(§4.7)。`question` 的 `header` 可为 `null`,`options` 为空表示自由回答。`mcp_elicitation` 的 `mode` 为 `form`(带 `requested_schema`)或 `url`(带 `url` 与它的主机 `url_host`,只有 `https` 和本机的 `http` 会推到宿主,别的直接回 server `decline`);`message`、`requested_schema`、`url` 都是 **MCP server 写的**,宿主要标明来自 `server`、显示完整 URL 与 `url_host`、不自动打开 —— Agix 自己从不打开它 |
 | `prompt_resolved` | `{prompt_id,resolution,reason?}` | 那一帧 `prompt` 不再悬着:`resolution` 为 `answered`(引擎收下了一个回答,不论是哪条连接答的)或 `withdrawn`(引擎不再等)。`withdrawn` 时带 `reason`:`timed_out`(提问超时没人答)或 `cancelled`(这一轮被中断或结束、会话在关闭);`answered` 时没有这个字段。每个 `prompt` 至多一帧,推给全部订阅者,包括答题的那条连接;收到就把这个提问从界面上撤下 |
 | `host_tool_call` | `{call_id,tool_use_id,name,input,timeout_ms,task_id,agent_session_id,cwd,depth}` | 模型调用了宿主声明的工具,等宿主用 `session.respondToolCall` 回答(§7.4)。`call_id` 是 daemon 生成的,回答用它;`tool_use_id` 是引出它的那次 `tool_use`;`input` 已按声明的 schema 校验过;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null`;`cwd` 是发起调用的会话的工作目录(绝对路径),`depth` 是它的委派深度(根会话 0) |
 | `host_tool_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `host_tool_call` 不再悬着:`answered`(引擎收下了一个回答)或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`no_host`(发起时没有订阅者)、`host_gone`(订阅者走光了)。每个调用一帧,推给全部订阅者,连接提供的工具再加上提供者(§7.4) |
