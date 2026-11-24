@@ -1006,6 +1006,50 @@ impl LiveRun {
         self.client.session_create(params).await
     }
 
+    /// Waits until `mcp.status` for this run's project reports every named
+    /// server `connected`. A session's first turn only waits a bounded time
+    /// for servers still connecting, so a case that needs a server's tools
+    /// in its first turn calls this first.
+    pub async fn wait_mcp_connected(&mut self, servers: &[&str]) -> anyhow::Result<()> {
+        let project = self.project.clone();
+        self.wait_mcp_connected_at(&project, servers).await
+    }
+
+    /// [`Self::wait_mcp_connected`] for another project of the same daemon.
+    pub async fn wait_mcp_connected_at(
+        &mut self,
+        project: &Path,
+        servers: &[&str],
+    ) -> anyhow::Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            let resp = self
+                .client
+                .call(
+                    "mcp.status",
+                    json!({ "project_root": project.to_string_lossy() }),
+                )
+                .await?;
+            let listed = resp.result.unwrap_or_default()["servers"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let connected = |name: &str| {
+                listed
+                    .iter()
+                    .any(|s| s["name"] == name && s["state"] == "connected")
+            };
+            if servers.iter().all(|n| connected(n)) {
+                return Ok(());
+            }
+            anyhow::ensure!(
+                std::time::Instant::now() < deadline,
+                "mcp servers {servers:?} never all connected: {listed:?}"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
     /// A session on this run's project in `scene`, which is activated first.
     /// For a declarative scene written with
     /// [`World::write_declarative_scene`] before the run started.

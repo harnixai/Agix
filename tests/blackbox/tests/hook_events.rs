@@ -246,6 +246,7 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
         .start()
         .await?;
 
+    run.wait_mcp_connected(&["demo"]).await?;
     let session = run.session().await?;
     let _watcher = run
         .watch_with(&session, |e| {

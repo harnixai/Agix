@@ -44,6 +44,7 @@ fn toy_run(
 }
 
 async fn asking_session(run: &mut LiveRun) -> anyhow::Result<String> {
+    run.wait_mcp_connected(&["demo"]).await?;
     run.session_with(json!({
         "options": { "prompt_types": ["permission", "mcp_elicitation"] }
     }))
@@ -319,6 +320,7 @@ async fn a_host_that_did_not_ask_for_mcp_questions_gets_none_and_the_server_gets
     let mut run = toy_run("ask-unlisted", &stub, &calls, &[], json!({}))?
         .start()
         .await?;
+    run.wait_mcp_connected(&["demo"]).await?;
     let session = run.session().await?;
     let host = run.watch_with(&session, answering(blue())).await?;
     stub.script([

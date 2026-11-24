@@ -179,6 +179,7 @@ async fn a_saved_mcp_result_read_back_is_still_fenced() -> anyhow::Result<()> {
         }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["toy"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     let path = saved_path(&run, &session, "m1");
@@ -452,6 +453,7 @@ async fn a_saved_mcp_result_read_back_through_bash_is_fenced_and_bash_is_not_sug
         .settings(json!({ "mcp": { "servers": { "toy": McpToy::stdio_config(&[])? } } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["toy"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     let path = saved_path(&run, &session, "m1");

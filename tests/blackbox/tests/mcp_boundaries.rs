@@ -145,6 +145,7 @@ async fn a_server_that_never_answers_initialize_does_not_hold_up_a_session() -> 
     let session = tokio::time::timeout(Duration::from_secs(120), run.session())
         .await
         .map_err(|_| anyhow::anyhow!("session.create still waiting on the mute server"))??;
+    run.wait_mcp_connected(&["toy"]).await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
         Reply::calls(
@@ -414,6 +415,7 @@ async fn a_tool_listed_twice_by_one_server_is_offered_once() -> anyhow::Result<(
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["twin"]).await?;
     let session = run.session().await?;
     stub.script([Reply::text("ok")]);
     run.turn(&session, "hello").await?;
@@ -441,6 +443,7 @@ async fn the_same_tool_on_two_servers_reaches_the_server_it_was_called_on() -> a
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["left", "right"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
@@ -482,6 +485,7 @@ async fn an_allow_rule_for_one_tool_does_not_cover_a_tool_named_after_it() -> an
         }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["canned"]).await?;
     let session = run.session().await?;
     let watcher = run.watch(&session, false).await?;
     stub.script([Reply::text("ok")]);
@@ -538,6 +542,7 @@ async fn a_resource_read_without_a_server_goes_only_to_the_server_that_lists_it(
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["left", "right"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
@@ -588,6 +593,7 @@ async fn the_resource_tools_obey_a_deny_rule_written_for_their_server() -> anyho
         }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["corp", "other"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
@@ -641,6 +647,7 @@ async fn what_a_server_wrote_in_the_resource_and_tool_listings_reaches_the_model
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["corp"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
@@ -679,6 +686,8 @@ async fn odd_server_names_still_make_tool_names_the_api_accepts() -> anyhow::Res
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["with space", "dot.ted", "ünïcode", &"long".repeat(16)])
+        .await?;
     let session = run.session().await?;
     stub.script([Reply::text("ok")]);
     run.turn(&session, "hello").await?;
@@ -699,6 +708,7 @@ async fn a_call_whose_server_died_is_reported_not_replayed() -> anyhow::Result<(
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["toy"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
@@ -732,6 +742,7 @@ async fn a_server_that_died_comes_back_for_the_next_call() -> anyhow::Result<()>
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["toy"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
@@ -776,6 +787,7 @@ async fn an_interrupted_mcp_call_is_cancelled_on_the_server() -> anyhow::Result<
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["toy"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
@@ -813,6 +825,7 @@ async fn an_mcp_prompt_runs_as_a_slash_command_and_a_missing_argument_is_reporte
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["toy"]).await?;
     let session = run.session().await?;
     stub.script([Reply::text("greeted"), Reply::text("explained")]);
     run.turn(&session, "/mcp__toy__greet name=Zed-4471 style=formal")
@@ -1224,6 +1237,7 @@ async fn a_host_agent_denied_a_dotted_server_is_offered_none_of_its_tools() -> a
         })
         .start()
         .await?;
+    run.wait_mcp_connected(&["my.docs"]).await?;
     let session = run.session().await?;
     stub.script_when("PARENT-MARK", [Reply::text("ok")]);
     run.turn(&session, "PARENT-MARK hello").await?;
@@ -1285,6 +1299,7 @@ async fn an_mcp_resource_is_fenced_as_the_servers_words() -> anyhow::Result<()> 
         .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["toy"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
@@ -1407,6 +1422,7 @@ async fn a_sub_agent_granted_an_mcp_server_is_shown_and_keeps_its_tools() -> any
         })
         .start()
         .await?;
+    run.wait_mcp_connected(&["toy"]).await?;
     let session = run.session().await?;
     stub.script_when(
         "PARENT-MARK",

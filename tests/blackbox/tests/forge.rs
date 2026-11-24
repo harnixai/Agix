@@ -574,6 +574,7 @@ async fn requirements_on_an_mcp_backend_answer_as_the_local_ones() -> anyhow::Re
     };
 
     stub.script(steps());
+    run.wait_mcp_connected(&["reqdb"]).await?;
     let local_session = run.session().await?;
     let local = all_ok(&ran(&run.turn(&local_session, "track").await?));
     stub.script(steps());
@@ -648,6 +649,7 @@ async fn specs_on_an_mcp_backend_take_the_merged_entries() -> anyhow::Result<()>
         Reply::text("done"),
     ]);
     stub.script(script);
+    run.wait_mcp_connected(&["specdb"]).await?;
     let session = run.session().await?;
     let out = all_ok(&ran(&run.turn(&session, "build the totals").await?));
     assert_eq!(

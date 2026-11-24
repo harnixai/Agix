@@ -442,6 +442,7 @@ async fn the_toy_mcp_server_answers_over_stdio_and_http() -> anyhow::Result<()> 
         .start()
         .await?;
 
+    run.wait_mcp_connected(&["local", "web", "legacy"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([

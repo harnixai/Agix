@@ -351,6 +351,7 @@ async fn live_forge_requirements_live_on_the_remote_backend() -> anyhow::Result<
             }),
     )
     .await?;
+    run.wait_mcp_connected(&["reqdb"]).await?;
     let session = run.session().await?;
     let host = run.watch(&session, true).await?;
     step(

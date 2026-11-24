@@ -30,6 +30,7 @@ fn toy_run(
 }
 
 async fn session(run: &mut LiveRun) -> anyhow::Result<String> {
+    run.wait_mcp_connected(&["demo"]).await?;
     run.session_with(json!({
         "options": { "prompt_types": ["permission", "mcp_elicitation"] }
     }))

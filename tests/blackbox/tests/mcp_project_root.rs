@@ -103,6 +103,7 @@ async fn a_plugins_server_and_a_settings_server_learn_the_sessions_project() -> 
         .settings(json!({ "mcp": { "servers": { "toy": toy, "older": older } } }))
         .start()
         .await?;
+    run.wait_mcp_connected(&["toy", "older"]).await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     stub.script([
@@ -144,6 +145,7 @@ async fn two_sessions_on_two_projects_each_see_their_own() -> anyhow::Result<()>
         .await?;
     let other = run.world.project("mcp-root-b")?;
 
+    run.wait_mcp_connected(&["kit-mcp-tools"]).await?;
     let first = run.session().await?;
     let _first_host = run.watch(&first, true).await?;
     stub.script([
@@ -154,6 +156,8 @@ async fn two_sessions_on_two_projects_each_see_their_own() -> anyhow::Result<()>
 
     let second = run
         .session_with(json!({ "project_root": other.to_string_lossy() }))
+        .await?;
+    run.wait_mcp_connected_at(&other, &["kit-mcp-tools"])
         .await?;
     let _second_host = run.watch(&second, true).await?;
     stub.script([
@@ -220,6 +224,7 @@ async fn a_sub_agent_granted_the_server_sees_the_same_root() -> anyhow::Result<(
         })
         .start()
         .await?;
+    run.wait_mcp_connected(&["kit-mcp-tools"]).await?;
     let session = run.session().await?;
     stub.script_when(
         "PARENT-MARK",
@@ -286,6 +291,7 @@ async fn a_project_opened_through_a_symlink_reports_its_resolved_root() -> anyho
     let link = run.world.root().join("linked-project");
     std::os::unix::fs::symlink(&run.project, &link)?;
 
+    run.wait_mcp_connected(&["kit-mcp-tools"]).await?;
     let direct = run.session().await?;
     let _direct_host = run.watch(&direct, true).await?;
     stub.script([
@@ -326,6 +332,8 @@ async fn a_remote_server_is_offered_no_roots() -> anyhow::Result<()> {
             "local": local,
         } } }))
         .start()
+        .await?;
+    run.wait_mcp_connected(&["remote", "older", "local"])
         .await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
