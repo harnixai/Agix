@@ -4,10 +4,12 @@
 use super::*;
 use crate::rpc::methods::session::SessionRef;
 use crate::rpc::methods::tasks::*;
-use crate::rpc::{RpcError, StartAgentParams};
-use crate::session_pool::api::{
-    AgentStarted, MessageDelivery, PoolError, SessionTasks, TaskOutput,
-};
+use crate::rpc::RpcError;
+#[cfg(feature = "agents")]
+use crate::rpc::StartAgentParams;
+#[cfg(feature = "agents")]
+use crate::session_pool::api::AgentStarted;
+use crate::session_pool::api::{MessageDelivery, PoolError, SessionTasks, TaskOutput};
 
 rpc_methods! {
     "session.tasks" => tasks(SessionRef) -> SessionTasks;
