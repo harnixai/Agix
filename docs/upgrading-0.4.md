@@ -289,6 +289,8 @@
 
 - Anthropic 请求的 `cache_control` 不再带 `scope`(官方端点对 `{"type":"ephemeral","ttl":"1h","scope":"global"}` 回 400)。
   只有 `type` 与 `ttl`;场景侧「静态、缓存一小时」的含义不变。
+- Anthropic 请求里的 `cache_control` 总数不超过四个(工具、系统、消息合计;官方端点对第五个回 400)。系统块标得
+  多时只留静态前缀(`Global` 块)末尾与最后一个缓存块,另两个给工具前缀和对话滚动点。
 
 ### 嵌入(`agix` crate)
 

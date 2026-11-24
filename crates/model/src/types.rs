@@ -9,8 +9,9 @@ use serde_json::Value;
 
 /// Anthropic's hard cap on `cache_control` breakpoints in a single request,
 /// counted across `tools` + `system` + `messages` combined. A request with a
-/// fifth breakpoint is rejected with a 400, so every automatic breakpoint this
-/// module adds has to be budgeted against the ones the caller placed itself.
+/// fifth breakpoint is rejected with a 400, so the automatic breakpoints this
+/// module adds and the ones the caller placed share one budget, and the
+/// caller's are thinned to fit (see `MessagesRequest::cache_plan`).
 pub const MAX_CACHE_BREAKPOINTS: usize = 4;
 
 /// Beta flag historically required to use `ttl: "1h"` on a `cache_control`
@@ -147,24 +148,6 @@ impl MessagesRequest {
     // written at earlier positions, which is exactly what makes the rolling
     // scheme below work.
 
-    /// Breakpoints the caller placed explicitly on `system` blocks.
-    fn explicit_system_breakpoints(&self) -> usize {
-        self.system
-            .iter()
-            .filter(|b| match b {
-                SystemBlock::Text { cache_control, .. } => cache_control.is_some(),
-            })
-            .count()
-    }
-
-    /// Breakpoints the caller placed explicitly on `tools` entries.
-    fn explicit_tool_breakpoints(&self) -> usize {
-        self.tools
-            .iter()
-            .filter(|t| t.cache_control.is_some())
-            .count()
-    }
-
     /// Whether we should append an automatic breakpoint to the **last** entry
     /// of the rendered `tools` array.
     ///
@@ -181,7 +164,7 @@ impl MessagesRequest {
     /// choice about placement beats a heuristic.
     fn wants_auto_tools_breakpoint(&self) -> bool {
         !(self.tools.is_empty() && self.anthropic_tools.is_empty())
-            && self.explicit_tool_breakpoints() == 0
+            && self.tools.iter().all(|t| t.cache_control.is_none())
     }
 
     /// Index into `self.messages` of the message that should carry the rolling
@@ -219,19 +202,171 @@ impl MessagesRequest {
         prev.filter(|&i| self.messages.get(i).is_some_and(|m| !m.content.is_empty()))
     }
 
+    /// The last block of each stable run of cached `system` blocks, in order.
+    ///
+    /// A run is a stretch of consecutive cached blocks; an uncached block ends
+    /// it, and a volatile block (see [`SystemBlock::volatile`]) stands alone,
+    /// so the run ahead of it keeps a breakpoint of its own. The first entry
+    /// ends the leading run — the static prefix, when the prompt opens with
+    /// one — and the last is the last cached block.
+    fn system_run_ends(&self) -> Vec<usize> {
+        let extends_run = |b: Option<&SystemBlock>| {
+            matches!(
+                b,
+                Some(SystemBlock::Text {
+                    cache_control: Some(_),
+                    volatile: false,
+                    ..
+                })
+            )
+        };
+        self.system
+            .iter()
+            .enumerate()
+            .filter(|&(i, b)| match b {
+                SystemBlock::Text {
+                    cache_control: None,
+                    ..
+                } => false,
+                SystemBlock::Text { volatile: true, .. } => true,
+                SystemBlock::Text { .. } => !extends_run(self.system.get(i + 1)),
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Every `cache_control` marker the serialized request carries, in render
+    /// order (`tools` → `system` → `messages`), never more than
+    /// [`MAX_CACHE_BREAKPOINTS`].
+    ///
+    /// Candidates are taken in this order until the budget is spent:
+    ///
+    /// 1. the caller's last tool breakpoint; the end of the static `system`
+    ///    prefix and the last cached `system` block (see
+    ///    [`Self::system_run_ends`]); the caller's last message breakpoint;
+    /// 2. the automatic tools and rolling-message breakpoints;
+    /// 3. the caller's remaining breakpoints, later ones first — `system` run
+    ///    ends, then other `system` blocks, then messages, then tools.
+    ///
+    /// Within a section a later breakpoint caches a longer prefix, so earlier
+    /// ones only pay off when something between them changes. The one kept on
+    /// purpose is the static-prefix end: it is what still hits after the
+    /// dynamic tail of the system prompt changes. The automatic pair outranks
+    /// the rest of the caller's `system` markers because prompt assembly marks
+    /// every cached block, not a chosen few.
+    ///
+    /// The API also refuses a 1h entry rendered after a 5m one. Dropping
+    /// markers cannot create that order and the automatic tools marker (1h)
+    /// renders first; the rolling marker (5m) is left out when a kept 1h
+    /// marker follows it.
+    fn cache_plan(&self) -> Vec<Breakpoint> {
+        let explicit = |spot, one_hour| Breakpoint {
+            spot,
+            one_hour,
+            automatic: false,
+        };
+        let tools: Vec<Breakpoint> = self
+            .tools
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| {
+                let cc = t.cache_control.as_ref()?;
+                Some(explicit(Spot::Tool(i), cc.is_one_hour()))
+            })
+            .collect();
+        let system_cached: Vec<usize> = self
+            .system
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| match b {
+                SystemBlock::Text { cache_control, .. } => cache_control.is_some(),
+            })
+            .map(|(i, _)| i)
+            .collect();
+        let system = |i: usize| match &self.system[i] {
+            SystemBlock::Text { cache_control, .. } => explicit(
+                Spot::System(i),
+                cache_control
+                    .as_ref()
+                    .is_some_and(CacheControl::is_one_hour),
+            ),
+        };
+        let run_ends = self.system_run_ends();
+        let messages: Vec<Breakpoint> = self
+            .messages
+            .iter()
+            .enumerate()
+            .flat_map(|(i, m)| {
+                m.content
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(j, b)| match b {
+                        ContentBlock::Text {
+                            cache_control: Some(cc),
+                            ..
+                        } => Some(explicit(
+                            Spot::Message(i, j),
+                            cc.get("ttl").and_then(Value::as_str) == Some("1h"),
+                        )),
+                        _ => None,
+                    })
+            })
+            .collect();
+
+        // 1-hour TTL for the tool prefix: the tool array is fixed for the
+        // lifetime of a session, so it should outlive the gaps between turns.
+        // 5 minutes for the rolling marker: it is superseded by the next
+        // turn's, so it only has to survive one round trip, and a 5m write
+        // costs 1.25x base against 2x for 1h.
+        let auto_tools = self.wants_auto_tools_breakpoint().then(|| Breakpoint {
+            spot: Spot::Tool(self.tools.len() + self.anthropic_tools.len() - 1),
+            one_hour: true,
+            automatic: true,
+        });
+        let auto_message = self
+            .auto_message_breakpoint_index()
+            .map(|i| Spot::Message(i, self.messages[i].content.len() - 1))
+            .filter(|spot| !messages.iter().any(|b| b.spot == *spot))
+            .map(|spot| Breakpoint {
+                spot,
+                one_hour: false,
+                automatic: true,
+            });
+
+        let mut candidates: Vec<Breakpoint> = Vec::new();
+        candidates.extend(tools.last().copied());
+        candidates.extend(run_ends.first().map(|&i| system(i)));
+        candidates.extend(run_ends.last().map(|&i| system(i)));
+        candidates.extend(messages.last().copied());
+        candidates.extend(auto_tools);
+        candidates.extend(auto_message);
+        candidates.extend(run_ends.iter().rev().map(|&i| system(i)));
+        candidates.extend(system_cached.iter().rev().map(|&i| system(i)));
+        candidates.extend(messages.iter().rev().copied());
+        candidates.extend(tools.iter().rev().copied());
+
+        let mut kept: Vec<Breakpoint> = Vec::with_capacity(MAX_CACHE_BREAKPOINTS);
+        for bp in candidates {
+            if kept.len() == MAX_CACHE_BREAKPOINTS {
+                break;
+            }
+            if !kept.iter().any(|k| k.spot == bp.spot) {
+                kept.push(bp);
+            }
+        }
+        if let Some(rolling) = auto_message {
+            if kept.iter().any(|b| b.one_hour && b.spot > rolling.spot) {
+                kept.retain(|b| b.spot != rolling.spot);
+            }
+        }
+        kept.sort_by_key(|b| b.spot);
+        kept
+    }
+
     /// True when any `cache_control` this request will emit uses the 1-hour
     /// TTL — including the automatic tools breakpoint, which does.
     pub fn uses_1h_cache_ttl(&self) -> bool {
-        let explicit = self.system.iter().any(|b| match b {
-            SystemBlock::Text { cache_control, .. } => cache_control
-                .as_ref()
-                .is_some_and(CacheControl::is_one_hour),
-        }) || self.tools.iter().any(|t| {
-            t.cache_control
-                .as_ref()
-                .is_some_and(CacheControl::is_one_hour)
-        });
-        explicit || self.wants_auto_tools_breakpoint()
+        self.cache_plan().iter().any(|b| b.one_hour)
     }
 
     /// Add [`EXTENDED_CACHE_TTL_BETA`] to `betas` when this request uses a
@@ -243,6 +378,70 @@ impl MessagesRequest {
     pub fn ensure_cache_ttl_beta(&mut self) {
         if self.uses_1h_cache_ttl() && !self.betas.iter().any(|b| b == EXTENDED_CACHE_TTL_BETA) {
             self.betas.push(EXTENDED_CACHE_TTL_BETA.to_string());
+        }
+    }
+}
+
+/// A place a `cache_control` marker can sit. The derived order is the API's
+/// render order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Spot {
+    Tool(usize),
+    System(usize),
+    Message(usize, usize),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Breakpoint {
+    spot: Spot,
+    one_hour: bool,
+    automatic: bool,
+}
+
+/// Make the serialized `tools`, `system` and `messages` carry exactly the
+/// markers in `plan`: the caller's markers left out of it are removed and the
+/// automatic ones written in.
+fn apply_cache_plan(
+    plan: &[Breakpoint],
+    tools: &mut [Value],
+    system: &mut [Value],
+    messages: &mut [Value],
+) {
+    let strip = |v: &mut Value, spot: Spot| {
+        if plan.iter().all(|b| b.spot != spot) {
+            if let Some(obj) = v.as_object_mut() {
+                obj.remove("cache_control");
+            }
+        }
+    };
+    for (i, t) in tools.iter_mut().enumerate() {
+        strip(t, Spot::Tool(i));
+    }
+    for (i, b) in system.iter_mut().enumerate() {
+        strip(b, Spot::System(i));
+    }
+    for (i, m) in messages.iter_mut().enumerate() {
+        if let Some(blocks) = m.get_mut("content").and_then(Value::as_array_mut) {
+            for (j, b) in blocks.iter_mut().enumerate() {
+                strip(b, Spot::Message(i, j));
+            }
+        }
+    }
+    for bp in plan.iter().filter(|b| b.automatic) {
+        let target = match bp.spot {
+            Spot::Tool(i) => tools.get_mut(i),
+            Spot::System(i) => system.get_mut(i),
+            Spot::Message(i, j) => messages
+                .get_mut(i)
+                .and_then(|m| m.get_mut("content"))
+                .and_then(|c| c.get_mut(j)),
+        };
+        let cc = match bp.one_hour {
+            true => CacheControl::ephemeral_1h(),
+            false => CacheControl::ephemeral_5m(),
+        };
+        if let Some(target) = target {
+            set_cache_control(target, &cc);
         }
     }
 }
@@ -272,74 +471,37 @@ fn set_cache_control(target: &mut Value, cc: &CacheControl) {
 // `tools` JSON array so built-in tools (web_search_20250305) appear in the
 // same array as function tools, matching the Anthropic Messages API contract.
 //
-// It is also where the automatic prompt-cache breakpoints are placed — see the
-// block comment on `MessagesRequest`'s breakpoint helpers for why the decision
-// has to happen here, with the whole request in view.
+// It is also where the prompt-cache breakpoints are settled — see the block
+// comment on `MessagesRequest`'s breakpoint helpers for why the decision has
+// to happen here, with the whole request in view.
 impl Serialize for MessagesRequest {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
 
-        // Breakpoint budget. `system` blocks are already marked by the caller
-        // (from `PromptBlock.cache_strategy`), so they are spent first;
-        // whatever is left is handed to tools and then to messages, in that
-        // order. Tools come first because they sit at the very front of the
-        // rendered prefix and are the only entry that survives a system-prompt
-        // change — a messages breakpoint is worthless if the prefix ahead of
-        // it already moved.
-        let mut budget = MAX_CACHE_BREAKPOINTS
-            .saturating_sub(self.explicit_system_breakpoints())
-            .saturating_sub(self.explicit_tool_breakpoints());
+        fn values<T: Serialize, E: serde::ser::Error>(
+            items: impl IntoIterator<Item = T>,
+        ) -> Result<Vec<Value>, E> {
+            items
+                .into_iter()
+                .map(|t| serde_json::to_value(t).map_err(E::custom))
+                .collect()
+        }
+
+        let mut system: Vec<Value> = values(&self.system)?;
+        let mut all_tools: Vec<Value> = values(&self.tools)?;
+        all_tools.extend(values::<_, S::Error>(&self.anthropic_tools)?);
+        let mut messages: Vec<Value> = values(&self.messages)?;
+        apply_cache_plan(
+            &self.cache_plan(),
+            &mut all_tools,
+            &mut system,
+            &mut messages,
+        );
 
         let mut map = s.serialize_map(None)?;
-
-        // Required scalar fields
         map.serialize_entry("model", &self.model)?;
         map.serialize_entry("max_tokens", &self.max_tokens)?;
-        map.serialize_entry("system", &self.system)?;
-
-        // Merge tools + anthropic_tools into one JSON array
-        let mut all_tools: Vec<Value> =
-            Vec::with_capacity(self.tools.len() + self.anthropic_tools.len());
-        for t in &self.tools {
-            all_tools.push(serde_json::to_value(t).map_err(serde::ser::Error::custom)?);
-        }
-        for bt in &self.anthropic_tools {
-            all_tools.push(serde_json::to_value(bt).map_err(serde::ser::Error::custom)?);
-        }
-        // The tool-prefix breakpoint. 1-hour TTL: the tool array is fixed for
-        // the lifetime of a session, so it should outlive the gaps between
-        // turns (a user thinking for ten minutes shouldn't cost a full
-        // re-bill of every tool schema).
-        if budget > 0 && self.wants_auto_tools_breakpoint() {
-            if let Some(last) = all_tools.last_mut() {
-                set_cache_control(last, &CacheControl::ephemeral_1h());
-                budget -= 1;
-            }
-        }
-
-        let mut messages: Vec<Value> = Vec::with_capacity(self.messages.len());
-        for m in &self.messages {
-            messages.push(serde_json::to_value(m).map_err(serde::ser::Error::custom)?);
-        }
-        // The rolling conversation breakpoint. 5-minute TTL rather than 1h:
-        // this entry is superseded by the next turn's, so it only has to
-        // survive one round trip, and a 5m write costs 1.25x base against 2x
-        // for 1h.
-        if budget > 0 {
-            if let Some(idx) = self.auto_message_breakpoint_index() {
-                if let Some(last) = messages
-                    .get_mut(idx)
-                    .and_then(|m| m.get_mut("content"))
-                    .and_then(|c| c.as_array_mut())
-                    .and_then(|blocks| blocks.last_mut())
-                {
-                    set_cache_control(last, &CacheControl::ephemeral_5m());
-                    budget -= 1;
-                }
-            }
-        }
-        let _ = budget; // no further automatic breakpoints today
-
+        map.serialize_entry("system", &system)?;
         map.serialize_entry("messages", &messages)?;
         map.serialize_entry("stream", &self.stream)?;
         map.serialize_entry("tools", &all_tools)?;
@@ -384,6 +546,8 @@ pub enum SystemBlock {
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<CacheControl>,
+        #[serde(skip)]
+        volatile: bool,
     },
 }
 
@@ -392,12 +556,31 @@ impl SystemBlock {
         Self::Text {
             text: s.into(),
             cache_control: None,
+            volatile: false,
         }
     }
     pub fn text_cached(s: impl Into<String>, cc: CacheControl) -> Self {
         Self::Text {
             text: s.into(),
             cache_control: Some(cc),
+            volatile: false,
+        }
+    }
+
+    /// Marks a block whose text may change between calls, so it never extends
+    /// the stable run of cached blocks ahead of it and that run's breakpoint
+    /// survives the trimming to [`MAX_CACHE_BREAKPOINTS`]. Not sent.
+    pub fn volatile(self) -> Self {
+        match self {
+            Self::Text {
+                text,
+                cache_control,
+                ..
+            } => Self::Text {
+                text,
+                cache_control,
+                volatile: true,
+            },
         }
     }
 }
@@ -750,23 +933,24 @@ mod tests {
         }
     }
 
-    /// Every `cache_control` in the request, as `(location, ttl)` pairs.
-    /// Counting these is the whole point: more than four is a 400.
+    /// Every `cache_control` in the request, as `(location, ttl)` pairs in
+    /// render order. Counting these is the whole point: more than four is a
+    /// 400. A marker without a TTL is the 5m default.
     fn breakpoints(v: &Value) -> Vec<(String, String)> {
         let mut out = Vec::new();
-        for (i, b) in v["system"].as_array().into_iter().flatten().enumerate() {
-            if let Some(cc) = b.get("cache_control") {
-                out.push((
-                    format!("system[{i}]"),
-                    cc["ttl"].as_str().unwrap_or("").into(),
-                ));
-            }
-        }
         for (i, t) in v["tools"].as_array().into_iter().flatten().enumerate() {
             if let Some(cc) = t.get("cache_control") {
                 out.push((
                     format!("tools[{i}]"),
-                    cc["ttl"].as_str().unwrap_or("").into(),
+                    cc["ttl"].as_str().unwrap_or("5m").into(),
+                ));
+            }
+        }
+        for (i, b) in v["system"].as_array().into_iter().flatten().enumerate() {
+            if let Some(cc) = b.get("cache_control") {
+                out.push((
+                    format!("system[{i}]"),
+                    cc["ttl"].as_str().unwrap_or("5m").into(),
                 ));
             }
         }
@@ -775,7 +959,7 @@ mod tests {
                 if let Some(cc) = b.get("cache_control") {
                     out.push((
                         format!("messages[{i}].content[{j}]"),
-                        cc["ttl"].as_str().unwrap_or("").into(),
+                        cc["ttl"].as_str().unwrap_or("5m").into(),
                     ));
                 }
             }
@@ -873,60 +1057,213 @@ mod tests {
         assert_eq!(v["messages"][2]["content"][1]["type"], "tool_result");
     }
 
-    /// The budget is shared across system + tools + messages. Four system
-    /// blocks already exhaust it, so nothing else may be added — a fifth
-    /// breakpoint is a 400.
-    #[test]
-    fn system_breakpoints_consume_the_budget_first() {
-        let system = (0..MAX_CACHE_BREAKPOINTS)
-            .map(|i| SystemBlock::text_cached(format!("block {i}"), CacheControl::ephemeral_1h()))
+    /// Eight static blocks and a volatile tail, all cached: the code scene's
+    /// system prompt.
+    fn code_scene_system() -> Vec<SystemBlock> {
+        let mut system: Vec<SystemBlock> = (0..8)
+            .map(|i| SystemBlock::text_cached(format!("static {i}"), CacheControl::ephemeral_1h()))
             .collect();
-        let req = request_with(
-            system,
-            vec![tool("Bash")],
-            vec![
-                text_msg(Role::User, "a"),
-                text_msg(Role::Assistant, "b"),
-                text_msg(Role::User, "c"),
-            ],
-        );
-        let v = serde_json::to_value(&req).unwrap();
+        system.push(SystemBlock::text_cached("dynamic", CacheControl::ephemeral_1h()).volatile());
+        system
+    }
 
-        let bps = breakpoints(&v);
-        assert_eq!(bps.len(), MAX_CACHE_BREAKPOINTS, "got {bps:?}");
-        assert!(
-            bps.iter().all(|(loc, _)| loc.starts_with("system")),
-            "no budget left for tools/messages, got {bps:?}"
+    /// `users` user messages with an assistant reply between each pair.
+    fn conversation(users: usize) -> Vec<MessageParam> {
+        (0..users * 2 - 1)
+            .map(|i| match i % 2 {
+                0 => text_msg(Role::User, &format!("u{i}")),
+                _ => text_msg(Role::Assistant, &format!("a{i}")),
+            })
+            .collect()
+    }
+
+    fn locations(bps: &[(String, String)]) -> Vec<&str> {
+        bps.iter().map(|(l, _)| l.as_str()).collect()
+    }
+
+    /// The API refuses a 1h entry rendered after a 5m one.
+    fn assert_ttl_order(bps: &[(String, String)]) {
+        let first_5m = bps.iter().position(|(_, ttl)| ttl != "1h");
+        if let Some(p) = first_5m {
+            assert!(
+                bps[p..].iter().all(|(_, ttl)| ttl != "1h"),
+                "1h after 5m: {bps:?}"
+            );
+        }
+    }
+
+    /// Nine system markers, a tool array and a conversation: what a code
+    /// session sends. The tool prefix, the end of the static run, the
+    /// volatile tail and the rolling message marker stay.
+    #[test]
+    fn nine_cached_system_blocks_are_thinned_to_fit() {
+        let req = request_with(
+            code_scene_system(),
+            vec![tool("Bash"), tool("Read")],
+            conversation(3),
+        );
+        let bps = breakpoints(&serde_json::to_value(&req).unwrap());
+        assert_eq!(
+            bps,
+            vec![
+                ("tools[1]".to_string(), "1h".to_string()),
+                ("system[7]".to_string(), "1h".to_string()),
+                ("system[8]".to_string(), "1h".to_string()),
+                ("messages[2].content[0]".to_string(), "5m".to_string()),
+            ]
+        );
+        assert_ttl_order(&bps);
+    }
+
+    /// With nothing automatic to place, the spare slots go to the later
+    /// `system` blocks.
+    #[test]
+    fn without_tools_or_history_the_spare_slots_go_to_system() {
+        let req = request_with(code_scene_system(), vec![], conversation(1));
+        let bps = breakpoints(&serde_json::to_value(&req).unwrap());
+        assert_eq!(
+            locations(&bps),
+            ["system[5]", "system[6]", "system[7]", "system[8]"]
         );
     }
 
-    /// With three system breakpoints there is exactly one slot left. Tools win
-    /// it: the tool prefix is rendered ahead of `system`, so it is the only
-    /// breakpoint that still hits when the (runtime-state-carrying) system
-    /// prompt changes between turns.
     #[test]
-    fn last_budget_slot_goes_to_tools_not_messages() {
-        let system = (0..3)
-            .map(|i| SystemBlock::text_cached(format!("block {i}"), CacheControl::ephemeral_1h()))
-            .collect();
-        let req = request_with(
-            system,
-            vec![tool("Bash")],
-            vec![
-                text_msg(Role::User, "a"),
-                text_msg(Role::Assistant, "b"),
-                text_msg(Role::User, "c"),
-            ],
-        );
-        let v = serde_json::to_value(&req).unwrap();
-
-        let bps = breakpoints(&v);
-        assert_eq!(bps.len(), MAX_CACHE_BREAKPOINTS);
+    fn no_messages_keeps_tools_and_three_system_markers() {
+        let req = request_with(code_scene_system(), vec![tool("Bash")], vec![]);
+        let bps = breakpoints(&serde_json::to_value(&req).unwrap());
         assert_eq!(
-            bps[3],
-            ("tools[0]".to_string(), "1h".to_string()),
-            "got {bps:?}"
+            locations(&bps),
+            ["tools[0]", "system[6]", "system[7]", "system[8]"]
         );
+    }
+
+    /// An uncached block ends a run just as a volatile one does.
+    #[test]
+    fn an_uncached_block_ends_the_static_prefix() {
+        let mut system: Vec<SystemBlock> = (0..3)
+            .map(|i| SystemBlock::text_cached(format!("s{i}"), CacheControl::ephemeral_1h()))
+            .collect();
+        system.push(SystemBlock::text("plain"));
+        system.extend(
+            (0..3).map(|i| SystemBlock::text_cached(format!("t{i}"), CacheControl::ephemeral_1h())),
+        );
+        let req = request_with(system, vec![tool("Bash")], conversation(2));
+        let bps = breakpoints(&serde_json::to_value(&req).unwrap());
+        assert_eq!(
+            locations(&bps),
+            [
+                "tools[0]",
+                "system[2]",
+                "system[6]",
+                "messages[0].content[0]"
+            ]
+        );
+    }
+
+    /// The caller's tool markers suppress the automatic one and, past the
+    /// budget, only the last of them stays; the rolling marker takes the
+    /// slot left after the two key `system` markers.
+    #[test]
+    fn explicit_tool_breakpoints_are_thinned_too() {
+        let tools = (0..6)
+            .map(|i| {
+                let mut t = tool(&format!("T{i}"));
+                t.cache_control = Some(CacheControl::ephemeral_1h());
+                t
+            })
+            .collect();
+        let req = request_with(code_scene_system(), tools, conversation(3));
+        let bps = breakpoints(&serde_json::to_value(&req).unwrap());
+        assert_eq!(
+            locations(&bps),
+            [
+                "tools[5]",
+                "system[7]",
+                "system[8]",
+                "messages[2].content[0]"
+            ]
+        );
+        assert_ttl_order(&bps);
+    }
+
+    #[test]
+    fn explicit_tool_breakpoints_alone_keep_the_last_four() {
+        let tools = (0..6)
+            .map(|i| {
+                let mut t = tool(&format!("T{i}"));
+                t.cache_control = Some(CacheControl::ephemeral_5m());
+                t
+            })
+            .collect();
+        let req = request_with(vec![], tools, vec![]);
+        let bps = breakpoints(&serde_json::to_value(&req).unwrap());
+        assert_eq!(
+            locations(&bps),
+            ["tools[2]", "tools[3]", "tools[4]", "tools[5]"]
+        );
+    }
+
+    /// A caller's marker on a message text block counts against the budget
+    /// and outranks the automatic ones: here the rolling marker is the one
+    /// left out.
+    #[test]
+    fn explicit_message_breakpoints_count_and_win_over_automatic_ones() {
+        let mut messages = conversation(3);
+        messages[0].content = vec![ContentBlock::Text {
+            text: "pinned".into(),
+            cache_control: Some(json!({"type": "ephemeral"})),
+        }];
+        let req = request_with(code_scene_system(), vec![tool("Bash")], messages);
+        let v = serde_json::to_value(&req).unwrap();
+        assert_eq!(
+            locations(&breakpoints(&v)),
+            [
+                "tools[0]",
+                "system[7]",
+                "system[8]",
+                "messages[0].content[0]"
+            ]
+        );
+        assert_eq!(
+            v["messages"][0]["content"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+    }
+
+    /// The rolling marker is 5m; a 1h marker the caller placed after it in the
+    /// conversation would make the request invalid, so the rolling one yields.
+    #[test]
+    fn rolling_marker_never_precedes_a_one_hour_marker() {
+        let mut messages = conversation(3);
+        messages[4].content = vec![ContentBlock::Text {
+            text: "latest".into(),
+            cache_control: Some(json!({"type": "ephemeral", "ttl": "1h"})),
+        }];
+        let req = request_with(vec![], vec![], messages);
+        let bps = breakpoints(&serde_json::to_value(&req).unwrap());
+        assert_eq!(
+            bps,
+            vec![("messages[4].content[0]".to_string(), "1h".to_string())]
+        );
+    }
+
+    /// The beta flag follows what is sent, not what the caller marked.
+    #[test]
+    fn a_trimmed_one_hour_marker_does_not_drag_in_the_beta_flag() {
+        let tools = (0..5)
+            .map(|i| {
+                let mut t = tool(&format!("T{i}"));
+                t.cache_control = Some(match i {
+                    0 => CacheControl::ephemeral_1h(),
+                    _ => CacheControl::ephemeral_5m(),
+                });
+                t
+            })
+            .collect();
+        let req = request_with(vec![], tools, vec![]);
+        let bps = breakpoints(&serde_json::to_value(&req).unwrap());
+        assert!(!locations(&bps).contains(&"tools[0]"), "{bps:?}");
+        assert!(!req.uses_1h_cache_ttl());
     }
 
     /// An explicit tool breakpoint means the caller has made a placement

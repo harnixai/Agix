@@ -140,8 +140,11 @@ fn system_blocks(prompt_blocks: Vec<PromptBlock>) -> Vec<SystemBlock> {
     prompt_blocks
         .into_iter()
         .map(|pb| match pb.cache_strategy {
-            Some(CacheStrategy::Ephemeral | CacheStrategy::Global) => {
+            Some(CacheStrategy::Global) => {
                 SystemBlock::text_cached(pb.content, CacheControl::ephemeral_1h())
+            }
+            Some(CacheStrategy::Ephemeral) => {
+                SystemBlock::text_cached(pb.content, CacheControl::ephemeral_1h()).volatile()
             }
             None => SystemBlock::text(pb.content),
         })
@@ -1635,6 +1638,62 @@ mod cache_control_wire_tests {
             body["system"][0]["cache_control"],
             json!({"type": "ephemeral", "ttl": "1h"})
         );
+    }
+
+    /// `Global` blocks form the static run and an `Ephemeral` one stands on
+    /// its own, so trimming to four keeps a marker at the end of each.
+    #[tokio::test]
+    async fn the_static_run_and_the_ephemeral_tail_each_keep_a_marker() {
+        let client = Arc::new(MockAnthropicClient::new());
+        client.push_turn(vec![StreamEvent::MessageStop]);
+        let model = AnthropicModel::new(client.clone());
+
+        let mut blocks: Vec<PromptBlock> = (0..8)
+            .map(|i| {
+                let mut b = PromptBlock::system_cached(format!("static {i}"));
+                b.cache_strategy = Some(CacheStrategy::Global);
+                b
+            })
+            .collect();
+        blocks.push(PromptBlock::system_cached("dynamic"));
+        let tools = vec![ToolDef::new("Bash", "run", json!({"type": "object"}))];
+        let text = |role, text: &str| ModelMessage {
+            role,
+            content: vec![ModelContentBlock::Text { text: text.into() }],
+        };
+        let messages = vec![
+            text(MessageRole::User, "a"),
+            text(MessageRole::Assistant, "b"),
+            text(MessageRole::User, "c"),
+        ];
+        let _ = model
+            .stream(
+                blocks,
+                tools,
+                messages,
+                off_params("m"),
+                CancellationToken::new(),
+            )
+            .await
+            .expect("the request goes out");
+
+        let body = serde_json::to_value(client.nth_request(0).expect("one request")).unwrap();
+        let mut controls = Vec::new();
+        collect_cache_controls(&body, &mut controls);
+        assert_eq!(
+            controls.len(),
+            crate::types::MAX_CACHE_BREAKPOINTS,
+            "{body:#}"
+        );
+        let marked: Vec<usize> = body["system"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.get("cache_control").is_some())
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(marked, [7, 8]);
     }
 
     async fn body_for(

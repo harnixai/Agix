@@ -1,5 +1,6 @@
-//! The prompt-cache breakpoints a session's first model call sends carry
-//! only `type` and `ttl`: Anthropic's endpoint refuses any other key.
+//! The prompt-cache breakpoints a code session's model calls send carry only
+//! `type` and `ttl`, and number at most four: Anthropic's endpoint refuses
+//! any other key and any fifth breakpoint.
 
 use blackbox::{LiveConfig, LiveRun, ProviderStub, Reply};
 use serde_json::Value;
@@ -47,6 +48,44 @@ async fn a_code_sessions_first_call_has_no_scope_on_any_cache_control() -> anyho
         assert!(
             keys.iter().all(|k| *k == "type" || *k == "ttl"),
             "unexpected cache_control keys: {cc}"
+        );
+    }
+    run.finish().await;
+    Ok(())
+}
+
+/// Anthropic refuses a request with more than four breakpoints in all, and
+/// a code session's system prompt alone marks more than that.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_code_sessions_calls_carry_at_most_four_breakpoints() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = LiveRun::builder("cache-control-budget")
+        .config(LiveConfig::for_endpoint(
+            &stub.base_url(),
+            blackbox::ModelEndpoint::model(&stub),
+        ))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([Reply::text("first")]);
+    run.turn(&session, "hello").await?;
+    stub.script([Reply::text("second")]);
+    run.turn(&session, "and again").await?;
+
+    let turns: Vec<_> = stub
+        .calls()
+        .into_iter()
+        .filter(|c| c.purpose() == blackbox::Purpose::Turn)
+        .collect();
+    anyhow::ensure!(turns.len() >= 2, "{} turn calls", turns.len());
+    for (i, call) in turns.iter().take(2).enumerate() {
+        let mut controls = Vec::new();
+        collect_cache_controls(&call.body, &mut controls);
+        assert!(
+            (1..=4).contains(&controls.len()),
+            "call {i} carries {} breakpoints: {}",
+            controls.len(),
+            call.body
         );
     }
     run.finish().await;

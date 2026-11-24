@@ -1107,8 +1107,9 @@ Builder::new().prompt_assembler(Arc::new(runtime::prompt_assembly::MergedSystemP
 ```
 
 `runtime::prompt_assembly::DefaultAssembler` 是引擎自己的组装,也是默认。`MergedSystemPrompt` 包住任何一个
-assembler,把它的系统块折成一个——提示贡献者比一个请求允许的四个 `cache_control`
-断点还多的部署要的正是这个:一个缓存前缀,而不是随便凑出来的四个。
+assembler,把它的系统块折成一个。一个请求最多四个 `cache_control` 断点(工具、系统、消息
+合计),超出时引擎只留静态前缀末尾和最后一个缓存系统块,其余让给工具前缀与对话滚动点;
+要的是整段系统提示一个缓存前缀的部署,用这个。
 
 assembler 收到的是一个 `AssemblyRequest`——registry、scene、settings、记忆 store、
 scene 上下文,以及已经渲染好的 skill 清单和 MCP 指令;managed 层的 `prompt.append` 单独给出
