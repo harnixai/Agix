@@ -267,8 +267,7 @@ fn format_results(query: &str, items: &[SearchOutputItem]) -> String {
             }
         }
     }
-    s.push_str("REMINDER: You MUST include the sources above in your response to the user using markdown hyperlinks.");
-    s
+    s.trim_end().to_string()
 }
 
 #[cfg(test)]
@@ -403,7 +402,7 @@ mod tests {
         assert!(text.contains("Rust Lang"));
         assert!(text.contains("https://rust-lang.org"));
         assert!(text.contains("Crates.io"));
-        assert!(text.contains("REMINDER: You MUST include the sources"));
+        assert!(!text.contains("REMINDER"), "the sources rule lives in the guide: {text}");
     }
 
     #[tokio::test]
@@ -452,7 +451,7 @@ mod tests {
         assert!(s.contains("Hello"));
         assert!(s.contains("https://x.com"));
         assert!(s.contains("Foo"));
-        assert!(s.contains("REMINDER: You MUST include the sources"));
+        assert!(!s.contains("REMINDER"));
     }
 
     #[test]
