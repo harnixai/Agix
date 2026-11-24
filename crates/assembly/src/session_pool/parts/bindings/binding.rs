@@ -165,6 +165,16 @@ impl ProjectBinding {
         }
     }
 
+    /// The modules of a session on this pair with the host's skill
+    /// directories `host`, drawing on `plugins`.
+    pub(in crate::session_pool) fn session_modules(
+        &self,
+        host: &crate::session_pool::SessionSkillDirs,
+        plugins: &crate::plugins::SessionPlugins,
+    ) -> Vec<Arc<dyn runtime::module::Module>> {
+        self.modules.session_modules(&self.settings, host, plugins)
+    }
+
     pub(in crate::session_pool) fn reload_skills(&self) {
         self.modules.reload_skills(&self.settings);
     }

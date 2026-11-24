@@ -1,9 +1,10 @@
 //! Turning a package's `[[agent]]` declarations into engine agent types.
 //!
-//! Every type produced here carries [`AgentTypeSource::Plugin`], which is what
-//! clamps its `permission_mode` / `max_turns` overrides: a definition that
-//! arrived over the network must not hand its sub-agent more than the session
-//! already had.
+//! Every type produced here carries [`AgentTypeSource::Plugin`] naming its
+//! package. The source clamps its `permission_mode` / `max_turns` overrides:
+//! a definition that arrived over the network must not hand its sub-agent
+//! more than the session already had. The name is what a session that leaves
+//! the package out drops it by.
 
 use crate::manifest::{AgentDef, Plugin};
 use base::agent_type::{AgentTypeDefinition, AgentTypeSource};
@@ -52,7 +53,9 @@ fn agent_type(plugin: &Plugin, def: &AgentDef) -> Option<AgentTypeDefinition> {
 
     Some(AgentTypeDefinition {
         name: def.name.clone(),
-        source: AgentTypeSource::Plugin,
+        source: AgentTypeSource::Plugin {
+            plugin: plugin.name().to_string(),
+        },
         description: def.description.clone(),
         allowed_tools: def.allowed_tools.clone(),
         disallowed_tools: def.disallowed_tools.clone(),
@@ -116,7 +119,7 @@ scene = "plugin:p"
         assert_eq!(t.effort.as_deref(), Some("high"));
         assert_eq!(t.max_turns, Some(30));
         assert_eq!(t.scene.as_deref(), Some("plugin:p"));
-        assert_eq!(t.source, AgentTypeSource::Plugin);
+        assert_eq!(t.source, AgentTypeSource::Plugin { plugin: "p".into() });
     }
 
     #[test]

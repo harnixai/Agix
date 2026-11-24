@@ -177,6 +177,7 @@ impl SessionPool {
         &self,
         _project_root: Option<&Path>,
         _scene_id: &str,
+        _plugins: &crate::plugins::SessionPlugins,
     ) -> (usize, Option<Arc<dyn runtime::module::Module>>) {
         (0, None)
     }

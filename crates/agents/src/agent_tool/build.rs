@@ -117,7 +117,9 @@ impl Delegator {
             tools.register(t);
         }
         let session_config = Arc::new(self.delegate_config(spec, def.as_ref()));
-        let scene = self.scene_for_subagent(def.as_ref());
+        let scene = self
+            .scene_for_subagent(def.as_ref())
+            .map_err(base::error::ToolError::Validation)?;
         let scene_id = scene.id.clone();
         let sid = spec.session_id.clone();
         let parent_session_id = Some(self.env.parent.id.clone());

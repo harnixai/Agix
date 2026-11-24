@@ -190,6 +190,7 @@ impl EngineFactory {
         req: BuildRequest<'_>,
     ) -> Result<BuiltEngine, CreateError> {
         let (session_id, scene, binding, spec) = (req.session_id, req.scene, req.binding, req.spec);
+        refuse_left_out_scene(&req.plugins, &scene.id)?;
         let options = spec.options.as_ref();
         let scene_id = scene.id.clone();
         let (model, task_router, model_name, clock) = models(session_id, binding, spec)?;
@@ -226,7 +227,7 @@ impl EngineFactory {
             builder = builder.environment(clock);
         }
         builder = builder.task_router(task_router);
-        builder = builder.scene_registry(req.scene_registry);
+        builder = builder.scene_registry(scenes_for(req.scene_registry, &req.plugins));
         let (mut builder, script_ledger, script_faults) = bind_session_scripts(
             builder.ext_commands(req.packages.commands),
             &settings_snapshot,
@@ -238,7 +239,7 @@ impl EngineFactory {
             builder = builder.module(module);
         }
         builder = builder
-            .modules(binding.modules.session_modules(req.skill_dirs))
+            .modules(binding.session_modules(req.skill_dirs, &req.plugins))
             .skill_dirs(runtime::agent::HostSkillDirs {
                 readable: req.skill_dirs.readable().clone(),
                 protected: req.protected_dirs.clone(),
@@ -577,6 +578,36 @@ fn bind_session_scripts(
         None
     };
     (builder, script_ledger, script_faults)
+}
+
+/// `Err` for a session put in the scene of a package it does not draw on.
+fn refuse_left_out_scene(
+    plugins: &crate::plugins::SessionPlugins,
+    scene_id: &str,
+) -> Result<(), CreateError> {
+    if plugins.permits_scene(scene_id) {
+        return Ok(());
+    }
+    Err(CreateError::InvalidOptions(vec![
+        crate::session_pool::api::InvalidOption::new(
+            "settings.plugins",
+            format!(
+                "scene `{scene_id}` is a plugin package's, and this session's plugins leave \
+                 that package out"
+            ),
+        ),
+    ]))
+}
+
+/// The scenes a session drawing on `plugins` may send its sub-agents into.
+fn scenes_for(
+    registry: Arc<scene::SceneRegistry>,
+    plugins: &crate::plugins::SessionPlugins,
+) -> Arc<scene::SceneRegistry> {
+    if !plugins.is_narrowed() {
+        return registry;
+    }
+    Arc::new(registry.narrowed(|id| plugins.permits_scene(id)))
 }
 
 fn build_failed(e: runtime::agent::EngineError) -> CreateError {

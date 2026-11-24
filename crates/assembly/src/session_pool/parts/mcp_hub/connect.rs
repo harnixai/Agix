@@ -57,11 +57,13 @@ impl SessionPool {
     /// `Arc` clones — not a reconnect), since a manager needs `&mut self` to
     /// refresh its tools, which a shared one cannot give it. `None` when
     /// nothing is connected or connecting, so the common "no MCP servers"
-    /// case pays nothing. The count is the pair's connected servers.
+    /// case pays nothing. A server a package declares reaches only a session
+    /// drawing on that package. The count is the servers the session gets.
     pub(in crate::session_pool) async fn mcp_session_module(
         &self,
         project_root: Option<&Path>,
         scene_id: &str,
+        plugins: &crate::plugins::SessionPlugins,
     ) -> (usize, Option<Arc<dyn runtime::module::Module>>) {
         let central = self.mcp_for_project(project_root, scene_id).await;
         let count = central.server_count();
@@ -69,8 +71,16 @@ impl SessionPool {
             return (count, None);
         }
         let mut per_session = central.share();
+        if plugins.is_narrowed() {
+            let owners = self.plugins.mcp_server_owners();
+            per_session = per_session
+                .share_where(|server| owners.get(server).is_none_or(|p| plugins.permits(p)));
+        }
         per_session.refresh_tools().await;
-        (count, Some(Arc::new(mcp::McpModule::new(per_session))))
+        (
+            per_session.server_count(),
+            Some(Arc::new(mcp::McpModule::new(per_session))),
+        )
     }
 
     /// The MCP servers a `(project, scene)` with these settings connects:

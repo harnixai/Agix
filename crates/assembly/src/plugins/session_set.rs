@@ -122,6 +122,18 @@ impl SessionPlugins {
         !self.narrowed || self.packages.iter().any(|p| p.name == plugin)
     }
 
+    /// Whether the session may enter the scene `scene_id`: a package's
+    /// scene, `plugin:<name>`, only when it draws on that package.
+    pub fn permits_scene(&self, scene_id: &str) -> bool {
+        scene_id
+            .strip_prefix("plugin:")
+            .is_none_or(|plugin| self.permits(plugin))
+    }
+
+    pub fn names(&self) -> BTreeSet<String> {
+        self.packages.iter().map(|p| p.name.clone()).collect()
+    }
+
     /// Whether the session's own settings narrowed the pool's set. Not
     /// narrowed, [`Self::permits`] follows the pool as its set changes.
     pub fn is_narrowed(&self) -> bool {
@@ -349,6 +361,18 @@ mod tests {
         assert!(set.packages().is_empty());
         assert_eq!(clamped[0].field, "settings.plugins.enabled");
         assert_eq!(clamped[0].applied, json!(false));
+    }
+
+    #[test]
+    fn a_package_scene_is_entered_only_by_a_session_drawing_on_the_package() {
+        let active = [package("a", &[]), package("b", &[])];
+        let asked = layer(json!({"plugins": {"allow": ["a"]}}));
+        let (set, _) = SessionPlugins::resolve(Some(&asked), true, &active);
+        assert!(set.permits_scene("plugin:a"));
+        assert!(!set.permits_scene("plugin:b"));
+        assert!(set.permits_scene("code"));
+        assert!(SessionPlugins::default().permits_scene("plugin:b"));
+        assert!(!SessionPlugins::none().permits_scene("plugin:a"));
     }
 
     #[test]

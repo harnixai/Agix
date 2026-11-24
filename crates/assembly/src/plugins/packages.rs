@@ -147,6 +147,15 @@ impl Packages {
         out
     }
 
+    /// The package each of [`Self::mcp_servers`] comes from.
+    pub fn mcp_server_owners(&self) -> HashMap<String, String> {
+        let mut out = HashMap::new();
+        for (plugin, key, _, _) in self.keyed_mcp_servers() {
+            out.entry(key).or_insert(plugin);
+        }
+        out
+    }
+
     /// `(key, package kept, package refused)` for each MCP server key a
     /// later package produced after an earlier one had it.
     pub fn mcp_key_clashes(&self) -> Vec<(String, String, String)> {

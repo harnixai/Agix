@@ -16,7 +16,7 @@ pub use declarative::{DeclaredScene, SceneLoadError};
 
 use base::interface::scene::SceneSpec;
 use base::paths::Layout;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -56,6 +56,7 @@ fn builtins(layout: &Layout) -> [SceneSpec; 3] {
 #[derive(Default)]
 pub struct SceneRegistry {
     scenes: HashMap<String, Arc<SceneSpec>>,
+    withheld: HashSet<String>,
 }
 
 impl SceneRegistry {
@@ -70,6 +71,28 @@ impl SceneRegistry {
     }
     pub fn ids(&self) -> Vec<String> {
         self.scenes.keys().cloned().collect()
+    }
+    /// This registry as one session sees it: the scenes `keep` turns down
+    /// resolve to nothing, and are [`withheld`](Self::withholds).
+    pub fn narrowed(&self, keep: impl Fn(&str) -> bool) -> Self {
+        let (scenes, dropped): (HashMap<_, _>, HashMap<_, _>) = self
+            .scenes
+            .iter()
+            .map(|(id, scene)| (id.clone(), scene.clone()))
+            .partition(|(id, _)| keep(id));
+        Self {
+            scenes,
+            withheld: self
+                .withheld
+                .iter()
+                .cloned()
+                .chain(dropped.into_keys())
+                .collect(),
+        }
+    }
+    /// Whether `id` is a scene this registry has but keeps from its session.
+    pub fn withholds(&self, id: &str) -> bool {
+        self.withheld.contains(id)
     }
     pub fn list_all(&self) -> Vec<SceneInfo> {
         self.scenes
@@ -120,6 +143,18 @@ impl SceneRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_narrowed_registry_resolves_only_what_it_keeps_and_knows_the_rest() {
+        let mut registry = SceneRegistry::new();
+        registry.register_builtin(&Layout::default());
+        let narrowed = registry.narrowed(|id| id != "mini");
+        assert!(narrowed.resolve("mini").is_none());
+        assert!(narrowed.withholds("mini"));
+        assert!(narrowed.resolve("code").is_some());
+        assert!(!narrowed.withholds("code") && !narrowed.withholds("nowhere"));
+        assert!(narrowed.narrowed(|_| true).withholds("mini"));
+    }
 
     #[test]
     fn the_built_in_scenes_are_named_for_the_product() {

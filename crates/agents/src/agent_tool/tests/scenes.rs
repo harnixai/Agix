@@ -13,7 +13,12 @@ fn subagent_scene_inherits_parent_and_agent_type_override_wins() {
     .agent_tool();
 
     assert_eq!(
-        agent_tool.delegator.scene_for_subagent(None).id.as_str(),
+        agent_tool
+            .delegator
+            .scene_for_subagent(None)
+            .unwrap()
+            .id
+            .as_str(),
         "harnix",
         "a harnix-scene parent must not hand its sub-agent the code scene"
     );
@@ -33,6 +38,7 @@ fn subagent_scene_inherits_parent_and_agent_type_override_wins() {
         agent_tool
             .delegator
             .scene_for_subagent(Some(&widening))
+            .unwrap()
             .id
             .as_str(),
         "harnix",
@@ -50,6 +56,7 @@ fn subagent_scene_inherits_parent_and_agent_type_override_wins() {
         agent_tool
             .delegator
             .scene_for_subagent(Some(&narrowing))
+            .unwrap()
             .id
             .as_str(),
         "mini",
@@ -66,6 +73,7 @@ fn subagent_scene_inherits_parent_and_agent_type_override_wins() {
         agent_tool
             .delegator
             .scene_for_subagent(Some(&bogus))
+            .unwrap()
             .id
             .as_str(),
         "harnix",
@@ -99,6 +107,7 @@ fn agent_type_can_name_a_scene_that_only_the_registry_knows() {
         agent_tool
             .delegator
             .scene_for_subagent(Some(&named))
+            .unwrap()
             .id
             .as_str(),
         "mini",
@@ -124,10 +133,33 @@ fn agent_type_can_name_a_scene_that_only_the_registry_knows() {
         agent_tool
             .delegator
             .scene_for_subagent(Some(&named))
+            .unwrap()
             .id
             .as_str(),
         "plugin:demo",
         "a registry-only scene id must resolve once the registry is wired in"
+    );
+
+    let mut registry = scene::SceneRegistry::new();
+    let mut alias = scene::mini::spec();
+    alias.id = "plugin:demo".into();
+    registry.register(Arc::new(alias));
+    let agent_tool = TestParent {
+        scene: Arc::new(scene::mini::spec()),
+        host: Some(runtime::agent::HostContracts {
+            scene_registry: Some(Arc::new(registry.narrowed(|id| id != "plugin:demo"))),
+            ..host_contracts()
+        }),
+        ..test_parent()
+    }
+    .agent_tool();
+    let refused = agent_tool
+        .delegator
+        .scene_for_subagent(Some(&named))
+        .unwrap_err();
+    assert!(
+        refused.contains("specialist") && refused.contains("plugin:demo"),
+        "a scene withheld from the session is refused, not swapped for the parent's: {refused}"
     );
 }
 

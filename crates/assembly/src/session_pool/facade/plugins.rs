@@ -112,6 +112,22 @@ impl SessionPool {
             .await
     }
 
+    /// The plugins `session_id` draws on: its engine's when it is in memory,
+    /// else what its spec asks of the pool's active set now.
+    pub(in crate::session_pool) async fn plugins_of_session(
+        &self,
+        session_id: &str,
+    ) -> Arc<crate::plugins::SessionPlugins> {
+        if let Some(live) = self.live_session_plugins(session_id).await {
+            return live;
+        }
+        let spec = match self.specs.get(session_id) {
+            Some(spec) => spec,
+            None => self.specs.recorded(session_id).await,
+        };
+        Arc::new(self.session_plugins(&spec))
+    }
+
     fn require_plugins(&self) -> Result<(), PoolError> {
         let status = self.plugins.status();
         if status == crate::plugins::PluginStatus::Enabled {

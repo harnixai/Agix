@@ -512,7 +512,9 @@ fn plugin_agent_type_cannot_loosen_permissions_or_raise_the_call_cap() {
     use base::permission::PermissionMode as M;
     let def = AgentTypeDefinition {
         name: "greedy".into(),
-        source: AgentTypeSource::Plugin,
+        source: AgentTypeSource::Plugin {
+            plugin: "pkg".into(),
+        },
         description: "d".into(),
         permission_mode: Some(M::BypassPermissions),
         max_turns: Some(10_000),
@@ -544,7 +546,9 @@ fn plugin_agent_type_may_still_tighten() {
     use base::permission::PermissionMode as M;
     let def = AgentTypeDefinition {
         name: "careful".into(),
-        source: AgentTypeSource::Plugin,
+        source: AgentTypeSource::Plugin {
+            plugin: "pkg".into(),
+        },
         description: "d".into(),
         permission_mode: Some(M::Plan),
         max_turns: Some(5),
@@ -609,7 +613,9 @@ fn a_planning_parent_holds_a_type_to_plan_and_a_bypassing_one_takes_it_along() {
     let mut settings = Settings::defaults_for("test-model");
     settings.permissions.mode = M::Default;
     let plugin = AgentTypeDefinition {
-        source: AgentTypeSource::Plugin,
+        source: AgentTypeSource::Plugin {
+            plugin: "pkg".into(),
+        },
         ..typed(M::BypassPermissions)
     };
     let settings = overridden(settings, &plugin);

@@ -504,9 +504,27 @@ fn a_session_plugins_agent_types_sit_between_the_shared_catalog_and_the_disk() {
         template: tools,
         shared_types: Some(Arc::new(std::sync::RwLock::new(Arc::new(shared)))),
         session_agent_types: vec![
-            def("builtin", AgentTypeSource::Plugin, "plugin"),
-            def("on-disk", AgentTypeSource::Plugin, "plugin"),
-            def("new", AgentTypeSource::Plugin, "plugin"),
+            def(
+                "builtin",
+                AgentTypeSource::Plugin {
+                    plugin: "pkg".into(),
+                },
+                "plugin",
+            ),
+            def(
+                "on-disk",
+                AgentTypeSource::Plugin {
+                    plugin: "pkg".into(),
+                },
+                "plugin",
+            ),
+            def(
+                "new",
+                AgentTypeSource::Plugin {
+                    plugin: "pkg".into(),
+                },
+                "plugin",
+            ),
         ],
         ..TestParent::new(Arc::new(DummyModel))
     }

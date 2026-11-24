@@ -4,10 +4,12 @@
 //!
 //! Per project and scene, a [`ProjectModules`] holds what the modules share
 //! across that pair's sessions (the skill catalog, the agent-type catalog,
-//! and what installed packages contribute to both);
+//! and what installed packages contribute to both), and the same catalogs
+//! for the sessions that draw on only some of the packages, one pair per set;
 //! per session, [`ProjectModules::session_modules`] hands the builder the
 //! modules; `build()` checks their order against each module's `Module::after`.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use base::agent_type::AgentTypeDefinition;
@@ -66,6 +68,72 @@ pub(crate) struct ProjectModules {
     plugin_skills: std::sync::RwLock<Vec<crate::plugins::PackageSkills>>,
     #[cfg(feature = "agents")]
     agent_types: agents::agent_tool::SharedAgentTypeCatalog,
+    /// Kept so the narrowed catalogs are merged from the packages' types too.
+    #[cfg(feature = "agents")]
+    plugin_agent_types: std::sync::RwLock<Vec<AgentTypeDefinition>>,
+    /// The catalogs of sessions that draw on fewer packages than the pool
+    /// has, by the set they draw on; each is dropped once no session holds it.
+    narrowed: std::sync::Mutex<Vec<Narrowed>>,
+}
+
+/// The catalogs of the sessions on a pair that draw on only `packages`:
+/// merged from the tiers, the built-ins and those packages alone, so a name
+/// a left-out package held goes to whatever is below it.
+struct Narrowed {
+    packages: BTreeSet<String>,
+    #[cfg(feature = "skills")]
+    skills: Arc<skills::manager::SkillManager>,
+    #[cfg(feature = "agents")]
+    agent_types: agents::agent_tool::SharedAgentTypeCatalog,
+}
+
+impl Narrowed {
+    fn held(&self) -> bool {
+        #[cfg_attr(not(any(feature = "skills", feature = "agents")), allow(unused_mut))]
+        let mut held = false;
+        #[cfg(feature = "skills")]
+        {
+            held |= Arc::strong_count(&self.skills) > 1;
+        }
+        #[cfg(feature = "agents")]
+        {
+            held |= Arc::strong_count(&self.agent_types.handle()) > 2;
+        }
+        held
+    }
+}
+
+#[cfg(feature = "skills")]
+fn skills_of(
+    all: &[crate::plugins::PackageSkills],
+    packages: &BTreeSet<String>,
+) -> Vec<crate::plugins::PackageSkills> {
+    all.iter()
+        .filter(|p| packages.contains(&p.plugin))
+        .cloned()
+        .collect()
+}
+
+#[cfg(feature = "agents")]
+fn agent_types_of(
+    all: &[AgentTypeDefinition],
+    packages: &BTreeSet<String>,
+) -> Vec<AgentTypeDefinition> {
+    all.iter()
+        .filter(|d| match &d.source {
+            base::agent_type::AgentTypeSource::Plugin { plugin } => packages.contains(plugin),
+            _ => true,
+        })
+        .cloned()
+        .collect()
+}
+
+/// The catalogs one session is built with.
+struct Catalogs {
+    #[cfg(feature = "skills")]
+    skills: Arc<skills::manager::SkillManager>,
+    #[cfg(feature = "agents")]
+    agent_types: agents::agent_tool::SharedAgentTypeMap,
 }
 
 impl ProjectModules {
@@ -90,7 +158,85 @@ impl ProjectModules {
                 &plugins.agent_types,
                 &agents::agent_tool::agent_type_files(settings),
             ),
+            #[cfg(feature = "agents")]
+            plugin_agent_types: std::sync::RwLock::new(plugins.agent_types.clone()),
+            narrowed: std::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    /// The narrowed catalogs some session still holds.
+    fn narrowed(&self) -> std::sync::MutexGuard<'_, Vec<Narrowed>> {
+        let mut narrowed = self.narrowed.lock().unwrap_or_else(|e| e.into_inner());
+        narrowed.retain(Narrowed::held);
+        narrowed
+    }
+
+    #[cfg_attr(
+        not(any(feature = "agents", feature = "skills")),
+        allow(unused_variables)
+    )]
+    fn catalogs_for(
+        &self,
+        settings: &settings::LoadedSettings,
+        plugins: &crate::plugins::SessionPlugins,
+    ) -> Catalogs {
+        if !plugins.is_narrowed() {
+            return Catalogs {
+                #[cfg(feature = "skills")]
+                skills: self.skills.clone(),
+                #[cfg(feature = "agents")]
+                agent_types: self.agent_types.handle(),
+            };
+        }
+        let packages = plugins.names();
+        let mut narrowed = self.narrowed();
+        let at = match narrowed.iter().position(|n| n.packages == packages) {
+            Some(at) => at,
+            None => {
+                narrowed.push(Narrowed {
+                    #[cfg(feature = "skills")]
+                    skills: Arc::new(skill_catalog(
+                        settings,
+                        &skills_of(&self.plugin_skills(), &packages),
+                    )),
+                    #[cfg(feature = "agents")]
+                    agent_types: agents::agent_tool::SharedAgentTypeCatalog::unwatched(
+                        &agents::agent_tool::agent_type_dirs(settings),
+                        &agent_types_of(&self.plugin_agent_types(), &packages),
+                        &agents::agent_tool::agent_type_files(settings),
+                    ),
+                    packages,
+                });
+                narrowed.len() - 1
+            }
+        };
+        #[cfg_attr(
+            not(any(feature = "agents", feature = "skills")),
+            allow(unused_variables)
+        )]
+        let found = &narrowed[at];
+        Catalogs {
+            #[cfg(feature = "skills")]
+            skills: found.skills.clone(),
+            #[cfg(feature = "agents")]
+            agent_types: found.agent_types.handle(),
+        }
+    }
+
+    #[cfg(feature = "skills")]
+    fn plugin_skills(&self) -> Vec<crate::plugins::PackageSkills> {
+        self.plugin_skills
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    #[cfg(feature = "agents")]
+    fn plugin_agent_types(&self) -> Vec<AgentTypeDefinition> {
+        self.plugin_agent_types
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// The command catalog shared by every session on the pair: the built-in
@@ -117,13 +263,15 @@ impl ProjectModules {
     pub(crate) fn reload_skills(&self, settings: &settings::LoadedSettings) {
         #[cfg(feature = "skills")]
         {
-            let packages = self
-                .plugin_skills
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
+            let packages = self.plugin_skills();
             self.skills
                 .replace_catalog(skill_catalog(settings, &packages));
+            for narrowed in self.narrowed().iter() {
+                narrowed.skills.replace_catalog(skill_catalog(
+                    settings,
+                    &skills_of(&packages, &narrowed.packages),
+                ));
+            }
         }
         #[cfg(not(feature = "skills"))]
         let _ = settings;
@@ -200,11 +348,24 @@ impl ProjectModules {
         plugin_agent_types: &[AgentTypeDefinition],
     ) {
         #[cfg(feature = "agents")]
-        self.agent_types.refresh(
-            &agents::agent_tool::agent_type_dirs(settings),
-            plugin_agent_types,
-            &agents::agent_tool::agent_type_files(settings),
-        );
+        {
+            let (dirs, files) = (
+                agents::agent_tool::agent_type_dirs(settings),
+                agents::agent_tool::agent_type_files(settings),
+            );
+            self.agent_types.refresh(&dirs, plugin_agent_types, &files);
+            *self
+                .plugin_agent_types
+                .write()
+                .unwrap_or_else(|e| e.into_inner()) = plugin_agent_types.to_vec();
+            for narrowed in self.narrowed().iter() {
+                narrowed.agent_types.refresh(
+                    &dirs,
+                    &agent_types_of(plugin_agent_types, &narrowed.packages),
+                    &files,
+                );
+            }
+        }
         #[cfg(not(feature = "agents"))]
         let _ = (settings, plugin_agent_types);
     }
@@ -223,25 +384,32 @@ impl ProjectModules {
             .contains_key(name)
     }
 
-    /// Everything after MCP, in order, for a session with the host's skill
-    /// directories `host`. Pushed one by one because each push is behind its
-    /// own feature.
+    /// Everything after MCP, in order, for a session on the pair's `settings`
+    /// with the host's skill directories `host`, drawing on `plugins`. Pushed
+    /// one by one because each push is behind its own feature.
     #[allow(clippy::vec_init_then_push)]
     pub(crate) fn session_modules(
         &self,
+        settings: &settings::LoadedSettings,
         host: &crate::session_pool::SessionSkillDirs,
+        plugins: &crate::plugins::SessionPlugins,
     ) -> Vec<Arc<dyn Module>> {
         #[cfg(not(feature = "skills"))]
         let _ = host;
+        #[cfg_attr(
+            not(any(feature = "agents", feature = "skills")),
+            allow(unused_variables)
+        )]
+        let catalogs = self.catalogs_for(settings, plugins);
         #[cfg_attr(not(any(feature = "agents", feature = "skills")), allow(unused_mut))]
         let mut out: Vec<Arc<dyn Module>> = Vec::new();
         #[cfg(feature = "agents")]
         out.push(Arc::new(
-            agents::AgentsModule::new().shared_agent_types(self.agent_types.handle()),
+            agents::AgentsModule::new().shared_agent_types(catalogs.agent_types),
         ));
         #[cfg(feature = "skills")]
         out.push(Arc::new(
-            skills::SkillsModule::shared(self.skills.clone()).with_host(host.layer().clone()),
+            skills::SkillsModule::shared(catalogs.skills).with_host(host.layer().clone()),
         ));
         out
     }
@@ -386,5 +554,93 @@ mod tests {
             "with alpha gone, beta's skill has the name"
         );
         assert!(modules.skills().get("solo").is_some());
+    }
+
+    /// A session drawing on beta alone gets beta's skill under the name alpha
+    /// holds pool-wide, the built-in agent type alpha replaced, and nothing of
+    /// a package enabled after it was built.
+    #[cfg(all(feature = "skills", feature = "agents"))]
+    #[test]
+    fn a_narrowed_session_gets_what_a_left_out_package_shadowed_and_no_later_package() {
+        let home = tempfile::tempdir().unwrap();
+        let mut settings = settings::LoadedSettings::new(
+            Settings::defaults_for("test"),
+            base::paths::PathSettings::default(),
+        );
+        settings.paths.global_data_dir = home.path().join("global");
+        settings.paths.user_data_dir = home.path().join("scene");
+        let explorer = AgentTypeDefinition {
+            name: "explore".into(),
+            source: base::agent_type::AgentTypeSource::Plugin {
+                plugin: "alpha".into(),
+            },
+            system_prompt: "alpha explores".into(),
+            ..Default::default()
+        };
+        let contributions = |skills| crate::plugins::Contributions {
+            agent_types: vec![explorer.clone()],
+            skills,
+        };
+        let modules = ProjectModules::build(
+            &settings,
+            &contributions(vec![
+                package("alpha", &["guide"]),
+                package("beta", &["guide", "solo"]),
+            ]),
+        );
+        let active = |name: &str| crate::plugins::ActivePackage {
+            name: name.into(),
+            version: "1.0.0".into(),
+            dependencies: Vec::new(),
+        };
+        let layer = serde_json::json!({"plugins": {"allow": ["beta"]}});
+        let (only_beta, _) = crate::plugins::SessionPlugins::resolve(
+            layer.as_object(),
+            true,
+            &[active("alpha"), active("beta")],
+        );
+
+        let narrowed = modules.catalogs_for(&settings, &only_beta);
+        assert_eq!(
+            narrowed.skills.get_skill_content("guide").as_deref(),
+            Some("beta body")
+        );
+        let explore = |map: &agents::agent_tool::SharedAgentTypeMap| {
+            map.read().unwrap()["explore"].source.clone()
+        };
+        assert_eq!(
+            explore(&narrowed.agent_types),
+            base::agent_type::AgentTypeSource::Builtin
+        );
+        let shared = modules.catalogs_for(&settings, &Default::default());
+        assert_eq!(
+            explore(&shared.agent_types),
+            base::agent_type::AgentTypeSource::Plugin {
+                plugin: "alpha".into()
+            }
+        );
+        assert!(Arc::ptr_eq(
+            &modules.catalogs_for(&settings, &only_beta).skills,
+            &narrowed.skills
+        ));
+
+        modules.refresh_plugins(
+            &settings,
+            &contributions(vec![
+                package("alpha", &["guide"]),
+                package("beta", &["guide", "solo"]),
+                package("gamma", &["late"]),
+            ]),
+        );
+        assert!(modules.skills().get("late").is_some());
+        assert!(narrowed.skills.get("late").is_none());
+        assert!(narrowed.skills.get("solo").is_some());
+        assert_eq!(
+            explore(&narrowed.agent_types),
+            base::agent_type::AgentTypeSource::Builtin
+        );
+
+        drop(narrowed);
+        assert!(modules.narrowed().is_empty(), "no session holds it");
     }
 }

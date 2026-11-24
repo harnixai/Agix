@@ -556,8 +556,10 @@ impl SessionPool {
     ) -> Result<BuiltEngine, CreateError> {
         let session_id = core.id();
         let scene_id = scene.id.clone();
-        let (mcp_server_count, mcp_module) =
-            self.mcp_session_module(core.project(), &scene.id).await;
+        let plugins = Arc::new(self.session_plugins(spec));
+        let (mcp_server_count, mcp_module) = self
+            .mcp_session_module(core.project(), &scene.id, &plugins)
+            .await;
         // A project's scripts belong to that project: the paths in its
         // settings resolve against it, and so does the question of whether a
         // file is inside it — which is what decides whether the script may
@@ -570,7 +572,6 @@ impl SessionPool {
             .project()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| self.cwd().to_path_buf());
-        let plugins = Arc::new(self.session_plugins(spec));
         let mut built = self.factory.build(BuildRequest {
             session_id,
             seed: SessionSeed {

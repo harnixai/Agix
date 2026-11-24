@@ -12,7 +12,7 @@
 /// project they trust. A plugin's, or an untrusted project's, is held to the
 /// parent's — and an untrusted project's does not replace a built-in, plugin
 /// or user type of the same name.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AgentTypeSource {
     /// Shipped with Agix.
@@ -22,24 +22,24 @@ pub enum AgentTypeSource {
     User,
     /// The project's `.agix/agents/`, and whether the project is trusted.
     Project { trusted: bool },
-    /// Declared by an installed plugin.
-    Plugin,
+    /// Declared by the plugin package `plugin`.
+    Plugin { plugin: String },
 }
 
 impl AgentTypeSource {
     /// May a definition from this source hand its sub-agent *more* than the
     /// session it was spawned from already had?
-    pub fn may_loosen(self) -> bool {
+    pub fn may_loosen(&self) -> bool {
         match self {
             Self::Builtin | Self::User => true,
-            Self::Project { trusted } => trusted,
-            Self::Plugin => false,
+            Self::Project { trusted } => *trusted,
+            Self::Plugin { .. } => false,
         }
     }
 
     /// Does a definition from this source replace one of the same name from
     /// the built-ins, a plugin or another tier?
-    pub fn may_shadow(self) -> bool {
+    pub fn may_shadow(&self) -> bool {
         matches!(self, Self::User | Self::Project { trusted: true })
     }
 }

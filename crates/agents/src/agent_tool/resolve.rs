@@ -170,10 +170,26 @@ impl Delegator {
     /// The scene a sub-agent should run in.
     ///
     /// The agent type's own `scene:` when it is no wider than the parent's,
-    /// otherwise the parent's.
-    pub(crate) fn scene_for_subagent(&self, def: Option<&AgentTypeDefinition>) -> Arc<SceneSpec> {
+    /// otherwise the parent's. `Err` when the type names a scene the host has
+    /// but keeps from this session.
+    pub(crate) fn scene_for_subagent(
+        &self,
+        def: Option<&AgentTypeDefinition>,
+    ) -> Result<Arc<SceneSpec>, String> {
         let parent = &self.env.scene;
         if let Some(name) = def.and_then(|d| d.scene.as_deref()) {
+            if self
+                .env
+                .host
+                .scene_registry
+                .as_ref()
+                .is_some_and(|r| r.withholds(name))
+            {
+                return Err(format!(
+                    "agent type `{}` runs in scene `{name}`, which this session does not have",
+                    def.map(|d| d.name.as_str()).unwrap_or("")
+                ));
+            }
             match self.resolve_scene_id(name) {
                 Some(requested) => {
                     // An agent type may *narrow* the scene, never widen it.
@@ -202,7 +218,7 @@ impl Delegator {
                                  does not; ignoring it and inheriting the parent's scene"
                             );
                         }
-                        _ => return requested,
+                        _ => return Ok(requested),
                     }
                 }
                 None => {
@@ -214,7 +230,7 @@ impl Delegator {
                 }
             }
         }
-        parent.clone()
+        Ok(parent.clone())
     }
 
     /// A scene id resolved against the host's registry when one was wired,

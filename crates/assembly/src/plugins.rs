@@ -181,6 +181,13 @@ mod imp {
             self.packages.mcp_key_clashes()
         }
 
+        /// The package each of [`Self::mcp_servers`] comes from. A key a
+        /// package declares is the package's even where the settings declare
+        /// it too: the package's server is the one connected under it.
+        pub fn mcp_server_owners(&self) -> HashMap<String, String> {
+            self.packages.mcp_server_owners()
+        }
+
         /// The set a session whose own settings are `layer` draws on, and
         /// what in `layer` asked for more than the pool has active.
         pub fn session_plugins(
@@ -430,6 +437,9 @@ mod imp {
         }
         pub fn mcp_key_clashes(&self) -> Vec<(String, String, String)> {
             Vec::new()
+        }
+        pub fn mcp_server_owners(&self) -> HashMap<String, String> {
+            HashMap::new()
         }
         pub fn session_plugins(
             &self,

@@ -560,7 +560,11 @@ impl McpManager {
     /// report through: the servers a delegate is granted, ready before its
     /// first request.
     pub fn share_servers(&self, servers: Option<&[String]>) -> Self {
-        let keep = |name: &str| servers.is_none_or(|s| s.iter().any(|n| n == name));
+        self.share_where(|name| servers.is_none_or(|s| s.iter().any(|n| n == name)))
+    }
+
+    /// [`Self::share_servers`] narrowed to the servers `keep` takes.
+    pub fn share_where(&self, keep: impl Fn(&str) -> bool) -> Self {
         Self {
             clients: self
                 .clients
@@ -571,7 +575,7 @@ impl McpManager {
             adapters: self
                 .adapters
                 .iter()
-                .filter(|a| a.spec().origin.mcp_server().is_some_and(keep))
+                .filter(|a| a.spec().origin.mcp_server().is_some_and(&keep))
                 .cloned()
                 .collect(),
             prompts: self

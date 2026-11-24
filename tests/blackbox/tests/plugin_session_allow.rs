@@ -2,14 +2,15 @@
 //! `options.settings.plugins.allow` / `plugins.enabled`, over
 //! `Embedded::serve_stream` with the host's own packages: what a package left
 //! out contributes to that session — its `prompt.block`, its `tool.around` in
-//! the session and in a sub-agent, its commands — against a session that
-//! narrows nothing, and what `session.create`'s `clamped_options` and
+//! the session and in a sub-agent, its commands, agent types, skills, MCP
+//! servers, functions and scene — against a session that narrows nothing,
+//! and what `session.create`'s `clamped_options` and
 //! `session.inspectContext` report. Only what the RPC and the model's
 //! requests show.
 
 use std::path::PathBuf;
 
-use blackbox::{ProviderStub, Reply};
+use blackbox::{McpToy, ProviderStub, Reply, SeenRequest};
 use daemon::embed::{EmbedConfig, Embedded};
 use rpc_client::DaemonRpcClient;
 use serde_json::{json, Value};
@@ -37,7 +38,7 @@ fn root(stub: &ProviderStub, plugins: Value) -> anyhow::Result<Root> {
             "tiers": {"strong": model, "balanced": model, "fast": model},
             "models": [model]
         }],
-        "permissions": {"mode": "acceptEdits", "allow": ["Agent"]},
+        "permissions": {"mode": "acceptEdits", "allow": ["Agent", "Skill"]},
         "sandbox": {"network": {"mode": "deny_all"}},
         "memory": { "enabled": false },
         "plugins": plugins,
@@ -457,6 +458,447 @@ async fn leaving_out_a_commands_owner_hands_the_name_to_the_other() -> anyhow::R
         Some("same from b"),
         "{commands:?}"
     );
+    embedded.shutdown().await;
+    Ok(())
+}
+
+fn write(dir: &std::path::Path, rel: &str, content: &str) -> anyhow::Result<()> {
+    let path = dir.join(rel);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+fn tool_description(request: &SeenRequest, name: &str) -> String {
+    request.body["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|t| t["name"] == name)
+        .and_then(|t| t["description"].as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn whole_text(request: &SeenRequest) -> String {
+    format!("{}\n{}", request.system_text(), request.messages_text())
+}
+
+/// What one turn of a session handing `KID-<tag>` to a sub-agent showed: the
+/// turn's events, its first request, and the sub-agent's first request when
+/// one was made.
+struct Delegated {
+    events: rpc_client::TurnEvents,
+    lead: SeenRequest,
+    kid: Option<SeenRequest>,
+}
+
+async fn delegate(
+    stub: &ProviderStub,
+    client: &mut DaemonRpcClient,
+    session: &str,
+    tag: &str,
+    subagent_type: &str,
+) -> anyhow::Result<Delegated> {
+    let (mark, child) = (format!("LEAD-{tag}"), format!("KID-{tag}"));
+    stub.script_when(
+        &mark,
+        [
+            Reply::calls(
+                &format!("a-{tag}"),
+                "Agent",
+                json!({
+                    "prompt": format!("{child} look around"),
+                    "description": "helper",
+                    "subagent_type": subagent_type,
+                }),
+            ),
+            Reply::text("lead done"),
+        ],
+    );
+    stub.script_when(&child, [Reply::text("kid done")]);
+    let events = client
+        .session_run_turn(session, &format!("{mark} go"), tag, None)
+        .await?;
+    anyhow::ensure!(events.turn_complete, "{events:?}");
+    let calls = stub.calls();
+    let lead = calls
+        .iter()
+        .find(|c| c.messages_contain(&mark))
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("no request of the turn {tag}"))?;
+    let kid = calls
+        .iter()
+        .find(|c| c.messages_contain(&child) && !c.messages_contain(&mark))
+        .cloned();
+    Ok(Delegated { events, lead, kid })
+}
+
+/// b's `explore` takes the built-in's name pool-wide, and b has a type of its
+/// own. A session leaving b out lists neither of b's, and its sub-agent of
+/// type `explore` runs on the built-in definition again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_left_out_packages_agent_types_are_gone_and_the_built_in_comes_back() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub, json!({}))?;
+    let a = package(&root, "a", "")?;
+    let b = package(
+        &root,
+        "b",
+        "[[agent]]\nname = \"explore\"\ndescription = \"b's own explorer\"\n\
+         prompt = \"agents/explore.md\"\n\
+         [[agent]]\nname = \"b-helper\"\ndescription = \"b's helper type\"\n\
+         prompt = \"agents/helper.md\"\n",
+    )?;
+    write(&b, "agents/explore.md", "PROMPT-OF-b-explore")?;
+    write(&b, "agents/helper.md", "PROMPT-OF-b-helper")?;
+    let (embedded, mut client) = start(&root, vec![a, b]).await?;
+
+    let narrowed = id(&create(&mut client, Some(json!({"plugins": {"allow": ["a"]}}))).await?);
+    let turn = delegate(&stub, &mut client, &narrowed, "N-EXPLORE", "explore").await?;
+    let listed = tool_description(&turn.lead, "Agent");
+    assert!(
+        listed.contains("Read-only file search and exploration specialist"),
+        "{listed}"
+    );
+    assert!(
+        !listed.contains("b's own explorer") && !listed.contains("b-helper"),
+        "{listed}"
+    );
+    let kid = turn.kid.expect("the sub-agent ran");
+    assert!(
+        kid.messages_contain("read-only file search specialist"),
+        "{}",
+        kid.messages_text()
+    );
+    assert!(!kid.messages_contain("PROMPT-OF-b-explore"));
+    let turn = delegate(&stub, &mut client, &narrowed, "N-HELPER", "b-helper").await?;
+    if let Some(kid) = turn.kid {
+        assert!(!kid.messages_contain("PROMPT-OF-b-helper"));
+    }
+
+    let whole = id(&create(&mut client, None).await?);
+    let turn = delegate(&stub, &mut client, &whole, "W-EXPLORE", "explore").await?;
+    let listed = tool_description(&turn.lead, "Agent");
+    assert!(
+        listed.contains("b's own explorer") && listed.contains("b-helper"),
+        "{listed}"
+    );
+    let kid = turn.kid.expect("the sub-agent ran");
+    assert!(
+        kid.messages_contain("PROMPT-OF-b-explore"),
+        "{}",
+        kid.messages_text()
+    );
+    embedded.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_left_out_packages_skill_is_not_listed_offered_or_run() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub, json!({}))?;
+    let a = package(&root, "a", "")?;
+    let b = package(&root, "b", "[skills]\ndir = \"skills\"\n")?;
+    write(
+        &b,
+        "skills/b-skill/SKILL.md",
+        "---\nname: b-skill\ndescription: SKILL-OF-b listed\n---\nBODY-OF-b-SKILL\n",
+    )?;
+    let (embedded, mut client) = start(&root, vec![a, b]).await?;
+
+    let run_skill = |tag: &str| {
+        let mark = format!("SKILL-{tag}");
+        stub.script_when(
+            &mark,
+            [
+                Reply::calls(&format!("s-{tag}"), "Skill", json!({ "skill": "b-skill" })),
+                Reply::text("skill done"),
+            ],
+        );
+        mark
+    };
+    let skill_commands = |listed: &Value| -> Vec<String> {
+        listed["commands"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["name"].as_str().map(str::to_string))
+            .filter(|n| n == "b-skill")
+            .collect()
+    };
+
+    let narrowed = id(&create(&mut client, Some(json!({"plugins": {"allow": ["a"]}}))).await?);
+    let listed = client
+        .call("commands.list", json!({ "session_id": narrowed }))
+        .await?
+        .result
+        .unwrap_or_default();
+    assert!(skill_commands(&listed).is_empty(), "{listed}");
+    let mark = run_skill("NARROWED");
+    let events = client
+        .session_run_turn(&narrowed, &format!("{mark} go"), "n", None)
+        .await?;
+    assert!(events.turn_complete, "{events:?}");
+    let first = stub
+        .calls()
+        .into_iter()
+        .find(|c| c.messages_contain(&mark))
+        .expect("the turn's request");
+    assert!(!whole_text(&first).contains("SKILL-OF-b"));
+    let (_, ran, _) = events
+        .tool_results
+        .iter()
+        .find(|(name, _, _)| name == "Skill")
+        .cloned()
+        .expect("the Skill call answered");
+    assert!(!ran.contains("BODY-OF-b-SKILL"), "{ran}");
+
+    let whole = id(&create(&mut client, None).await?);
+    let listed = client
+        .call("commands.list", json!({ "session_id": whole }))
+        .await?
+        .result
+        .unwrap_or_default();
+    assert_eq!(skill_commands(&listed), ["b-skill"], "{listed}");
+    let mark = run_skill("WHOLE");
+    let events = client
+        .session_run_turn(&whole, &format!("{mark} go"), "w", None)
+        .await?;
+    assert!(events.turn_complete, "{events:?}");
+    let first = stub
+        .calls()
+        .into_iter()
+        .find(|c| c.messages_contain(&mark))
+        .expect("the turn's request");
+    assert!(whole_text(&first).contains("SKILL-OF-b"));
+    let after = stub
+        .calls()
+        .into_iter()
+        .filter(|c| c.messages_contain(&mark))
+        .nth(1)
+        .expect("the request after the Skill call");
+    assert!(
+        after.messages_contain("BODY-OF-b-SKILL"),
+        "{}",
+        after.messages_text()
+    );
+    embedded.shutdown().await;
+    Ok(())
+}
+
+/// b's MCP server reaches neither a session leaving b out nor its sub-agent
+/// whose type names the server.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_left_out_packages_mcp_server_is_in_no_request_of_the_session() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub, json!({}))?;
+    let a = package(&root, "a", "")?;
+    let b = package(
+        &root,
+        "b",
+        "[[mcp]]\nname = \"toy\"\nkind = \"native\"\nconfig = \"mcp/server.json\"\n",
+    )?;
+    write(
+        &b,
+        "mcp/server.json",
+        &McpToy::stdio_config(&[])?.to_string(),
+    )?;
+    write(
+        &root.project,
+        ".agix/agents/granted.md",
+        "---\ndescription: uses b's server\nmcp_servers: [b-mcp-toy]\n---\nYou ping.\n",
+    )?;
+    let (embedded, mut client) = start(&root, vec![a, b]).await?;
+    let offers_toy = |request: &SeenRequest| {
+        request
+            .tool_names()
+            .iter()
+            .any(|n| n.starts_with("mcp__") && n.contains("toy"))
+    };
+    let resource_tools = |request: &SeenRequest| {
+        request
+            .tool_names()
+            .into_iter()
+            .filter(|n| n == "ListMcpResources" || n == "ReadMcpResource")
+            .count()
+    };
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let status = client.call("mcp.status", json!({})).await?.result;
+        let status = status.unwrap_or_default();
+        if status["servers"][0]["state"] == "connected" {
+            break;
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "b's server did not connect: {status}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    let whole = id(&create(&mut client, None).await?);
+    let turn = delegate(&stub, &mut client, &whole, "W-MCP", "granted").await?;
+    assert!(offers_toy(&turn.lead), "{:?}", turn.lead.tool_names());
+    assert_eq!(
+        resource_tools(&turn.lead),
+        2,
+        "{:?}",
+        turn.lead.tool_names()
+    );
+    let kid = turn.kid.expect("the sub-agent ran");
+    assert!(offers_toy(&kid), "{:?}", kid.tool_names());
+
+    let narrowed = id(&create(&mut client, Some(json!({"plugins": {"allow": ["a"]}}))).await?);
+    let turn = delegate(&stub, &mut client, &narrowed, "N-MCP", "granted").await?;
+    assert!(!offers_toy(&turn.lead), "{:?}", turn.lead.tool_names());
+    assert_eq!(
+        resource_tools(&turn.lead),
+        0,
+        "{:?}",
+        turn.lead.tool_names()
+    );
+    let kid = turn.kid.expect("the sub-agent ran");
+    assert!(!offers_toy(&kid), "{:?}", kid.tool_names());
+    embedded.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_left_out_packages_function_is_not_listed_or_called_for_the_session() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub, json!({}))?;
+    let a = package(&root, "a", "")?;
+    let b = package(
+        &root,
+        "b",
+        "[[function]]\nname = \"check\"\nentry = \"f.js:check\"\ndescription = \"b check\"\n",
+    )?;
+    write(&b, "f.js", "async function check() { return 'b-ran'; }\n")?;
+    let (embedded, mut client) = start(&root, vec![a, b]).await?;
+    let names = |resp: daemon::rpc::RpcResponse| -> Vec<String> {
+        resp.result.unwrap_or_default()["functions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|f| f["name"].as_str().map(str::to_string))
+            .collect()
+    };
+    let check = "b.check".to_string();
+
+    let narrowed = id(&create(&mut client, Some(json!({"plugins": {"allow": ["a"]}}))).await?);
+    let whole = id(&create(&mut client, None).await?);
+
+    let resp = client
+        .call("plugin.functions", json!({ "session_id": narrowed }))
+        .await?;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+    assert!(!names(resp).contains(&check));
+    let resp = client
+        .call("plugin.functions", json!({ "session_id": whole }))
+        .await?;
+    assert!(names(resp).contains(&check));
+    let resp = client
+        .call("plugin.functions", json!({ "cwd": root.project }))
+        .await?;
+    assert!(names(resp).contains(&check));
+
+    let refused = client
+        .call(
+            "plugin.call",
+            json!({ "function": "b.check", "session_id": narrowed }),
+        )
+        .await?;
+    let error = refused.error.expect("the call is refused");
+    assert_eq!(error.code, -32602, "{}", error.message);
+    assert!(
+        error.message.contains("plugin `b`") && error.message.contains(&narrowed),
+        "{}",
+        error.message
+    );
+    let ran = client
+        .call(
+            "plugin.call",
+            json!({ "function": "b.check", "session_id": whole }),
+        )
+        .await?;
+    assert!(ran.error.is_none(), "{:?}", ran.error);
+    let ran = ran.result.unwrap_or_default();
+    assert_eq!(ran["ok"], true, "{ran}");
+    assert_eq!(ran["value"], "b-ran", "{ran}");
+    embedded.shutdown().await;
+    Ok(())
+}
+
+/// b's scene, `plugin:b`, is refused to a session leaving b out: as the
+/// scene it is created in, and as the scene an agent type sends its
+/// sub-agent into.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_left_out_packages_scene_is_entered_neither_at_create_nor_by_a_sub_agent(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub, json!({}))?;
+    let a = package(&root, "a", "")?;
+    let b = package(&root, "b", "[scene]\ndir = \"scene\"\n")?;
+    write(
+        &b,
+        "scene/scene.json",
+        r#"{"id": "plugin:b", "name": "B", "tools": ["Read"]}"#,
+    )?;
+    write(&b, "scene/prompt.md", "SCENE-OF-b")?;
+    write(
+        &root.project,
+        ".agix/agents/inb.md",
+        "---\ndescription: works in b's scene\nscene: plugin:b\n---\nYou read.\n",
+    )?;
+    let (embedded, mut client) = start(&root, vec![a, b]).await?;
+
+    let refused = client
+        .call(
+            "session.create",
+            json!({
+                "scene": "plugin:b",
+                "options": {
+                    "attended": false,
+                    "auto_name": false,
+                    "settings": {"plugins": {"allow": ["a"]}},
+                },
+            }),
+        )
+        .await?;
+    let error = refused.error.expect("the scene is refused");
+    assert_eq!(error.code, -32602, "{}", error.message);
+    let data = error.data.clone().unwrap_or_default().to_string();
+    assert!(data.contains("plugin:b"), "{} {data}", error.message);
+    let entered = client
+        .call(
+            "session.create",
+            json!({ "scene": "plugin:b", "options": { "attended": false, "auto_name": false } }),
+        )
+        .await?;
+    assert!(entered.error.is_none(), "{:?}", entered.error);
+
+    let narrowed = id(&create(&mut client, Some(json!({"plugins": {"allow": ["a"]}}))).await?);
+    let turn = delegate(&stub, &mut client, &narrowed, "N-SCENE", "inb").await?;
+    assert!(turn.kid.is_none(), "the sub-agent ran in plugin:b");
+    let (_, answer, _) = turn
+        .events
+        .tool_results
+        .iter()
+        .find(|(name, _, _)| name == "Agent")
+        .cloned()
+        .expect("the Agent call answered");
+    assert!(answer.contains("plugin:b"), "{answer}");
+
+    let whole = id(&create(&mut client, None).await?);
+    let turn = delegate(&stub, &mut client, &whole, "W-SCENE", "inb").await?;
+    let kid = turn.kid.expect("the sub-agent ran");
+    assert!(kid.system_contains("SCENE-OF-b"), "{}", kid.system_text());
     embedded.shutdown().await;
     Ok(())
 }

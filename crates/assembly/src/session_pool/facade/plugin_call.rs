@@ -19,23 +19,29 @@ use base::interface::tool_middleware::ToolOutcome;
 use base::permission::PermissionRule;
 
 impl SessionPool {
-    /// The functions the enabled packages expose to the host. A `target`
-    /// given must be there: the session, or the directory.
+    /// The functions the enabled packages expose to the host; for a session
+    /// `target`, those of the packages it draws on. A `target` given must be
+    /// there: the session, or the directory.
     pub async fn plugin_functions(
         &self,
         target: Option<&PluginCallTarget>,
     ) -> Result<Vec<PluginFunctionInfo>, PoolError> {
         self.require_plugin_functions()?;
-        match target {
+        let functions = self.plugins.functions();
+        let functions = match target {
             Some(PluginCallTarget::Session(id)) if !self.session_exists(id).await => {
                 return Err(PoolError::no_session(id));
             }
             Some(PluginCallTarget::Project(dir)) if !dir.is_dir() => {
                 return Err(PoolError::ProjectNotFound { path: dir.clone() });
             }
-            _ => {}
-        }
-        Ok(self.plugins.functions().iter().map(info_of).collect())
+            Some(PluginCallTarget::Session(id)) => self
+                .plugins_of_session(id)
+                .await
+                .retain(functions, |f| &f.plugin),
+            _ => functions,
+        };
+        Ok(functions.iter().map(info_of).collect())
     }
 
     /// Run `call` and hand back what the function returned or why it did
@@ -54,6 +60,7 @@ impl SessionPool {
         self.require_plugin_functions()?;
         let time = time_of(&call)?;
         let function = self.function_named(&call.function)?;
+        let plugin = function.plugin.clone();
         let tool = runtime::plugin_call::tool(runtime::plugin_call::FunctionCall {
             function,
             writes: call.writes,
@@ -93,6 +100,7 @@ impl SessionPool {
                 match &target {
                     PluginCallTarget::Session(id) => {
                         let (runner, _running) = pool.session_runner(id).await?;
+                        pool.refuse_left_out(id, &plugin).await?;
                         Ok(result_of(&name, runner.run(tool, input, rules, stop).await))
                     }
                     PluginCallTarget::Project(dir) => {
@@ -129,6 +137,17 @@ impl SessionPool {
             });
         }
         Ok(())
+    }
+
+    /// `Err` when `session_id` does not draw on the package `plugin`.
+    async fn refuse_left_out(&self, session_id: &str, plugin: &str) -> Result<(), PoolError> {
+        if self.plugins_of_session(session_id).await.permits(plugin) {
+            return Ok(());
+        }
+        Err(PoolError::InvalidRequest(format!(
+            "session `{session_id}` does not draw on plugin `{plugin}`: its \
+             settings.plugins leave the package out, so none of its functions run there"
+        )))
     }
 
     fn function_named(&self, name: &str) -> Result<PluginFunction, PoolError> {

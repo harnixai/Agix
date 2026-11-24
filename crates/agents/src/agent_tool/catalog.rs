@@ -120,7 +120,10 @@ pub fn load_agent_types_from_dir(
             }
         };
         match parse_agent_type_file(&content, &path) {
-            Some(def) => types.push(AgentTypeDefinition { source, ..def }),
+            Some(def) => types.push(AgentTypeDefinition {
+                source: source.clone(),
+                ..def
+            }),
             None => {
                 tracing::warn!(path = %path.display(), "agent type: failed to parse frontmatter");
             }
@@ -180,7 +183,7 @@ pub fn merge_agent_types(
         merged.insert(def.name.clone(), def.clone());
     }
     for (dir, source) in dirs {
-        for def in load_agent_types_from_dir(dir, *source, files) {
+        for def in load_agent_types_from_dir(dir, source.clone(), files) {
             if def.source.may_shadow() || !merged.contains_key(&def.name) {
                 merged.insert(def.name.clone(), def);
             } else {
@@ -234,7 +237,7 @@ pub fn project_agent_types_requiring_trust(
 /// The inner `Arc<HashMap>` is swapped wholesale on reload (never mutated in
 /// place), so a reader that clones it out under a brief read lock never sees
 /// a half-updated map — see `SharedAgentTypeCatalog`/`AgentCatalog`.
-pub(crate) type SharedAgentTypeMap =
+pub type SharedAgentTypeMap =
     Arc<std::sync::RwLock<Arc<std::collections::HashMap<String, AgentTypeDefinition>>>>;
 
 pub struct SharedAgentTypeCatalog {
