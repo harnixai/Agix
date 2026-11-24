@@ -47,9 +47,13 @@ impl settings::section::Section for PluginsConfig {
         use settings::keys::{Key, Scope};
         &[
             Key::at("").scope(Scope::Process),
-            Key::at("allow").tighten(SubsetEmptyIsAll),
+            Key::at("allow")
+                .scope(Scope::Session)
+                .tighten(SubsetEmptyIsAll),
             Key::at("enable_on_install").tighten(FalseTighter),
-            Key::at("enabled").tighten(FalseTighter),
+            Key::at("enabled")
+                .scope(Scope::Session)
+                .tighten(FalseTighter),
         ]
     };
 }

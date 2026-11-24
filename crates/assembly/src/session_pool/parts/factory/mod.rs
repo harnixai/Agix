@@ -98,6 +98,8 @@ pub(in crate::session_pool) struct BuildRequest<'a> {
     pub(in crate::session_pool) scene_registry: Arc<scene::SceneRegistry>,
     pub(in crate::session_pool) cron_store: Arc<tools::cron::CronStore>,
     pub(in crate::session_pool) packages: crate::plugins::SessionPackages,
+    /// The plugins the session draws on; `packages` is already drawn from it.
+    pub(in crate::session_pool) plugins: Arc<crate::plugins::SessionPlugins>,
     pub(in crate::session_pool) mcp_module: Option<Arc<dyn runtime::module::Module>>,
     /// Where the session's commands record their process groups, for them to
     /// be stopped as it ends; used while its settings' `sandbox.reap_on_close`
@@ -123,6 +125,7 @@ pub(in crate::session_pool) struct BuiltEngine {
     /// What the engine was built on: the pair's settings with the session's
     /// layer over them, and the session's mode, model and workplace.
     pub(in crate::session_pool) session_config: Arc<settings::SessionConfig>,
+    pub(in crate::session_pool) plugins: Arc<crate::plugins::SessionPlugins>,
 }
 
 impl EngineFactory {
@@ -280,6 +283,7 @@ impl EngineFactory {
             scripts: script_ledger,
             script_faults,
             session_config,
+            plugins: req.plugins,
         })
     }
 

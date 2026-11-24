@@ -39,6 +39,7 @@ mod plugin_calls;
 mod plugin_command_prompts;
 mod plugin_commands;
 mod plugin_functions;
+mod plugin_session_allow;
 mod project_state;
 mod project_trust_untrusted;
 mod provider_fallback;

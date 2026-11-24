@@ -92,6 +92,26 @@ impl SessionPool {
         out
     }
 
+    /// The plugins the session of `spec` draws on, over the pool's active
+    /// set as it is now.
+    pub(in crate::session_pool) fn session_plugins(
+        &self,
+        spec: &SessionSpec,
+    ) -> crate::plugins::SessionPlugins {
+        self.plugins.session_plugins(spec.settings_layer()).0
+    }
+
+    /// The plugins live `session_id`'s engine was built to draw on; `None`
+    /// for a session not in memory.
+    pub(in crate::session_pool) async fn live_session_plugins(
+        &self,
+        session_id: &str,
+    ) -> Option<Arc<crate::plugins::SessionPlugins>> {
+        self.live
+            .with_live(session_id, |live| live.engine.plugins.clone())
+            .await
+    }
+
     fn require_plugins(&self) -> Result<(), PoolError> {
         let status = self.plugins.status();
         if status == crate::plugins::PluginStatus::Enabled {

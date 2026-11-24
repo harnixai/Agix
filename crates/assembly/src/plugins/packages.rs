@@ -2,7 +2,7 @@
 //! host provides, the host's own packages, and the active set every reader
 //! shares.
 
-use super::{DaemonPaths, PackageScripts, PackageSkills, PluginsConfig};
+use super::{ActivePackage, DaemonPaths, PackageScripts, PackageSkills, PluginsConfig};
 use crate::session_pool::api::{PluginInfo, PluginOrigin};
 use ::packages::manifest::Plugin;
 use base::command::HostLibrary;
@@ -176,7 +176,49 @@ impl Packages {
 
     /// See [`super::commands::kept`].
     pub fn commands(&self) -> Vec<base::command::ExtCommand> {
-        super::commands::kept(&self.active())
+        super::commands::kept(self.active().iter())
+    }
+
+    /// [`Self::commands`] of the packages `permits` takes, judged before a
+    /// name two packages declare goes to the first.
+    pub fn commands_of(&self, permits: impl Fn(&str) -> bool) -> Vec<base::command::ExtCommand> {
+        super::commands::kept(self.active().iter().filter(|p| permits(p.name())))
+    }
+
+    /// The active set as a session's set is drawn from it: each package with
+    /// those of its dependencies the set holds at a version it takes.
+    pub fn active_packages(&self) -> Vec<ActivePackage> {
+        let active = self.active();
+        active
+            .iter()
+            .map(|p| ActivePackage {
+                name: p.name().to_string(),
+                version: p.manifest.plugin.version.clone(),
+                dependencies: p
+                    .manifest
+                    .dependencies
+                    .iter()
+                    .filter(|(name, required)| {
+                        let found = active
+                            .iter()
+                            .filter(|q| q.name() == name.as_str())
+                            .map(|q| q.manifest.plugin.version.clone())
+                            .collect::<Vec<_>>();
+                        let met = ::packages::manifest::check_dependency(name, required, &found);
+                        if let Err(e) = &met {
+                            tracing::debug!(
+                                plugin = %p.name(),
+                                error = %e,
+                                "a dependency is not in the active set; a session naming the \
+                                 package does not get it"
+                            );
+                        }
+                        met.is_ok()
+                    })
+                    .map(|(name, _)| name.clone())
+                    .collect(),
+            })
+            .collect()
     }
 
     pub fn command_clashes(&self) -> Vec<(String, String, String)> {

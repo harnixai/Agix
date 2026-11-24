@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Every command of `active`, in package-name order. A name two packages
 /// declare goes to the first; the other's is in [`clashes`].
-pub(super) fn kept(active: &[Plugin]) -> Vec<ExtCommand> {
+pub(super) fn kept<'a>(active: impl IntoIterator<Item = &'a Plugin>) -> Vec<ExtCommand> {
     let mut seen = std::collections::HashSet::new();
     declared(active)
         .into_iter()
@@ -51,9 +51,9 @@ pub(super) fn listed(plugin: &Plugin) -> Vec<PluginCommand> {
 
 /// Discovery already checked these entries; a package whose entry no longer
 /// passes loses its commands here, not the others'.
-fn declared(active: &[Plugin]) -> Vec<ExtCommand> {
+fn declared<'a>(active: impl IntoIterator<Item = &'a Plugin>) -> Vec<ExtCommand> {
     active
-        .iter()
+        .into_iter()
         .flat_map(|p| match packages::commands::declared_commands(p) {
             Ok(commands) => commands,
             Err(e) => {

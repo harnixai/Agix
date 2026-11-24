@@ -154,3 +154,45 @@ fn a_spec_entry_no_engine_wrote_does_not_stop_the_read() {
         "a session layer that does not read leaves the rest of the spec"
     );
 }
+
+/// The plugins a session draws on only narrow: a last spec that does not
+/// read leaves its `plugins` settings in force over the spec read before it,
+/// and leaves the session none when they cannot be found in it either.
+#[test]
+fn a_last_spec_that_does_not_read_keeps_its_plugins_narrowed() {
+    let earlier = entry(json!({"options": {"settings": {"model": {"effort": "low"}}}}));
+    let unread = entry(json!({
+        "options": {"prompt_types": 3, "settings": {"plugins": {"allow": ["a"]}}},
+    }));
+    let spec = recorded_in(&[earlier.clone(), unread]);
+    assert_eq!(
+        spec.settings_layer()
+            .map(|l| serde_json::Value::Object(l.clone())),
+        Some(json!({"model": {"effort": "low"}, "plugins": {"allow": ["a"]}}))
+    );
+
+    for lost in [
+        json!("x"),
+        json!({"options": 3}),
+        json!({"options": {"settings": "x"}}),
+    ] {
+        let spec = recorded_in(&[earlier.clone(), entry(lost.clone())]);
+        assert_eq!(
+            spec.session_setting("plugins.enabled"),
+            Some(&json!(false)),
+            "{lost}"
+        );
+    }
+
+    let read = entry(json!({"options": {"settings": {"plugins": {"allow": ["a"]}}}}));
+    assert_eq!(
+        recorded_in(&[read]).settings,
+        None,
+        "a spec that reads is taken as it is"
+    );
+    let untouched = entry(json!({"options": {"prompt_types": 3}}));
+    assert_eq!(
+        recorded_in(&[earlier, untouched]).session_setting("plugins"),
+        None
+    );
+}

@@ -588,12 +588,14 @@ pub(in crate::session_pool) fn forked_spec(
 }
 
 /// The spec `entries`, a session's log, recorded last; an empty one when they
-/// record none.
+/// record none. When the last one does not read, the one before it is taken,
+/// with the last one's `plugins` settings: those only narrow, so a session
+/// whose spec cannot say what it narrowed to gets no plugin rather than all.
 pub(in crate::session_pool) fn recorded_in(
     entries: &[history::entry::EnvelopedEntry],
 ) -> SessionSpec {
     let recorded = last_recorded(entries).unwrap_or_default();
-    SessionSpec {
+    let mut spec = SessionSpec {
         options: recorded.options,
         model: recorded.model,
         provider: recorded.provider,
@@ -601,5 +603,50 @@ pub(in crate::session_pool) fn recorded_in(
         skill_dirs: recorded.skill_dirs,
         permission_mode: recorded.permission_mode,
         recorder: None,
+    };
+    if let Some(plugins) = plugins_of_unread_last(entries) {
+        spec.change_layer(|layer| {
+            layer.insert("plugins".into(), plugins);
+        });
     }
+    spec
+}
+
+/// The `plugins` settings of the last spec in `entries`, when it does not
+/// read as a spec and sets them; `{"enabled": false}` when where they would be
+/// does not read either.
+fn plugins_of_unread_last(entries: &[history::entry::EnvelopedEntry]) -> Option<Value> {
+    let closed = || {
+        Some(Value::Object(Map::from_iter([(
+            "enabled".to_string(),
+            Value::Bool(false),
+        )])))
+    };
+    let mut payload = entries.iter().rev().find_map(|env| match &env.entry {
+        history::entry::LogEntry::Extension { ns, event, payload }
+            if ns == SPEC_NS && event == SPEC_EVENT =>
+        {
+            Some(payload.clone())
+        }
+        _ => None,
+    })?;
+    let Value::Object(spec) = &mut payload else {
+        return closed();
+    };
+    spec_of_0_3_and_0_4_0(spec);
+    if serde_json::from_value::<RecordedSpec>(Value::Object(spec.clone())).is_ok() {
+        return None;
+    }
+    let layer = match (spec.get("settings"), spec.get("options")) {
+        (Some(Value::Object(layer)), _) => layer,
+        (Some(_), _) => return closed(),
+        (None, None) => return None,
+        (None, Some(Value::Object(options))) => match options.get("settings") {
+            None => return None,
+            Some(Value::Object(layer)) => layer,
+            Some(_) => return closed(),
+        },
+        (None, Some(_)) => return closed(),
+    };
+    layer.get("plugins").cloned()
 }

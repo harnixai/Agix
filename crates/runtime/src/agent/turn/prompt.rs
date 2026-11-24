@@ -797,6 +797,7 @@ impl Agent {
             total_tokens: total,
             compact_threshold: budget.compact_threshold,
             hard_cap: budget.hard_cap,
+            plugins: Vec::new(),
         }
     }
 }

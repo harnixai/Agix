@@ -1792,6 +1792,29 @@
         }
       ]
     },
+    "ContextPlugin": {
+      "description": "One plugin package a session draws on.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "required_by": {
+          "description": "The packages of the session's set that depend on this one, when the\nsession's `plugins.allow` does not name it and it is there only as\ntheir dependency.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
     "ContextReport": {
       "description": "What the next model call would carry if a step started now with no new\ninput, and roughly what each part costs.",
       "properties": {
@@ -1822,6 +1845,14 @@
         },
         "model": {
           "type": "string"
+        },
+        "plugins": {
+          "default": [],
+          "description": "The plugin packages the session draws on. The engine does not know\npackages; the pool fills it in.",
+          "items": {
+            "$ref": "#/$defs/ContextPlugin"
+          },
+          "type": "array"
         },
         "provider": {
           "default": null,

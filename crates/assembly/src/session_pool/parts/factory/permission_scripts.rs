@@ -37,16 +37,19 @@ pub(in crate::session_pool) fn effective_permission_mode(
 /// over it, and the permission mode — `requested` clamped against `base` — it
 /// runs in; with the keys of `layer` held to the settings' value, as fields of
 /// `options`. The mode is decided by [`effective_permission_mode`] apart from
-/// the layer, so the managed layer has the last word over it.
+/// the layer, so the managed layer has the last word over it. The plugins a
+/// session draws on are judged against the pool's active set, not `base`, by
+/// `PluginSubsystem::session_plugins`.
 pub(in crate::session_pool) fn session_settings(
     base: &Arc<settings::LoadedSettings>,
     layer: Option<&serde_json::Map<String, serde_json::Value>>,
     requested: Option<base::permission::PermissionMode>,
 ) -> (settings::SessionConfig, Vec<api::ClampedOption>) {
     let mode = effective_permission_mode(base, requested);
+    let layer = layer.map(crate::plugins::without_session_keys);
     let config = settings::SessionConfig::with_session_layer(
         base.clone(),
-        layer,
+        layer.as_ref(),
         &crate::settings_sections::all(),
     )
     .with_permission_mode(mode);
@@ -60,7 +63,7 @@ pub(in crate::session_pool) fn session_settings(
             applied: held.applied.clone(),
         })
         .collect();
-    let asked = layer.and_then(api::requested_permission_mode);
+    let asked = layer.as_ref().and_then(api::requested_permission_mode);
     if let Some(asked) = asked.filter(|asked| requested == Some(*asked) && mode != *asked) {
         clamped.insert(
             0,

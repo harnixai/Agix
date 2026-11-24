@@ -21,12 +21,14 @@ pub(in crate::session_pool) fn created_answer(
     scene: &str,
     project: Option<&Path>,
     binding: &ProjectBinding,
+    plugins: &crate::plugins::PluginSubsystem,
     options: Option<&SessionOptions>,
     existing: bool,
 ) -> api::SessionCreated {
     let requested = options.and_then(SessionOptions::requested_permission_mode);
     let layer = options.and_then(|o| o.settings.as_ref());
-    let (_, clamped_options) = session_settings(&binding.settings, layer, requested);
+    let (_, mut clamped_options) = session_settings(&binding.settings, layer, requested);
+    clamped_options.extend(plugins.session_plugins(layer).1);
     api::SessionCreated {
         session_id: core.id().to_string(),
         scene: scene.to_string(),
@@ -173,6 +175,7 @@ impl SessionPool {
             &place.scene.id,
             place.project.as_deref(),
             &place.binding,
+            &self.plugins,
             options,
             false,
         ))
@@ -567,6 +570,7 @@ impl SessionPool {
             .project()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| self.cwd().to_path_buf());
+        let plugins = Arc::new(self.session_plugins(spec));
         let mut built = self.factory.build(BuildRequest {
             session_id,
             seed: SessionSeed {
@@ -583,7 +587,8 @@ impl SessionPool {
             spec,
             scene_registry: self.scenes.registry(),
             cron_store: self.scheduler.store(),
-            packages: self.plugins.for_session(),
+            packages: self.plugins.for_session(&plugins),
+            plugins: plugins.clone(),
             mcp_module,
             process_groups: Some(core.process_groups().clone()),
             skill_dirs: core.skill_dirs(),
@@ -618,7 +623,7 @@ impl SessionPool {
                     resume_from: (restore != Restore::New).then(|| session_id.to_string()),
                     auth_modes: Vec::new(),
                     mcp_server_count,
-                    plugin_count: self.plugins.count(),
+                    plugin_count: plugins.packages().len(),
                     skill_count: binding.modules.skill_count(),
                     output_format: "jsonrpc".to_string(),
                     started_at_ms: (time::OffsetDateTime::now_utc().unix_timestamp_nanos()
@@ -738,6 +743,7 @@ fn run_engine(
         input_tx,
         namer,
         scripts,
+        plugins,
         ..
     } = built;
     hub.answer_host_calls_with(input_tx.clone());
@@ -770,6 +776,7 @@ fn run_engine(
             scripts,
             health,
             commands,
+            plugins,
         },
         event_rx,
     )

@@ -269,6 +269,8 @@ pub(in crate::session_pool) struct EngineSlot {
     pub(in crate::session_pool) health: Arc<base::interface::health::HealthChecks>,
     /// The slash commands this engine resolves, for `commands.list`.
     pub(in crate::session_pool) commands: Arc<runtime::commands::CommandRegistry>,
+    /// The plugins this engine was built to draw on.
+    pub(in crate::session_pool) plugins: Arc<crate::plugins::SessionPlugins>,
 }
 
 impl EngineSlot {

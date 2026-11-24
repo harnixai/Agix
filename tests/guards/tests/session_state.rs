@@ -231,6 +231,10 @@ const FIELDS: &[(&str, &str)] = &[
         "EngineSlot::commands",
         "Engine: the slash commands it resolves",
     ),
+    (
+        "EngineSlot::plugins",
+        "Engine: the plugins it was built to draw on",
+    ),
 ];
 
 const CREATED_AT: &[(&str, &str)] = &[

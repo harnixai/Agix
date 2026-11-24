@@ -20,8 +20,11 @@ pub(crate) mod host_libraries;
 #[cfg(feature = "plugin-packages")]
 mod packages;
 mod policy;
+mod session_set;
 
 pub use policy::PluginsConfig;
+pub(crate) use session_set::without_session_keys;
+pub use session_set::{ActivePackage, SessionPlugin, SessionPlugins};
 
 use crate::config::DaemonPaths;
 use crate::session_pool::api::{
@@ -69,7 +72,7 @@ pub struct PackageScripts {
     pub bindings: Vec<base::interface::script::ScriptBinding>,
 }
 
-/// What the active packages hand a session as it is built.
+/// What the packages a session draws on hand it as it is built.
 pub struct SessionPackages {
     pub scripts: Vec<PackageScripts>,
     pub commands: Vec<base::command::ExtCommand>,
@@ -178,10 +181,23 @@ mod imp {
             self.packages.mcp_key_clashes()
         }
 
-        pub fn for_session(&self) -> SessionPackages {
+        /// The set a session whose own settings are `layer` draws on, and
+        /// what in `layer` asked for more than the pool has active.
+        pub fn session_plugins(
+            &self,
+            layer: Option<&serde_json::Map<String, serde_json::Value>>,
+        ) -> (SessionPlugins, Vec<crate::session_pool::api::ClampedOption>) {
+            SessionPlugins::resolve(
+                layer,
+                self.packages.is_enabled(),
+                &self.packages.active_packages(),
+            )
+        }
+
+        pub fn for_session(&self, plugins: &SessionPlugins) -> SessionPackages {
             SessionPackages {
-                scripts: self.packages.script_bindings(),
-                commands: self.packages.commands(),
+                scripts: plugins.retain(self.packages.script_bindings(), |p| &p.name),
+                commands: self.packages.commands_of(|name| plugins.permits(name)),
             }
         }
 
@@ -415,7 +431,13 @@ mod imp {
         pub fn mcp_key_clashes(&self) -> Vec<(String, String, String)> {
             Vec::new()
         }
-        pub fn for_session(&self) -> SessionPackages {
+        pub fn session_plugins(
+            &self,
+            layer: Option<&serde_json::Map<String, serde_json::Value>>,
+        ) -> (SessionPlugins, Vec<crate::session_pool::api::ClampedOption>) {
+            SessionPlugins::resolve(layer, false, &[])
+        }
+        pub fn for_session(&self, _plugins: &SessionPlugins) -> SessionPackages {
             SessionPackages {
                 scripts: Vec::new(),
                 commands: Vec::new(),

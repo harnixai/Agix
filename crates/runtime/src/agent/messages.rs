@@ -272,6 +272,24 @@ pub struct ContextReport {
     pub total_tokens: usize,
     pub compact_threshold: usize,
     pub hard_cap: Option<usize>,
+    /// The plugin packages the session draws on. The engine does not know
+    /// packages; the pool fills it in.
+    #[serde(default)]
+    pub plugins: Vec<ContextPlugin>,
+}
+
+/// One plugin package a session draws on.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct ContextPlugin {
+    pub name: String,
+    pub version: String,
+    /// The packages of the session's set that depend on this one, when the
+    /// session's `plugins.allow` does not name it and it is there only as
+    /// their dependency.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_by: Vec<String>,
 }
 
 /// The reasoning effort and thinking mode the session's next model call

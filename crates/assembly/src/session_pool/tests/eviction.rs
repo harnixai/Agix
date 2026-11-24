@@ -38,6 +38,7 @@ fn dummy_live_session(last_active: Instant) -> LiveSession {
             scripts: None,
             health: Default::default(),
             commands: Default::default(),
+            plugins: Default::default(),
         },
         turn: TurnSlot::new(event_rx),
     }

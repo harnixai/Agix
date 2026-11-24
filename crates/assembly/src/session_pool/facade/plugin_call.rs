@@ -222,6 +222,7 @@ impl SessionPool {
             }),
             ..Default::default()
         };
+        let plugins = Arc::new(self.session_plugins(&spec));
         let mut built = self.factory.build(BuildRequest {
             session_id: &sid,
             seed: SessionSeed {
@@ -238,7 +239,8 @@ impl SessionPool {
             spec: &spec,
             scene_registry: self.scenes.registry(),
             cron_store: self.scheduler.store(),
-            packages: self.plugins.for_session(),
+            packages: self.plugins.for_session(&plugins),
+            plugins,
             mcp_module: None,
             process_groups: Some(core.process_groups().clone()),
             skill_dirs: core.skill_dirs(),

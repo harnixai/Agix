@@ -329,6 +329,17 @@ impl SessionPool {
             .await?
         {
             runtime::agent::ContextAnswer::Inspected(mut report) => {
+                if let Some(plugins) = self.live_session_plugins(session_id).await {
+                    report.plugins = plugins
+                        .packages()
+                        .iter()
+                        .map(|p| runtime::agent::ContextPlugin {
+                            name: p.name.clone(),
+                            version: p.version.clone(),
+                            required_by: p.required_by.clone(),
+                        })
+                        .collect();
+                }
                 if let Some(binding) = self.live_binding(session_id).await {
                     let spec = self.specs.get(session_id).unwrap_or_default();
                     report.provider = Some(binding.routed_provider(spec.provider().as_deref()));
