@@ -72,7 +72,7 @@ fn requests_with_marker(proxy: &LiveProvider, marker: &str) -> usize {
     proxy
         .calls()
         .iter()
-        .filter(|c| c.system_contains(marker))
+        .filter(|c| c.body.to_string().contains(marker))
         .count()
 }
 
@@ -180,7 +180,14 @@ async fn a_host_started_agent_can_name_the_provider() -> anyhow::Result<()> {
 
     let task = agent_task(&mut run, &session).await?;
     assert_eq!(task["status"], "done", "{task}");
-    assert!(task.to_string().contains(&word), "{task}");
+    let output = run
+        .client
+        .call(
+            "session.taskOutput",
+            json!({"session_id": session, "task_id": task["task_id"]}),
+        )
+        .await?;
+    assert!(format!("{:?}", output.result).contains(&word), "{output:?}");
     assert_eq!(task["detail"]["provider"], "cc", "{task}");
 
     let cc = run.second().unwrap();
@@ -269,7 +276,9 @@ async fn a_session_on_cc_sends_a_sub_agent_to_ds_and_usage_stays_apart() -> anyh
     );
     let ds_calls = run.provider.calls();
     assert!(!ds_calls.is_empty(), "provider ds was never called");
-    assert!(ds_calls.iter().all(|c| c.system_contains(&marker)));
+    assert!(ds_calls
+        .iter()
+        .all(|c| c.body.to_string().contains(&marker)));
     assert!(ds_calls.iter().all(|c| c.model() == ds_model));
 
     let task = agent_task(&mut run, &session).await?;
