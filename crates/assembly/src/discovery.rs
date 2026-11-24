@@ -285,6 +285,9 @@ pub fn capabilities() -> Vec<&'static str> {
     if cfg!(feature = "mcp-oauth-jwt") {
         out.push("mcp_oauth_jwt");
     }
+    if cfg!(feature = "plugin-packages") {
+        out.push("session_plugins");
+    }
     if runtime::PTC_ENABLED {
         out.push("ptc");
     }

@@ -59,7 +59,7 @@ impl SessionPool {
     ) -> Result<PluginCallResult, PoolError> {
         self.require_plugin_functions()?;
         let time = time_of(&call)?;
-        let function = self.function_named(&call.function)?;
+        let function = self.function_named(&call.function, &call.target).await?;
         let plugin = function.plugin.clone();
         let tool = runtime::plugin_call::tool(runtime::plugin_call::FunctionCall {
             function,
@@ -150,10 +150,22 @@ impl SessionPool {
         )))
     }
 
-    fn function_named(&self, name: &str) -> Result<PluginFunction, PoolError> {
-        let functions = self.plugins.functions();
+    /// `Err` naming the functions there are — for a session, those of the
+    /// packages it draws on — when none is `name`.
+    async fn function_named(
+        &self,
+        name: &str,
+        target: &PluginCallTarget,
+    ) -> Result<PluginFunction, PoolError> {
+        let mut functions = self.plugins.functions();
         if let Some(found) = functions.iter().find(|f| f.call_name() == name) {
             return Ok(found.clone());
+        }
+        if let PluginCallTarget::Session(id) = target {
+            functions = self
+                .plugins_of_session(id)
+                .await
+                .retain(functions, |f| &f.plugin);
         }
         let known: Vec<String> = functions.iter().map(PluginFunction::call_name).collect();
         Err(PoolError::InvalidRequest(match known.is_empty() {

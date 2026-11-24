@@ -902,3 +902,137 @@ async fn a_left_out_packages_scene_is_entered_neither_at_create_nor_by_a_sub_age
     embedded.shutdown().await;
     Ok(())
 }
+
+/// The first request of a one-reply turn of `session`.
+async fn one_turn(
+    stub: &ProviderStub,
+    client: &mut DaemonRpcClient,
+    session: &str,
+    tag: &str,
+) -> anyhow::Result<SeenRequest> {
+    let mark = format!("ONE-{tag}");
+    stub.script_when(&mark, [Reply::text("done")]);
+    let events = client
+        .session_run_turn(session, &format!("{mark} go"), tag, None)
+        .await?;
+    anyhow::ensure!(events.turn_complete, "{events:?}");
+    stub.calls()
+        .into_iter()
+        .find(|c| c.messages_contain(&mark))
+        .ok_or_else(|| anyhow::anyhow!("no request of the turn {tag}"))
+}
+
+/// b, installed rather than the host's, has a server the pair connected
+/// for a first session. Once b is disabled its server reaches no session
+/// created after: one narrowed to a, nor one narrowing nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_disabled_packages_mcp_server_reaches_no_later_session() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub, json!({}))?;
+    let a = package(&root, "a", "")?;
+    let staged = package(
+        &root,
+        "b",
+        "[[mcp]]\nname = \"toy\"\nkind = \"native\"\nconfig = \"mcp/server.json\"\n",
+    )?;
+    write(
+        &staged,
+        "mcp/server.json",
+        &McpToy::stdio_config(&[])?.to_string(),
+    )?;
+    let installed = root.data.join("plugins/cache/b/1.0.0");
+    std::fs::create_dir_all(installed.parent().unwrap_or(&root.data))?;
+    std::fs::rename(&staged, &installed)?;
+    write(&installed, ".agix-installed", "")?;
+    let (embedded, mut client) = start(&root, vec![a]).await?;
+    let offers_toy = |request: &SeenRequest| {
+        request
+            .tool_names()
+            .iter()
+            .any(|n| n.starts_with("mcp__") && n.contains("toy"))
+    };
+
+    let first = id(&create(&mut client, None).await?);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let status = client.call("mcp.status", json!({})).await?.result;
+        let status = status.unwrap_or_default();
+        if status["servers"][0]["state"] == "connected" {
+            break;
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "b's server did not connect: {status}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let seen = one_turn(&stub, &mut client, &first, "FIRST").await?;
+    assert!(offers_toy(&seen), "{:?}", seen.tool_names());
+
+    let disabled = client.call("plugin.disable", json!({"name": "b"})).await?;
+    assert!(disabled.error.is_none(), "{:?}", disabled.error);
+
+    let narrowed = id(&create(&mut client, Some(json!({"plugins": {"allow": ["a"]}}))).await?);
+    let seen = one_turn(&stub, &mut client, &narrowed, "NARROWED").await?;
+    assert!(!offers_toy(&seen), "{:?}", seen.tool_names());
+    let whole = id(&create(&mut client, None).await?);
+    let seen = one_turn(&stub, &mut client, &whole, "WHOLE").await?;
+    assert!(!offers_toy(&seen), "{:?}", seen.tool_names());
+    embedded.shutdown().await;
+    Ok(())
+}
+
+/// A function name nobody has is answered with the names there are: for a
+/// session leaving b out, not b's.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_function_names_only_what_the_session_draws_on() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub, json!({}))?;
+    let functions = |name: &str| {
+        format!(
+            "[[function]]\nname = \"check\"\nentry = \"f.js:check\"\n\
+             description = \"{name} check\"\n"
+        )
+    };
+    let a = package(&root, "a", &functions("a"))?;
+    write(&a, "f.js", "async function check() { return 'a-ran'; }\n")?;
+    let b = package(&root, "b", &functions("b"))?;
+    write(&b, "f.js", "async function check() { return 'b-ran'; }\n")?;
+    let (embedded, mut client) = start(&root, vec![a, b]).await?;
+    let narrowed = id(&create(&mut client, Some(json!({"plugins": {"allow": ["a"]}}))).await?);
+    let whole = id(&create(&mut client, None).await?);
+    let unknown = |session: &str| json!({ "function": "c.none", "session_id": session });
+
+    let error = client
+        .call("plugin.call", unknown(&narrowed))
+        .await?
+        .error
+        .expect("no such function");
+    assert!(error.message.contains("a.check"), "{}", error.message);
+    assert!(!error.message.contains("b.check"), "{}", error.message);
+    let error = client
+        .call("plugin.call", unknown(&whole))
+        .await?
+        .error
+        .expect("no such function");
+    assert!(error.message.contains("b.check"), "{}", error.message);
+    embedded.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_daemon_says_a_session_can_narrow_its_plugins() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub, json!({}))?;
+    let (embedded, mut client) = start(&root, Vec::new()).await?;
+    let ping = client.call("daemon.ping", json!({})).await?;
+    let ping = ping.result.unwrap_or_default();
+    assert!(
+        ping["capabilities"]
+            .as_array()
+            .is_some_and(|c| c.iter().any(|c| c == "session_plugins")),
+        "{ping}"
+    );
+    embedded.shutdown().await;
+    Ok(())
+}

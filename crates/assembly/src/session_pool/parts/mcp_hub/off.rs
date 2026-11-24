@@ -173,6 +173,8 @@ impl SessionPool {
         (Vec::new(), Vec::new(), Vec::new())
     }
 
+    pub(in crate::session_pool) async fn drop_unconfigured_mcp_servers(&self) {}
+
     pub(in crate::session_pool) async fn mcp_session_module(
         &self,
         _project_root: Option<&Path>,

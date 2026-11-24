@@ -250,9 +250,11 @@ impl SessionPool {
     /// every binding. The subsystem has already re-read itself by this point;
     /// what is left is the state this pool derives from it. The catalogs are
     /// swapped in place, so a running session's next turn sees a package's
-    /// skills come or go.
+    /// skills come or go. A package's MCP servers leave with it; one a
+    /// package brings waits for its pair to connect anew.
     pub(in crate::session_pool) async fn refresh_after_plugin_change(&self) {
         self.adopt_plugin_scenes().await;
         self.bindings.refresh_plugins().await;
+        self.drop_unconfigured_mcp_servers().await;
     }
 }

@@ -58,7 +58,9 @@ impl SessionPool {
     /// refresh its tools, which a shared one cannot give it. `None` when
     /// nothing is connected or connecting, so the common "no MCP servers"
     /// case pays nothing. A server a package declares reaches only a session
-    /// drawing on that package. The count is the servers the session gets.
+    /// drawing on that package; a session narrowing its packages gets only
+    /// the pair's settings' own servers besides, never one nobody owns now.
+    /// The count is the servers the session gets.
     pub(in crate::session_pool) async fn mcp_session_module(
         &self,
         project_root: Option<&Path>,
@@ -73,8 +75,17 @@ impl SessionPool {
         let mut per_session = central.share();
         if plugins.is_narrowed() {
             let owners = self.plugins.mcp_server_owners();
-            per_session = per_session
-                .share_where(|server| owners.get(server).is_none_or(|p| plugins.permits(p)));
+            let settings = self.settings_for_project(project_root, scene_id).await;
+            let declared: std::collections::HashSet<&str> = settings
+                .values
+                .mcp
+                .declared()
+                .map(|(name, _)| name.as_str())
+                .collect();
+            per_session = per_session.share_where(|server| match owners.get(server) {
+                Some(owner) => plugins.permits(owner),
+                None => declared.contains(server),
+            });
         }
         per_session.refresh_tools().await;
         (
@@ -411,6 +422,41 @@ impl SessionPool {
         }
         (connected, failed, connecting)
     }
+
+    /// Take out of every connected pair the servers neither its settings nor
+    /// the active packages configure any more — those of a package just
+    /// disabled or uninstalled — and have the pair's sessions rebuilt without
+    /// them. Nothing is connected anew.
+    pub(in crate::session_pool) async fn drop_unconfigured_mcp_servers(&self) {
+        let mut touched = Vec::new();
+        for (key, slot) in self.mcp.cache.slots() {
+            let settings = self.settings_for_project(key.0.as_deref(), &key.1).await;
+            let configured = self.configured_mcp_servers(&settings.values);
+            let update = slot.update().await;
+            let Some(manager) = update.current() else {
+                continue;
+            };
+            if mcp_server_names(&manager).all(|name| configured.contains_key(name)) {
+                continue;
+            }
+            update.set(Arc::new(
+                manager.share_where(|name| configured.contains_key(name)),
+            ));
+            touched.push(key);
+        }
+        self.invalidate_mcp_keys(&touched).await;
+    }
+}
+
+/// Every server `manager` holds, in whatever state.
+fn mcp_server_names(manager: &McpManager) -> impl Iterator<Item = &str> {
+    let clients = manager.clients().iter().map(|c| c.server_name());
+    let waiting = manager.pending().iter().chain(manager.connecting());
+    let failed = manager.failed().iter().chain(manager.invalid());
+    clients
+        .chain(waiting.map(|p| p.name.as_str()))
+        .chain(failed.map(|f| f.name.as_str()))
+        .chain(manager.denied().iter().map(|d| d.name.as_str()))
 }
 
 /// The pair's servers start under its settings' `sandbox.env`, and

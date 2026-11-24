@@ -1,8 +1,14 @@
 //! `agix.session/spec` 条目的载荷格式：0.3 与 0.4.0 写出的日志读回成现在的形状，现在写出的
-//! 原样读回得到同一份 JSON，读不懂的条目不让读取失败。
+//! 原样读回得到同一份 JSON，读不懂的条目不让读取失败；会话自己的设置记不进日志时不建会话。
 
+use super::mcp_for_project::test_pool_with_store;
+use super::rebuild::StoreThatGoesDown;
+use crate::session_pool::api::SessionOptions;
 use crate::session_pool::parts::specs::{recorded_in, RecordedSpec};
+use crate::session_pool::{PoolError, ProjectSelector};
 use serde_json::json;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 const SPEC_0_4_0: &str = include_str!("fixtures/spec_0.4.0.json");
 
@@ -195,4 +201,31 @@ fn a_last_spec_that_does_not_read_keeps_its_plugins_narrowed() {
         recorded_in(&[earlier, untouched]).session_setting("plugins"),
         None
     );
+}
+
+/// A session whose own settings the log does not take is not created: a
+/// resume would find no spec and draw on every package. One without settings
+/// of its own is created as before.
+#[tokio::test]
+async fn a_session_whose_own_settings_are_not_recorded_is_not_created() {
+    let store = Arc::new(StoreThatGoesDown::default());
+    let (pool, _dir) = test_pool_with_store(Some(store.clone())).await;
+    store.down.store(true, Ordering::SeqCst);
+    let narrowed = SessionOptions {
+        settings: json!({"plugins": {"allow": ["a"]}}).as_object().cloned(),
+        ..Default::default()
+    };
+
+    match pool
+        .create_session(None, ProjectSelector::Default, Some(&narrowed))
+        .await
+    {
+        Err(PoolError::Engine(failure)) => {
+            assert_eq!(failure.kind, base::event::FailureKind::PersistFailed);
+        }
+        other => panic!("created without its spec recorded: {other:?}"),
+    }
+    pool.create_session(None, ProjectSelector::Default, None)
+        .await
+        .expect("a session with nothing of its own to record");
 }

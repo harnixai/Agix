@@ -873,6 +873,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `provider_tiers` | `config.setProvider` 接受 `tier`(`project` / `global`)与 `dry_run`,结果带 `tier`、`dry_run`(§6.4) |
 | `host_call_context` | `host_tool_call` 与 `hook_call` 帧带 `cwd`(发起调用的会话的工作目录)与 `depth`(根会话 0,子 Agent 逐层加 1);hook 的 payload 带 `depth`(§7.4、§7.6) |
 | `config_explain` | 有 `config.explain`:一个设置键为什么是现在这个值,逐层列出值与结局(§6.4) |
+| `session_plugins` | `options.settings.plugins.allow` / `plugins.enabled`:会话只用池里已启用的包的一部分,留在外面的包给这个会话的东西都不进(§6.3) |
 | `mcp_oauth_jwt` | 这个构建能用 `oauth.private_key_jwt`(feature `mcp-oauth-jwt`);没有这一项的构建,配了 `private_key_jwt` 的 MCP server 连接时报明确的错(`docs/mcp_auth.md`) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 | `runext` | 这个构建带插件命令:包的 `[[command]]` 经 `RunExt` 与 `/name args` 跑,`plugin.list` 带 `commands` / `command_conflicts`,`commands.list` 有 `kind:"ext"`,任务有 `kind:"ext"`(`docs/runext.md`) |

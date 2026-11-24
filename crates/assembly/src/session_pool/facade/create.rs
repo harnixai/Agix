@@ -230,15 +230,13 @@ impl SessionPool {
         // sessions already have one from when they were first created, and
         // must not get a second (that would break the "Meta is always
         // entries[0]" assumption `Transcript::resume`/`session.resume`
-        // rely on). Best-effort: a write failure here doesn't fail session
+        // rely on). Best-effort: a failed `Meta` write doesn't fail session
         // creation — the session still works, it's just not identifiable by
         // scene/project on a later resume (falls back to inference, same as
         // any other pre-v2 file).
         if !resume {
             self.write_meta(&core, &built.session_config).await;
-            if spec.options.is_some() {
-                self.specs.persist(&session_id, &spec).await;
-            }
+            self.record_new_spec(&session_id, &spec).await?;
         }
 
         built.agent.starts_as(if resume {
@@ -324,6 +322,24 @@ impl SessionPool {
         ));
         info!(%session_id, "session created");
         Ok(core)
+    }
+
+    /// A new session with settings of its own is created only once its log
+    /// records them: resumed without them it would run on the pool's, which
+    /// may let it draw on packages its own leave out.
+    async fn record_new_spec(&self, sid: &str, spec: &SessionSpec) -> Result<(), CreateError> {
+        if spec.options.is_none() {
+            return Ok(());
+        }
+        if spec.settings_layer().is_none_or(|layer| layer.is_empty()) {
+            self.specs.persist(sid, spec).await;
+            return Ok(());
+        }
+        self.specs.try_persist(sid, spec).await.map_err(|e| {
+            CreateError::PersistFailed(format!(
+                "session `{sid}` was not created: recording its own settings failed ({e})"
+            ))
+        })
     }
 
     /// The spec of a session being brought up, with a recording's root
