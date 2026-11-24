@@ -33,7 +33,7 @@ async fn title_and_compact_calls_go_to_the_models_of_their_tiers() -> anyhow::Re
     );
     assert!(
         main != compactor && main != titler && compactor != titler,
-        "AGIX_LIVE_MODELS needs three Flash names"
+        "AGIX_LIVE_MODELS needs three model names"
     );
     let mut settings = LiveRun::base_settings();
     settings["providers"] = providers(&run, &main, &compactor, &titler);

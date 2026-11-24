@@ -337,7 +337,7 @@ async fn a_web_fetch_tier_extracts_on_its_own_model_and_falls_back_to_the_page(
     );
     assert_ne!(
         main, extractor,
-        "AGIX_LIVE_MODELS needs a second Flash name"
+        "AGIX_LIVE_MODELS needs a second model name"
     );
     let settings = json!({
         "providers": providers(&run, &main, &main, &extractor),
@@ -438,7 +438,7 @@ async fn the_web_search_tier_routes_the_search_to_its_own_model() -> anyhow::Res
         run.config().model.clone(),
         run.config().model_at(2).to_string(),
     );
-    assert_ne!(main, searcher, "AGIX_LIVE_MODELS needs a third Flash name");
+    assert_ne!(main, searcher, "AGIX_LIVE_MODELS needs a third model name");
     let settings = json!({
         "providers": providers(&run, &main, &main, &searcher),
     });

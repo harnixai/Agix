@@ -40,6 +40,13 @@ const DEFAULT_MAX_CALLS: usize = 400;
 const DEFAULT_TURN_TIMEOUT_SECS: u64 = 900;
 const RESPONSE_KEEP_BYTES: usize = 1 << 20;
 
+/// Which real provider the live tier treats as its main one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Primary {
+    DeepSeek,
+    Anthropic,
+}
+
 /// Where the real model is and how to reach it.
 #[derive(Clone)]
 pub struct LiveConfig {
@@ -47,34 +54,66 @@ pub struct LiveConfig {
     token: String,
     /// The model sessions use unless told otherwise.
     pub model: String,
-    /// Every model a case may hand out — `AGIX_LIVE_MODELS`, comma-separated,
-    /// else just [`model`](Self::model).
+    /// Every model a case may hand out; the primary's list, `model` first.
     pub models: Vec<String>,
     pub max_calls: usize,
     pub turn_timeout: Duration,
-    /// A second real provider, for cases that cross providers.
+    /// `AGIX_LIVE_PRIMARY`: whose endpoint `base_url` / `model` / `models` are.
+    pub primary: Primary,
+    /// The other provider, for cases that cross providers.
     pub second: Option<SecondEndpoint>,
 }
 
-/// Real Anthropic, reached with `CLAUDE_BASE_URL` / `CLAUDE_API_KEY`.
+/// The provider that is not the primary one.
 #[derive(Clone)]
 pub struct SecondEndpoint {
     pub base_url: String,
     token: String,
     pub model: String,
+    pub models: Vec<String>,
 }
 
-pub const DEFAULT_SECOND_MODEL: &str = "claude-sonnet-5-5";
+const DEFAULT_ANTHROPIC_MODELS: &str = "claude-sonnet-5-5,claude-sonnet-5,claude-sonnet-4-6";
+const DEFAULT_DEEPSEEK_MODELS: &str = "deepseek-flash,deepseek-v4-flash,claude-haiku-4-5";
 
 impl std::fmt::Debug for LiveConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LiveConfig")
             .field("base_url", &self.base_url)
+            .field("primary", &self.primary)
             .field("model", &self.model)
             .field("models", &self.models)
             .field("max_calls", &self.max_calls)
             .field("second_model", &self.second.as_ref().map(|s| &s.model))
             .finish_non_exhaustive()
+    }
+}
+
+fn model_list(raw: Option<String>, default: &str, first: Option<String>) -> Vec<String> {
+    let mut models: Vec<String> = raw
+        .as_deref()
+        .unwrap_or(default)
+        .split(',')
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .collect();
+    if let Some(first) = first {
+        models.retain(|m| *m != first);
+        models.insert(0, first);
+    }
+    models
+}
+
+fn check_anthropic_models(models: &[String]) -> anyhow::Result<()> {
+    let bad = models.iter().find(|m| {
+        let m = m.to_ascii_lowercase();
+        is_pro_model(&m) || m.contains("opus") || m.contains("haiku")
+    });
+    match bad {
+        Some(bad) => {
+            anyhow::bail!("live tier runs real Anthropic on Sonnet only, but `{bad}` is configured")
+        }
+        None => Ok(()),
     }
 }
 
@@ -104,27 +143,66 @@ impl LiveConfig {
                 file.display()
             )
         };
-        let base_url = get("ANTHROPIC_BASE_URL").ok_or_else(|| missing("ANTHROPIC_BASE_URL"))?;
-        let token = get("ANTHROPIC_AUTH_TOKEN")
-            .or_else(|| get("ANTHROPIC_API_KEY"))
-            .ok_or_else(|| missing("ANTHROPIC_AUTH_TOKEN"))?;
-        let model = get("AGIX_LIVE_MODEL")
-            .or_else(|| get("ANTHROPIC_MODEL"))
-            .ok_or_else(|| missing("ANTHROPIC_MODEL"))?;
-        let mut models: Vec<String> = get("AGIX_LIVE_MODELS")
-            .map(|list| {
-                list.split(',')
-                    .map(|m| m.trim().to_string())
-                    .filter(|m| !m.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
-        if !models.contains(&model) {
-            models.insert(0, model.clone());
-        }
-        if let Some(pro) = models.iter().find(|m| is_pro_model(m)) {
-            anyhow::bail!("live tier runs on Flash only, but `{pro}` is configured");
-        }
+        let primary = match get("AGIX_LIVE_PRIMARY").as_deref() {
+            None | Some("deepseek") => Primary::DeepSeek,
+            Some("anthropic") => Primary::Anthropic,
+            Some(other) => {
+                anyhow::bail!("AGIX_LIVE_PRIMARY is `deepseek` or `anthropic`, not `{other}`")
+            }
+        };
+
+        let deepseek = match (
+            get("ANTHROPIC_BASE_URL"),
+            get("ANTHROPIC_AUTH_TOKEN").or_else(|| get("ANTHROPIC_API_KEY")),
+        ) {
+            (Some(base_url), Some(token)) => {
+                let model = get("AGIX_LIVE_MODEL")
+                    .or_else(|| get("ANTHROPIC_MODEL"))
+                    .ok_or_else(|| missing("ANTHROPIC_MODEL"))?;
+                let models = model_list(
+                    get("AGIX_LIVE_MODELS"),
+                    DEFAULT_DEEPSEEK_MODELS,
+                    Some(model.clone()),
+                );
+                if let Some(pro) = models.iter().find(|m| is_pro_model(m)) {
+                    anyhow::bail!("live tier runs on Flash only, but `{pro}` is configured");
+                }
+                Some(SecondEndpoint {
+                    base_url,
+                    token,
+                    model,
+                    models,
+                })
+            }
+            _ if primary == Primary::DeepSeek => {
+                return Err(missing("ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN"));
+            }
+            _ => None,
+        };
+        let anthropic = match (get("CLAUDE_BASE_URL"), get("CLAUDE_API_KEY")) {
+            (Some(base_url), Some(token)) => {
+                let models = model_list(
+                    get("AGIX_LIVE_ANTHROPIC_MODELS"),
+                    DEFAULT_ANTHROPIC_MODELS,
+                    get("AGIX_LIVE_SECOND_MODEL"),
+                );
+                check_anthropic_models(&models)?;
+                Some(SecondEndpoint {
+                    base_url,
+                    token,
+                    model: models[0].clone(),
+                    models,
+                })
+            }
+            _ if primary == Primary::Anthropic => {
+                return Err(missing("CLAUDE_BASE_URL and CLAUDE_API_KEY"));
+            }
+            _ => None,
+        };
+        let (main, second) = match primary {
+            Primary::DeepSeek => (deepseek.expect("checked above"), anthropic),
+            Primary::Anthropic => (anthropic.expect("checked above"), deepseek),
+        };
         let max_calls = get("AGIX_LIVE_MAX_CALLS")
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_MAX_CALLS);
@@ -133,43 +211,33 @@ impl LiveConfig {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(DEFAULT_TURN_TIMEOUT_SECS),
         );
-        let second = match (get("CLAUDE_BASE_URL"), get("CLAUDE_API_KEY")) {
-            (Some(base_url), Some(token)) => {
-                let model =
-                    get("AGIX_LIVE_SECOND_MODEL").unwrap_or_else(|| DEFAULT_SECOND_MODEL.into());
-                if is_pro_model(&model) || model.to_ascii_lowercase().contains("opus") {
-                    anyhow::bail!("live tier never runs Opus or Pro, but `{model}` is configured");
-                }
-                Some(SecondEndpoint {
-                    base_url,
-                    token,
-                    model,
-                })
-            }
-            _ => None,
-        };
         Ok(Self {
-            base_url,
-            token,
-            model,
-            models,
+            base_url: main.base_url,
+            token: main.token,
+            model: main.model,
+            models: main.models,
             max_calls,
             turn_timeout,
+            primary,
             second,
         })
     }
 
     /// The config the second provider's proxy runs on: its own endpoint,
-    /// credential and model, the same call budget and timeout.
+    /// credential and models, the same call budget and timeout.
     pub fn second_config(&self) -> Option<LiveConfig> {
         let second = self.second.as_ref()?;
         Some(Self {
             base_url: second.base_url.clone(),
             token: second.token.clone(),
             model: second.model.clone(),
-            models: vec![second.model.clone()],
+            models: second.models.clone(),
             max_calls: self.max_calls,
             turn_timeout: self.turn_timeout,
+            primary: match self.primary {
+                Primary::DeepSeek => Primary::Anthropic,
+                Primary::Anthropic => Primary::DeepSeek,
+            },
             second: None,
         })
     }
@@ -181,8 +249,8 @@ impl LiveConfig {
             Some(second) => Ok(Some(second.model)),
             None => {
                 eprintln!(
-                    "[live {case}] skipped: no second provider (CLAUDE_BASE_URL and \
-                     CLAUDE_API_KEY are not set)"
+                    "[live {case}] skipped: no second provider (both ANTHROPIC_* and \
+                     CLAUDE_* credentials are needed)"
                 );
                 Ok(None)
             }
@@ -200,6 +268,7 @@ impl LiveConfig {
             models: vec![model.into()],
             max_calls: DEFAULT_MAX_CALLS,
             turn_timeout: Duration::from_secs(120),
+            primary: Primary::DeepSeek,
             second: None,
         }
     }
@@ -893,9 +962,25 @@ impl LiveRun {
         self.provider.config()
     }
 
-    /// The recording proxy of the second provider, if one is configured.
+    /// The recording proxy of the provider that is not the primary one.
     pub fn second(&self) -> Option<&LiveProvider> {
         self.second.as_ref()
+    }
+
+    /// The DeepSeek proxy, whichever provider is the primary one.
+    pub fn deepseek(&self) -> Option<&LiveProvider> {
+        match self.provider.config().primary {
+            Primary::DeepSeek => Some(&self.provider),
+            Primary::Anthropic => self.second.as_ref(),
+        }
+    }
+
+    /// The real-Anthropic proxy, whichever provider is the primary one.
+    pub fn anthropic(&self) -> Option<&LiveProvider> {
+        match self.provider.config().primary {
+            Primary::Anthropic => Some(&self.provider),
+            Primary::DeepSeek => self.second.as_ref(),
+        }
     }
 
     pub fn write_file(&self, relative: &str, contents: &str) -> anyhow::Result<PathBuf> {

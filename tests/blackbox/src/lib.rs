@@ -51,7 +51,7 @@ pub mod world;
 pub use handle::{alternate_daemon_binary, daemon_binary, Daemon, DaemonOptions, Host, Mode};
 pub use live::{
     is_pro_model, Answer, Asked, Exchange, LiveConfig, LiveProvider, LiveRun, LiveRunBuilder,
-    Tokens, Watcher,
+    Primary, Tokens, Watcher,
 };
 pub use mcp::{McpToy, McpToyHttp};
 pub use oauth::{DaemonEvents, OAuthWorld};

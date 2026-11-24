@@ -60,7 +60,8 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use blackbox::{
-    is_pro_model, Exchange, LiveConfig, LiveProvider, LiveRun, Mode, ModelEndpoint, Spent, Tokens,
+    is_pro_model, Exchange, LiveConfig, LiveProvider, LiveRun, Mode, ModelEndpoint, Primary, Spent,
+    Tokens,
 };
 use serde_json::{json, Value};
 
@@ -1489,6 +1490,12 @@ fn dsh_bin() -> anyhow::Result<PathBuf> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn agix_and_dsh_on_the_same_tasks() -> anyhow::Result<()> {
+    if LiveConfig::load()?.primary != Primary::DeepSeek {
+        eprintln!(
+            "[compare_dsh] skipped: dsh only speaks to DeepSeek, AGIX_LIVE_PRIMARY is not deepseek"
+        );
+        return Ok(());
+    }
     let bin = dsh_bin()?;
     let wanted = std::env::var("AGIX_COMPARE_CASES").ok();
     let cases: Vec<Case> = Case::ALL

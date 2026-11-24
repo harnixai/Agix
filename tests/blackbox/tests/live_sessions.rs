@@ -317,7 +317,7 @@ async fn set_model_moves_the_next_turn_to_another_model_with_the_same_history() 
         run.config().model.clone(),
         run.config().model_at(1).to_string(),
     );
-    assert_ne!(first, second, "AGIX_LIVE_MODELS needs a second Flash name");
+    assert_ne!(first, second, "AGIX_LIVE_MODELS needs a second model name");
     let session = run.session().await?;
     let word = format!("CODEWORD-{}", nonce());
     run.turn(
@@ -482,7 +482,10 @@ fn zip_entry(path: &Path, name: &str) -> anyhow::Result<String> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn export_carries_the_sidechain_and_delete_takes_it_along() -> anyhow::Result<()> {
-    let mut run = LiveRun::builder("export").start().await?;
+    let mut run = LiveRun::builder("export")
+        .settings(json!({"permissions": {"allow": ["Agent", "Read", "Write"], "deny": ["Bash"]}}))
+        .start()
+        .await?;
     let token = format!("SIDE-{}", nonce());
     run.write_file("sub.txt", &format!("{token}\n"))?;
     run.write_file(
@@ -498,8 +501,8 @@ async fn export_carries_the_sidechain_and_delete_takes_it_along() -> anyhow::Res
     run.turn(
         &session,
         "Call the Agent tool once: subagent_type reader, description reader, prompt \"Read \
-         sub.txt\". Do not read the file yourself. Write the agent's answer to answer.txt \
-         with the Write tool, then reply DONE.",
+         sub.txt\". Do not read the file yourself and use no other tool. Write the agent's answer \
+         to answer.txt with the Write tool, verbatim, then reply DONE.",
     )
     .await?;
     assert_eq!(trimmed(&run, "answer.txt"), Some(token.clone()));

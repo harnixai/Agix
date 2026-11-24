@@ -8,8 +8,8 @@
 //! providers, a sub-agent that fails over from `ds` to `cc` mid-run,
 //! `model.order` and an untrusted project restricting who may name `cc`, and
 //! the main session's own naming and compaction calls on real Anthropic.
-//! Skipped, with the reason printed, when no second provider is configured
-//! (`CLAUDE_BASE_URL` and `CLAUDE_API_KEY`).
+//! Skipped, with the reason printed, when only one provider is configured
+//! (`ANTHROPIC_*` for DeepSeek, `CLAUDE_*` for Anthropic); `ds` and `cc` always name those two, whichever is `AGIX_LIVE_PRIMARY`.
 
 use std::time::Duration;
 
@@ -67,9 +67,12 @@ async fn start_with(
     let mut run = tweak(LiveRun::builder(name).max_calls(CASE_MAX_CALLS))
         .start()
         .await?;
-    let second = run.second().expect("second provider is configured");
+    let (ds, cc) = (
+        run.deepseek().expect("DeepSeek is configured"),
+        run.anthropic().expect("Anthropic is configured"),
+    );
     let mut settings = LiveRun::base_settings();
-    settings["providers"] = providers(&run.provider, second);
+    settings["providers"] = providers(ds, cc);
     settings["model"] = json!({ "order": order });
     settings["permissions"] = json!({"mode": "default", "allow": ["Agent"]});
     for (key, value) in extra.as_object().into_iter().flatten() {
@@ -118,7 +121,7 @@ async fn an_agent_type_naming_a_provider_runs_its_sub_agent_there() -> anyhow::R
     let Some(mut run) = start("cross-type", ["ds", "cc"]).await? else {
         return Ok(());
     };
-    let second_model = run.second().unwrap().config().model.clone();
+    let second_model = run.anthropic().unwrap().config().model.clone();
     let (word, marker) = (format!("PELICAN-{}", nonce()), format!("ROLE-{}", nonce()));
     run.write_file("note.txt", &format!("{word}\n"))?;
     run.write_file(
@@ -138,14 +141,14 @@ async fn an_agent_type_naming_a_provider_runs_its_sub_agent_there() -> anyhow::R
         .await?;
     assert!(events.text.contains(&word), "{}", events.text);
 
-    let cc = run.second().unwrap();
+    let cc = run.anthropic().unwrap();
     assert!(
         requests_with_marker(cc, &marker) >= 1,
         "provider cc never saw the sub-agent"
     );
     assert!(cc.calls().iter().all(|c| c.model() == second_model));
     assert_eq!(
-        requests_with_marker(&run.provider, &marker),
+        requests_with_marker(run.deepseek().unwrap(), &marker),
         0,
         "provider ds saw the sub-agent's request"
     );
@@ -185,7 +188,7 @@ async fn a_host_started_agent_can_name_the_provider() -> anyhow::Result<()> {
     let Some(mut run) = start("cross-host", ["ds", "cc"]).await? else {
         return Ok(());
     };
-    let second_model = run.second().unwrap().config().model.clone();
+    let second_model = run.anthropic().unwrap().config().model.clone();
     let word = format!("HERON-{}", nonce());
     run.write_file("note.txt", &format!("{word}\n"))?;
 
@@ -217,11 +220,11 @@ async fn a_host_started_agent_can_name_the_provider() -> anyhow::Result<()> {
     assert!(format!("{:?}", output.result).contains(&word), "{output:?}");
     assert_eq!(task["detail"]["provider"], "cc", "{task}");
 
-    let cc = run.second().unwrap();
+    let cc = run.anthropic().unwrap();
     assert!(!cc.calls().is_empty(), "provider cc was never called");
     assert!(cc.calls().iter().all(|c| c.model() == second_model));
     assert!(
-        run.provider.calls().is_empty(),
+        run.deepseek().unwrap().calls().is_empty(),
         "nothing but the sub-agent ran, and it ran on cc"
     );
     run.finish().await;
@@ -255,7 +258,7 @@ async fn the_agent_tool_takes_a_provider() -> anyhow::Result<()> {
     assert_eq!(input["provider"], "cc", "{:?}", events.tool_uses);
     assert!(events.text.contains(&word), "{}", events.text);
 
-    let cc = run.second().unwrap();
+    let cc = run.anthropic().unwrap();
     assert!(!cc.calls().is_empty(), "provider cc was never called");
     let task = agent_task(&mut run, &session).await?;
     assert_eq!(task["detail"]["provider"], "cc", "{task}");
@@ -269,8 +272,8 @@ async fn a_session_on_cc_sends_a_sub_agent_to_ds_and_usage_stays_apart() -> anyh
         return Ok(());
     };
     let (ds_model, cc_model) = (
-        run.config().model.clone(),
-        run.second().unwrap().config().model.clone(),
+        run.deepseek().unwrap().config().model.clone(),
+        run.anthropic().unwrap().config().model.clone(),
     );
     let (word, marker) = (format!("OSPREY-{}", nonce()), format!("ROLE-{}", nonce()));
     run.write_file("note.txt", &format!("{word}\n"))?;
@@ -291,7 +294,7 @@ async fn a_session_on_cc_sends_a_sub_agent_to_ds_and_usage_stays_apart() -> anyh
         .await?;
     assert!(events.text.contains(&word), "{}", events.text);
 
-    let cc = run.second().unwrap();
+    let cc = run.anthropic().unwrap();
     assert!(
         cc.calls().iter().all(|c| c.model() == cc_model),
         "the parent stayed on cc's model"
@@ -301,7 +304,7 @@ async fn a_session_on_cc_sends_a_sub_agent_to_ds_and_usage_stays_apart() -> anyh
         0,
         "provider cc saw the sub-agent's request"
     );
-    let ds_calls = run.provider.calls();
+    let ds_calls = run.deepseek().unwrap().calls();
     assert!(!ds_calls.is_empty(), "provider ds was never called");
     assert!(ds_calls
         .iter()
@@ -311,8 +314,8 @@ async fn a_session_on_cc_sends_a_sub_agent_to_ds_and_usage_stays_apart() -> anyh
     let task = agent_task(&mut run, &session).await?;
     assert_eq!(task["detail"]["provider"], "ds", "{task}");
     assert_eq!(task["detail"]["model"], ds_model.as_str(), "{task}");
-    let (_, ds_input, ds_output) = run.provider.spend();
-    let (_, cc_input, cc_output) = run.second().unwrap().spend();
+    let (_, ds_input, ds_output) = run.deepseek().unwrap().spend();
+    let (_, cc_input, cc_output) = run.anthropic().unwrap().spend();
     assert_eq!(task["usage"]["input_tokens"], ds_input, "{task}");
     assert_eq!(task["usage"]["output_tokens"], ds_output, "{task}");
     assert!(
@@ -342,7 +345,7 @@ async fn a_team_member_whose_type_names_cc_runs_there() -> anyhow::Result<()> {
     else {
         return Ok(());
     };
-    let cc_model = run.second().unwrap().config().model.clone();
+    let cc_model = run.anthropic().unwrap().config().model.clone();
     let (word, marker) = (format!("HERON-{}", nonce()), format!("ROLE-{}", nonce()));
     run.write_file("note.txt", &format!("{word}\n"))?;
     run.write_file(
@@ -369,13 +372,13 @@ async fn a_team_member_whose_type_names_cc_runs_there() -> anyhow::Result<()> {
     );
     assert!(events.text.contains(&word), "{}", events.text);
 
-    let cc = run.second().unwrap();
+    let cc = run.anthropic().unwrap();
     assert!(
         requests_with_marker(cc, &marker) >= 1,
         "provider cc never saw the member"
     );
     assert!(cc.calls().iter().all(|c| c.model() == cc_model));
-    assert_eq!(requests_with_marker(&run.provider, &marker), 0);
+    assert_eq!(requests_with_marker(run.deepseek().unwrap(), &marker), 0);
 
     let tasks = run
         .wait_tasks_settled(&session, Duration::from_secs(300))
@@ -396,8 +399,8 @@ async fn two_sub_agents_in_one_message_run_on_their_own_providers() -> anyhow::R
         return Ok(());
     };
     let (ds_model, cc_model) = (
-        run.config().model.clone(),
-        run.second().unwrap().config().model.clone(),
+        run.deepseek().unwrap().config().model.clone(),
+        run.anthropic().unwrap().config().model.clone(),
     );
     let (left, right) = (format!("LEFT-{}", nonce()), format!("RIGHT-{}", nonce()));
     let ds_marker = format!("ROLE-DS-{}", nonce());
@@ -429,11 +432,11 @@ async fn two_sub_agents_in_one_message_run_on_their_own_providers() -> anyhow::R
         events.text
     );
 
-    let cc = run.second().unwrap();
+    let cc = run.anthropic().unwrap();
     assert!(requests_with_marker(cc, &cc_marker) >= 1);
     assert_eq!(requests_with_marker(cc, &ds_marker), 0);
-    assert!(requests_with_marker(&run.provider, &ds_marker) >= 1);
-    assert_eq!(requests_with_marker(&run.provider, &cc_marker), 0);
+    assert!(requests_with_marker(run.deepseek().unwrap(), &ds_marker) >= 1);
+    assert_eq!(requests_with_marker(run.deepseek().unwrap(), &cc_marker), 0);
 
     let tasks = run
         .wait_tasks_settled(&session, Duration::from_secs(300))
@@ -460,7 +463,7 @@ async fn a_sub_agent_whose_first_provider_fails_finishes_on_the_next() -> anyhow
     let Some(mut run) = start("cross-failover", ["ds", "cc"]).await? else {
         return Ok(());
     };
-    let cc_model = run.second().unwrap().config().model.clone();
+    let cc_model = run.anthropic().unwrap().config().model.clone();
     let (word, marker) = (format!("EGRET-{}", nonce()), format!("ROLE-{}", nonce()));
     run.write_file("note.txt", &format!("{word}\n"))?;
     run.write_file(
@@ -470,7 +473,7 @@ async fn a_sub_agent_whose_first_provider_fails_finishes_on_the_next() -> anyhow
              {marker}. Read the file you are told to read and answer with its content only."
         ),
     )?;
-    run.provider.inject_failures_when(
+    run.deepseek().unwrap().inject_failures_when(
         &marker,
         50,
         Reply::status(
@@ -491,14 +494,15 @@ async fn a_sub_agent_whose_first_provider_fails_finishes_on_the_next() -> anyhow
         .await?;
     assert!(events.text.contains(&word), "{}", events.text);
 
-    let cc = run.second().unwrap();
+    let cc = run.anthropic().unwrap();
     assert!(
         requests_with_marker(cc, &marker) >= 1,
         "provider cc never took over"
     );
     assert!(cc.calls().iter().all(|c| c.model() == cc_model));
     let first: Vec<_> = run
-        .provider
+        .deepseek()
+        .unwrap()
         .exchanges()
         .into_iter()
         .filter(|e| e.request.body.to_string().contains(&marker))
@@ -519,15 +523,19 @@ async fn a_sub_agent_whose_first_provider_fails_finishes_on_the_next() -> anyhow
         })
         .count();
     assert!(moved >= 1, "no task_updated moved it to cc");
-    let switched = watcher
+    let switches: Vec<Value> = watcher
         .frames()
         .iter()
-        .filter(|f| {
-            f["event"]["kind"] == "provider_switched"
-                || f["event"]["event"]["kind"] == "provider_switched"
-        })
-        .count();
-    eprintln!("[live cross-failover] provider_switched frames: {switched}");
+        .flat_map(|f| [&f["event"], &f["event"]["event"]])
+        .filter(|e| e["kind"] == "provider_switched")
+        .cloned()
+        .collect();
+    assert!(
+        switches
+            .iter()
+            .any(|e| e["from"] == "ds" && e["to"] == "cc"),
+        "no provider_switched from ds to cc: {switches:?}"
+    );
     run.finish_allowing_refusals().await;
     Ok(())
 }
@@ -538,7 +546,7 @@ async fn a_provider_outside_the_order_is_the_hosts_to_name() -> anyhow::Result<(
         return Ok(());
     };
     let (cc_model, word) = (
-        run.second().unwrap().config().model.clone(),
+        run.anthropic().unwrap().config().model.clone(),
         format!("TERN-{}", nonce()),
     );
     run.write_file("note.txt", &format!("{word}\n"))?;
@@ -560,7 +568,7 @@ async fn a_provider_outside_the_order_is_the_hosts_to_name() -> anyhow::Result<(
         .any(|(name, text, is_error)| name == "Agent" && *is_error && text.contains("model.order"));
     assert!(refused, "{:?}", events.tool_results);
     assert!(
-        run.second().unwrap().calls().is_empty(),
+        run.anthropic().unwrap().calls().is_empty(),
         "cc was called although the order leaves it out"
     );
 
@@ -589,7 +597,7 @@ async fn a_provider_outside_the_order_is_the_hosts_to_name() -> anyhow::Result<(
     assert_eq!(task["status"], "done", "{task}");
     assert_eq!(task["detail"]["provider"], "cc", "{task}");
     assert_eq!(task["detail"]["model"], cc_model.as_str(), "{task}");
-    assert!(!run.second().unwrap().calls().is_empty());
+    assert!(!run.anthropic().unwrap().calls().is_empty());
     run.finish_allowing_refusals().await;
     Ok(())
 }
@@ -604,9 +612,12 @@ async fn an_untrusted_projects_agent_type_stays_on_ds_until_trusted() -> anyhow:
         .untrusted()
         .start()
         .await?;
-    let second = run.second().expect("second provider is configured");
+    let (ds, cc) = (
+        run.deepseek().expect("DeepSeek is configured"),
+        run.anthropic().expect("Anthropic is configured"),
+    );
     run.world.write_global_settings(&json!({
-        "providers": providers(&run.provider, second),
+        "providers": providers(ds, cc),
         "model": {"order": ["ds", "cc"]},
         "permissions": {"allow": ["Agent"]},
     }))?;
@@ -640,11 +651,11 @@ async fn an_untrusted_projects_agent_type_stays_on_ds_until_trusted() -> anyhow:
     let events = run.turn(&session, ask).await?;
     assert!(events.text.contains(&word), "{}", events.text);
     assert_eq!(
-        requests_with_marker(run.second().unwrap(), &marker),
+        requests_with_marker(run.anthropic().unwrap(), &marker),
         0,
         "an untrusted type sent its sub-agent to cc"
     );
-    assert!(requests_with_marker(&run.provider, &marker) >= 1);
+    assert!(requests_with_marker(run.deepseek().unwrap(), &marker) >= 1);
     let task = agent_task(&mut run, &session).await?;
     assert_eq!(task["detail"]["provider"], "ds", "{task}");
 
@@ -661,7 +672,7 @@ async fn an_untrusted_projects_agent_type_stays_on_ds_until_trusted() -> anyhow:
     let events = run.turn(&session, ask).await?;
     assert!(events.text.contains(&word), "{}", events.text);
     assert!(
-        requests_with_marker(run.second().unwrap(), &marker) >= 1,
+        requests_with_marker(run.anthropic().unwrap(), &marker) >= 1,
         "once trusted, the type's provider applies"
     );
     run.finish().await;
@@ -712,7 +723,7 @@ async fn naming_and_compaction_calls_on_anthropic_are_well_formed() -> anyhow::R
         .await?;
     assert!(compacted.error.is_none(), "{compacted:?}");
 
-    let exchanges = run.second().unwrap().exchanges();
+    let exchanges = run.anthropic().unwrap().exchanges();
     for purpose in [Purpose::Title, Purpose::Compact] {
         let of: Vec<_> = exchanges
             .iter()

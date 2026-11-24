@@ -74,24 +74,26 @@ JSON-RPC 与盘上的文件跟产品打交道，和下游二次开发的用法�
 |---|---|
 | `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`） | Anthropic 兼容端点 |
 | `ANTHROPIC_MODEL`（`AGIX_LIVE_MODEL` 优先） | 会话的默认模型 |
-| `AGIX_LIVE_MODELS` | 逗号分隔的可用模型，给「每个子 agent 一个模型」的用例分配；缺省只有默认模型 |
+| `AGIX_LIVE_PRIMARY` | `deepseek`（缺省）或 `anthropic`：LIVE 层的主 provider。`anthropic` 时主代理（`run.provider`、`run.config().model` / `models`）是真实 Anthropic 的 Sonnet，第二个代理是 DeepSeek（Flash）；`deepseek` 时反过来。跨 provider 的用例用 `run.deepseek()` / `run.anthropic()` 取按角色定的代理，`ds` / `cc` 两个 provider id 因此与谁是主无关；只认 DeepSeek 的 `compare_dsh` 在主为 `anthropic` 时打印原因后跳过。两家的凭据在 `anthropic` 时都需要 |
+| `AGIX_LIVE_MODELS` | DeepSeek 一侧逗号分隔的可用模型，给「每个子 agent 一个模型」的用例分配；缺省 `deepseek-flash,deepseek-v4-flash,claude-haiku-4-5`（DeepSeek 把 `claude-haiku*` 映射到 Flash，只会发给 DeepSeek 的代理），不必再设 |
+| `AGIX_LIVE_ANTHROPIC_MODELS` | Anthropic 一侧的可用模型，缺省 `claude-sonnet-5-5,claude-sonnet-5,claude-sonnet-4-6`；主为 `anthropic` 时用例按它分配多个模型。Opus、Haiku、Pro 名字一律报错 |
 | `AGIX_LIVE_MAX_CALLS` | 一个用例最多调几次模型（两个代理各自计），默认 400，用例可用 `builder.max_calls(n)` 调低；超出后代理直接回错误，不再花钱 |
 | `AGIX_LIVE_TURN_TIMEOUT_SECS` | 一轮的上限，默认 900 |
-| `CLAUDE_BASE_URL`、`CLAUDE_API_KEY` | 第二个真实 provider（Anthropic）；两个都有，`run.second()` 才有第二个录制代理，跨 provider 的用例（`live_cross_provider.rs`）才跑，缺任何一个就打印原因后跳过 |
-| `AGIX_LIVE_SECOND_MODEL` | 第二个 provider 用的模型，缺省 `claude-sonnet-5-5`；Opus、Pro 名字一律报错 |
+| `CLAUDE_BASE_URL`、`CLAUDE_API_KEY` | 真实 Anthropic；两个都有，`run.anthropic()` 才有录制代理（`deepseek` 主时它同时是 `run.second()`），跨 provider 的用例（`live_cross_provider.rs`）才跑，缺任何一个就打印原因后跳过 |
+| `AGIX_LIVE_SECOND_MODEL` | Anthropic 一侧排第一的模型，缺省 `claude-sonnet-5-5`；Opus、Haiku、Pro 名字一律报错 |
 | `AGIX_LIVE_ENV_FILE` | 换一个 `.env` |
 
 文件优先于进程环境，因为跑测试的那个 shell 很可能带着给别的工具用的 `ANTHROPIC_*`。
 
-**真实层只用 Flash。** 配置里出现 Pro 模型名，`LiveConfig::load` 直接报错；代理也拒绝转发
+**DeepSeek 一侧只用 Flash，Anthropic 一侧只用 Sonnet。** 配置里出现 Pro 模型名，`LiveConfig::load` 直接报错；代理也拒绝转发
 任何会落到 Pro 上的请求——DeepSeek 的 Anthropic 端点把 `claude-opus*` 也映射到 Pro，所以
-按名字判断时这一类同样算 Pro。下面例子里的三个名字都落在 Flash 上，名字不同只是为了让
+按名字判断时这一类同样算 Pro；Anthropic 一侧的名字里有 opus、haiku 同样报错。缺省的三个名字都落在 Flash（或 Sonnet）上，名字不同只是为了让
 「每个子 agent 一个模型」的用例分得出谁是谁。
 
 ```sh
 cargo build -p daemon                       # 另起进程的那条用例要 target/debug/agixd
-AGIX_LIVE_MODELS=deepseek-flash,deepseek-v4-flash,claude-haiku-4-5 \
-  cargo test -p blackbox --features real-model --test real_model -- --nocapture
+cargo test -p blackbox --features real-model --test real_model -- --nocapture
+AGIX_LIVE_PRIMARY=anthropic cargo test -p blackbox --features real-model --test real_model
 ```
 
 `--nocapture` 会打出每一轮的耗时、用到的工具、模型的回答，以及每个用例的调用次数和
