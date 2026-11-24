@@ -126,6 +126,7 @@ impl ChannelElicitation {
             turn_id: String::new(),
             tool_use_id,
             task_id: None,
+            agent_session_id: None,
             origin,
             permit_always,
         });
@@ -158,6 +159,7 @@ impl ChannelElicitation {
             turn_id: String::new(),
             tool_use_id,
             task_id: None,
+            agent_session_id: None,
         });
 
         Some(match open.wait(rx, within).await? {
@@ -202,6 +204,7 @@ impl ChannelElicitation {
                         events: &self.events,
                         pending,
                         task_id: None,
+                        agent_session_id: None,
                     }
                     .ask(request, within)
                     .await
@@ -219,6 +222,7 @@ pub struct McpAsk<'a> {
     pub events: &'a EventSender,
     pub pending: &'a PendingMcpAnswers,
     pub task_id: Option<String>,
+    pub agent_session_id: Option<String>,
 }
 
 impl McpAsk<'_> {
@@ -259,6 +263,7 @@ impl McpAsk<'_> {
                 turn_id: String::new(),
                 tool_use_id,
                 task_id: self.task_id.clone(),
+                agent_session_id: self.agent_session_id.clone(),
             });
         Some(match open.wait(rx, within).await? {
             Ok(answer) => ElicitOutcome::answered(&answer),

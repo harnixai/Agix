@@ -281,6 +281,7 @@ pub fn capabilities() -> Vec<&'static str> {
     if cfg!(feature = "agents") {
         out.push("host_agents");
         out.push("subagent_provider");
+        out.push("prompt_task");
         out.push("task_model");
         out.push("agent_token_budget");
     }

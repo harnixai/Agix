@@ -1097,24 +1097,23 @@ async fn a_task_sub_agents_question_reaches_the_parents_host_naming_its_task() {
     );
     let asker = agent_tool.sub_relay(Some(task.clone())).elicitation;
     let asked = tokio::spawn(async move { asker.ask(authorization("p1", "run the probe?")).await });
-    let (prompt_id, message, task_id, tool_use_id) = loop {
+    let (prompt_id, message, task_id, tool_use_id, agent_session_id) = loop {
         match rx.recv().await.expect("the question reaches the parent") {
             AgentEvent::PermissionPrompt {
                 prompt_id,
                 message,
                 task_id,
                 tool_use_id,
+                agent_session_id,
                 ..
-            } => break (prompt_id, message, task_id, tool_use_id),
+            } => break (prompt_id, message, task_id, tool_use_id, agent_session_id),
             _ => continue,
         }
     };
     assert_eq!(message, "[sub-agent sub] run the probe?");
     assert_eq!(task_id.as_deref(), Some("task-1"));
-    assert_eq!(
-        tool_use_id, None,
-        "the sub-agent's call is not one of the parent's"
-    );
+    assert_eq!(tool_use_id.as_deref(), Some("toolu_sub"));
+    assert_eq!(agent_session_id.as_deref(), Some("sub"));
     assert_eq!(*task.waiting_for.lock().unwrap(), vec![prompt_id.clone()]);
     pending
         .lock()

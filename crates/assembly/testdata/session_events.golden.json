@@ -317,6 +317,7 @@
             "permit_always": true,
             "prompt_id": "p1",
             "prompt_type": "permission",
+            "task_id": "a1",
             "tool_name": "Bash",
             "tool_use_id": "toolu_1"
           },
@@ -350,6 +351,7 @@
             "permit_always": true,
             "prompt_id": "p1",
             "prompt_type": "permission",
+            "task_id": "a1",
             "tool_name": "Bash",
             "tool_use_id": "toolu_1"
           },
@@ -490,6 +492,7 @@
             "prompt_id": "toolu_q",
             "prompt_type": "question",
             "question": "which?",
+            "task_id": "a1",
             "tool_use_id": "toolu_q"
           },
           "session_id": "s1",
@@ -528,6 +531,7 @@
             "prompt_id": "toolu_q",
             "prompt_type": "question",
             "question": "which?",
+            "task_id": "a1",
             "tool_use_id": "toolu_q"
           },
           "session_id": "s1",

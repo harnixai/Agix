@@ -585,3 +585,79 @@ async fn a_token_budget_of_zero_is_refused() -> anyhow::Result<()> {
     daemon.stop().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_agents_under_one_session_ask_with_their_own_task() -> anyhow::Result<()> {
+    let (_world, provider, daemon, mut client, session) = daemon_with("tasks", json!({})).await?;
+    let mut watcher = daemon.connect().await?;
+    watcher.session_subscribe(&session).await?;
+    provider.script([
+        Reply::Blocks(vec![Block::tool(
+            "b-1",
+            "Bash",
+            json!({ "command": "echo one > one.txt" }),
+        )]),
+        Reply::Blocks(vec![Block::tool(
+            "b-2",
+            "Bash",
+            json!({ "command": "echo two > two.txt" }),
+        )]),
+        Reply::text("done one"),
+        Reply::text("done two"),
+    ]);
+    let mut started = Vec::new();
+    for prompt in ["first", "second"] {
+        started.push(
+            start_agent(
+                &mut client,
+                json!({ "session_id": session, "prompt": prompt }),
+            )
+            .await?,
+        );
+    }
+
+    let mut asked = Vec::new();
+    while asked.len() < 2 {
+        let frame = event_where(&mut watcher, |e| e["kind"] == "prompt").await?;
+        asked.push(frame["event"].clone());
+    }
+    for start in &started {
+        let own: Vec<&Value> = asked
+            .iter()
+            .filter(|p| {
+                p["task_id"] == start["task_id"]
+                    && p["agent_session_id"] == start["agent_session_id"]
+            })
+            .collect();
+        assert_eq!(own.len(), 1, "{start} among {asked:?}");
+        assert_eq!(own[0]["prompt_type"], "permission", "{own:?}");
+        assert!(
+            own[0]["tool_use_id"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty()),
+            "{own:?}"
+        );
+    }
+    assert_ne!(asked[0]["task_id"], asked[1]["task_id"]);
+    for prompt in &asked {
+        let answered = client
+            .call(
+                "session.respondToPrompt",
+                json!({
+                    "session_id": session,
+                    "prompt_id": prompt["prompt_id"],
+                    "decision": { "type": "permit" }
+                }),
+            )
+            .await?;
+        assert!(answered.error.is_none(), "{answered:?}");
+    }
+    for start in &started {
+        assert_eq!(
+            settled(&mut client, &session, start).await?["status"],
+            "done"
+        );
+    }
+    daemon.stop().await;
+    Ok(())
+}

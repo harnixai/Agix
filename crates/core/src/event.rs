@@ -131,6 +131,9 @@ pub enum AgentEvent {
         /// question outlives the turn it happened to arrive during.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task_id: Option<String>,
+        /// The sub-agent's session, when a sub-agent asks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_session_id: Option<String>,
         /// The plugin command whose sub-call this is; `None` for the model's own.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         origin: Option<crate::interface::elicitation::PromptOrigin>,
@@ -155,6 +158,9 @@ pub enum AgentEvent {
         tool_use_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task_id: Option<String>,
+        /// The sub-agent's session, when a sub-agent asks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_session_id: Option<String>,
     },
 
     /// An MCP server asks the user something during a tool call. `message`,
@@ -180,6 +186,9 @@ pub enum AgentEvent {
         tool_use_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task_id: Option<String>,
+        /// The sub-agent's session, when a sub-agent asks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_session_id: Option<String>,
     },
 
     /// The ask `prompt_id` — a `PermissionPrompt`, `QuestionPrompt` or

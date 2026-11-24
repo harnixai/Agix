@@ -11,9 +11,11 @@ use base::event::{
     AgentEvent, CompactCause, CompactOutcome, ContextUsage, FailureKind, HostCallWithdrawal,
     PromptResolution, QueuedUserMessage, TeamStageStatus, TurnFailure, WithdrawalReason,
 };
-use base::interface::elicitation::ElicitOption;
 use base::interface::model::Usage;
 use base::tool::FileChange;
+mod prompt;
+pub use prompt::PromptPayload;
+
 use serde::Serialize;
 use serde_json::Value;
 
@@ -242,47 +244,6 @@ pub enum SessionEventPayload {
     },
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "prompt_type", rename_all = "snake_case")]
-pub enum PromptPayload {
-    Permission {
-        prompt_id: String,
-        tool_name: String,
-        message: String,
-        paths: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        tool_use_id: Option<String>,
-        /// The plugin command run whose sub-call this is.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        origin: Option<base::interface::elicitation::PromptOrigin>,
-        permit_always: bool,
-    },
-    Question {
-        prompt_id: String,
-        tool_use_id: Option<String>,
-        question: String,
-        header: Option<String>,
-        options: Vec<ElicitOption>,
-    },
-    /// The server's words: `message`, `requested_schema`, `url`.
-    McpElicitation {
-        prompt_id: String,
-        server: String,
-        mode: String,
-        message: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        requested_schema: Option<Value>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        url: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        url_host: Option<String>,
-        #[serde(skip_serializing_if = "std::ops::Not::not")]
-        limited: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        tool_use_id: Option<String>,
-    },
-}
-
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DropReason {
@@ -463,63 +424,9 @@ impl SessionEventPayload {
                 is_error: *is_error,
                 file_changes: file_changes.clone(),
             },
-            AgentEvent::PermissionPrompt {
-                prompt_id,
-                tool_name,
-                message,
-                paths,
-                turn_id: _,
-                tool_use_id,
-                task_id: _,
-                origin,
-                permit_always,
-            } => Self::Prompt(PromptPayload::Permission {
-                prompt_id: prompt_id.clone(),
-                tool_name: tool_name.clone(),
-                message: message.clone(),
-                paths: paths.iter().map(|p| p.display().to_string()).collect(),
-                tool_use_id: tool_use_id.clone(),
-                origin: origin.clone(),
-                permit_always: *permit_always,
-            }),
-            AgentEvent::QuestionPrompt {
-                prompt_id,
-                question,
-                header,
-                options,
-                turn_id: _,
-                tool_use_id,
-                task_id: _,
-            } => Self::Prompt(PromptPayload::Question {
-                prompt_id: prompt_id.clone(),
-                tool_use_id: tool_use_id.clone(),
-                question: question.clone(),
-                header: header.clone(),
-                options: options.clone(),
-            }),
-            AgentEvent::McpElicitationPrompt {
-                prompt_id,
-                server,
-                mode,
-                message,
-                requested_schema,
-                url,
-                url_host,
-                limited,
-                turn_id: _,
-                tool_use_id,
-                task_id: _,
-            } => Self::Prompt(PromptPayload::McpElicitation {
-                prompt_id: prompt_id.clone(),
-                server: server.clone(),
-                mode: mode.clone(),
-                message: message.clone(),
-                requested_schema: requested_schema.clone(),
-                url: url.clone(),
-                url_host: url_host.clone(),
-                limited: *limited,
-                tool_use_id: tool_use_id.clone(),
-            }),
+            AgentEvent::PermissionPrompt { .. }
+            | AgentEvent::QuestionPrompt { .. }
+            | AgentEvent::McpElicitationPrompt { .. } => Self::Prompt(PromptPayload::of(event)?),
             AgentEvent::PromptResolved {
                 prompt_id,
                 resolution,
