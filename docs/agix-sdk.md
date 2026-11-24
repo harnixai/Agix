@@ -740,7 +740,7 @@ engine.shutdown().await;
 
 - `start(config)`：读场景（内建的与 `<data_root>/scenes/` 下声明式的）、设置、插件包、MCP、调度器，建池并让它跑起来（§2 的 `assemble` 做的全部），探测可导入的配置、记启动计时。场景不认识 → `EmbedError::UnknownScene`；实例锁被占 → `AlreadyRunning`；进程组登记冲突 → `InstanceInProcess` / `GroupsInProcess`（本进程已有一个在登记），或 `GroupsHeld`（登记文件的拥有者是另一个活着的进程）；其余失败 → `Startup`。
 - `serve_stream(stream)`：在任意 `AsyncRead + AsyncWrite` 上服务一条连接，分帧、帧上限、在途上限、出站队列都与 unix socket 上的一条连接相同，不要 `daemon.auth`。回复与事件走同一条有序的流：等到一个回复，就已经收到了排在它前面的帧。进程内就用 `tokio::io::duplex`，不必再写一份进程内链路；对端关掉写端，任务结束。
-- `serve_unix()`：在 `config.socket` 上监听，直到关停开始；权限与 agixd 的 socket 相同（`0600`，拒绝引擎自己起的进程）。路径上已有一个还有人在听的 socket（另一个 agixd 或 `Embedded`）时不替换它，返回 `AddrInUse`；没人听的旧文件照常换掉。没有 `instance` 时没有锁，这是唯一挡住两个引擎抢同一个 socket 的地方。关停开始之后再调，什么都不绑、不写，立刻返回。
+- `serve_unix()`：在 `config.socket` 上监听，直到关停开始；权限与 agixd 的 socket 相同（`0600`，拒绝引擎自己起的进程）。路径上已有一个还有人在听的 socket（另一个 agixd 或 `Embedded`）时不替换它，返回 `AddrInUse`；没人听的旧文件照常换掉。连续约一秒都连得上才算有人在听——刚关掉的监听可能还留在一个 fork 了、尚未 exec 的子进程里，所以判定前会等一等，返回 `AddrInUse` 也要晚这么久。没有 `instance` 时没有锁，这是唯一挡住两个引擎抢同一个 socket 的地方。关停开始之后再调，什么都不绑、不写，立刻返回。
 - `closed()`：关停开始（有连接发了 `daemon.shutdown`，或调了 `shutdown`）就返回；宿主据此收尾自己的东西。
 - `pool()`：协议服务的那个 `SessionPool`（`&Arc<SessionPool>`），给协议没有的 Rust 用法，如 §8 表里的 `call_plugin`。与协议连接同时用没有问题：两边看到的是同一组会话。
 - `shutdown()`：不再接受连接，停掉所有会话（至多等 10 秒），放掉锁、删掉上面那些文件。可以重复调、并发调，后来的等第一次做完。

@@ -160,7 +160,7 @@ enum Running {
     InProcess {
         pool: Option<Arc<SessionPool>>,
         cancel: CancellationToken,
-        tasks: Vec<JoinHandle<()>>,
+        serving: Option<JoinHandle<anyhow::Result<()>>>,
     },
     Spawned {
         child: tokio::process::Child,
@@ -239,21 +239,17 @@ impl Daemon {
         let cancel = CancellationToken::new();
         let server = Arc::new(DaemonServer::new(pool.clone(), cancel.clone()));
 
-        let mut tasks = Vec::new();
-        {
-            let server = server.clone();
+        let serving = {
             let socket = socket.clone();
-            tasks.push(tokio::spawn(async move {
-                let _ = server.serve_unix(&socket).await;
-            }));
-        }
+            tokio::spawn(async move { server.serve_unix(&socket).await })
+        };
 
         let mut daemon = Self {
             socket,
             running: Running::InProcess {
                 pool: Some(pool),
                 cancel,
-                tasks,
+                serving: Some(serving),
             },
         };
         daemon.wait_until_answering().await?;
@@ -396,14 +392,18 @@ impl Daemon {
             Running::InProcess {
                 pool,
                 cancel,
-                tasks,
+                serving,
             } => {
                 // The pool goes with the server: a restart in the same world
                 // must not find the old one still holding its sessions.
                 pool.take();
                 cancel.cancel();
-                for task in tasks.drain(..) {
+                // Waited for, not just aborted: until the task is dropped its
+                // listener still answers, and the next daemon's bind refuses
+                // a socket something answers on.
+                if let Some(task) = serving.take() {
                     task.abort();
+                    let _ = task.await;
                 }
             }
             Running::Spawned { child, .. } => {
@@ -436,12 +436,27 @@ impl Daemon {
                     }
                 }
             }
-            // A daemon that has already exited will never answer, and the
-            // reason it exited is in its stderr rather than in a timeout
-            // two minutes from now.
-            if let Running::Spawned { child, .. } = &mut self.running {
-                if let Ok(Some(status)) = child.try_wait() {
-                    anyhow::bail!("daemon exited during startup ({status})\n{}", self.stderr());
+            // A daemon that has exited, or a server task that has ended, will
+            // never answer, and why is in its stderr or the task's result
+            // rather than in a timeout two minutes from now.
+            match &mut self.running {
+                Running::Spawned { child, .. } => {
+                    if let Ok(Some(status)) = child.try_wait() {
+                        anyhow::bail!("daemon exited during startup ({status})\n{}", self.stderr());
+                    }
+                }
+                Running::InProcess { serving, .. } => {
+                    if let Some(ended) = serving.take_if(|task| task.is_finished()) {
+                        let why = match ended.await {
+                            Ok(Ok(())) => "it returned without an error".to_string(),
+                            Ok(Err(e)) => format!("{e:#}"),
+                            Err(e) => e.to_string(),
+                        };
+                        anyhow::bail!(
+                            "server on {} stopped during startup: {why}",
+                            self.socket.display()
+                        );
+                    }
                 }
             }
             if std::time::Instant::now() > deadline {

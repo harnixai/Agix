@@ -153,7 +153,6 @@ fn socket_of(root: &Root) -> PathBuf {
 }
 
 fn script_plain_turn(stub: &ProviderStub) {
-    stub.script_when(TITLE_NEEDLE, (0..4).map(|_| Reply::text("a title")));
     stub.script([Reply::text("EMBED-ANSWER")]);
 }
 
@@ -165,7 +164,12 @@ where
     let mut frames = Vec::new();
     let (_, ping) = wire.call_collecting("daemon.ping", json!({})).await?;
     frames.push(ping);
-    let (events, created) = wire.call_collecting("session.create", json!({})).await?;
+    let (events, created) = wire
+        .call_collecting(
+            "session.create",
+            json!({ "options": { "auto_name": false } }),
+        )
+        .await?;
     frames.extend(events);
     let session = created["result"]["session_id"]
         .as_str()

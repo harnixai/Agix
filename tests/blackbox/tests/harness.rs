@@ -8,8 +8,8 @@
 use std::time::Duration;
 
 use blackbox::{
-    Answer, Block, LiveConfig, LiveRun, LiveRunBuilder, McpToy, Page, PageServer, ProviderStub,
-    Purpose, Reply,
+    Answer, Block, Daemon, DaemonOptions, LiveConfig, LiveRun, LiveRunBuilder, McpToy, Page,
+    PageServer, ProviderStub, Purpose, Reply, World,
 };
 use serde_json::json;
 
@@ -582,5 +582,27 @@ async fn world_fixtures_are_where_the_daemon_looks() -> anyhow::Result<()> {
         stub.calls().iter().map(|c| c.purpose()).collect::<Vec<_>>()
     );
     run.finish().await;
+    Ok(())
+}
+
+/// A daemon in this process is gone from its socket once `halt` returns, so
+/// the one a restart starts on the same socket can bind it. On a
+/// single-threaded runtime nothing else gets to run in between, which is
+/// what a loaded machine does to a multi-threaded one now and then.
+#[tokio::test]
+async fn a_halted_daemon_has_let_go_of_its_socket_when_halt_returns() -> anyhow::Result<()> {
+    let world = World::new()?;
+    let project = world.project("halt")?;
+    let stub = ProviderStub::start().await?;
+    let mut daemon = Daemon::start(&world, &stub, DaemonOptions::new(project.clone())).await?;
+    daemon.halt().await;
+    assert!(
+        std::os::unix::net::UnixStream::connect(daemon.socket()).is_err(),
+        "the halted daemon still answers on its socket"
+    );
+    let restarted = Daemon::start(&world, &stub, DaemonOptions::new(project)).await?;
+    let mut client = restarted.connect().await?;
+    assert!(client.call("daemon.ping", json!({})).await?.error.is_none());
+    restarted.stop().await;
     Ok(())
 }

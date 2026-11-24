@@ -147,7 +147,8 @@ socket_path}`)。它是单实例锁,不是发现文件,客户端不要读它,用
 (Windows 上没有 Unix socket,daemon 改用命名管道 `\\.\pipe\agix-daemon`。)
 
 路径上已经有一个还有人在听的 socket(另一个 daemon,或嵌进别的进程的引擎)时,daemon 不替换它,
-以 `AddrInUse` 拒绝启动;没人听的旧 socket 文件照常换掉。
+以 `AddrInUse` 拒绝启动;没人听的旧 socket 文件照常换掉。「有人在听」要连续约一秒都连得上才算:
+旧引擎关掉监听时,它刚 fork、还没 exec 的子进程手里还有一份监听描述符,这一小段时间里连得上却没人服务。
 
 `--instance <name>` 决定 `instances.d/<name>.json` 的文件名,默认是把所有激活场景
 (`--scene` 加 `--scenes`)去重排序后用 `,` 连接。多 daemon 并存时 instance 名必须

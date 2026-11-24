@@ -61,6 +61,9 @@ pub(super) async fn refuse_own_descendant(mut stream: tokio::net::UnixStream, pi
     }
 }
 
+const PROBE_PAUSE: Duration = Duration::from_millis(10);
+const PROBE_PAUSES: u32 = 100;
+
 const ACCEPT_BACKOFF_FIRST: Duration = Duration::from_millis(10);
 const ACCEPT_BACKOFF_CAP: Duration = Duration::from_secs(1);
 const ACCEPT_FAILURES_BEFORE_ERROR: u32 = 10;
@@ -140,22 +143,42 @@ impl DaemonServer {
 
     /// Bind the unix socket, replacing a stale one, readable and writable by
     /// this user only; a directory it creates for it is this user's only
-    /// too. One something still answers on is not replaced: that fails with
-    /// [`std::io::ErrorKind::AddrInUse`]. Split from
-    /// [`Self::serve_unix_listener`] so a caller can bind every listener
-    /// before announcing the daemon — a client that finds it must be able to
-    /// connect. No command this process sandboxes can connect to it.
+    /// too. One something still answers on for about a second is not
+    /// replaced: that fails with [`std::io::ErrorKind::AddrInUse`]. The
+    /// second is for a listener its server has already closed but a child
+    /// forked a moment before still holds, as it holds every descriptor,
+    /// until it execs: that one accepts connections nobody will serve.
+    /// Split from [`Self::serve_unix_listener`] so a caller can bind every
+    /// listener before announcing the daemon — a client that finds it must
+    /// be able to connect. No command this process sandboxes can connect to
+    /// it.
     pub fn bind_unix(socket_path: &Path) -> anyhow::Result<UnixBinding> {
+        let mut pauses = 0;
+        Self::bind_unix_probing(socket_path, || {
+            pauses += 1;
+            std::thread::sleep(PROBE_PAUSE);
+            pauses <= PROBE_PAUSES
+        })
+    }
+
+    /// [`Self::bind_unix`], running `pause` each time the socket still
+    /// answers; `false` gives up.
+    fn bind_unix_probing(
+        socket_path: &Path,
+        mut pause: impl FnMut() -> bool,
+    ) -> anyhow::Result<UnixBinding> {
         if let Some(parent) = socket_path.parent() {
             crate::discovery::create_private_dir(parent)?;
         }
         if socket_path.exists() {
-            if std::os::unix::net::UnixStream::connect(socket_path).is_ok() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AddrInUse,
-                    format!("{} is being served already", socket_path.display()),
-                )
-                .into());
+            while std::os::unix::net::UnixStream::connect(socket_path).is_ok() {
+                if !pause() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::AddrInUse,
+                        format!("{} is being served already", socket_path.display()),
+                    )
+                    .into());
+                }
             }
             std::fs::remove_file(socket_path)?;
         }
@@ -259,6 +282,54 @@ mod tests {
         assert!(accepted.is_none());
         let n = attempts.load(std::sync::atomic::Ordering::SeqCst);
         assert!((2..=8).contains(&n), "{n} attempts in 300ms");
+    }
+
+    #[tokio::test]
+    async fn a_listener_only_a_forked_child_still_holds_is_waited_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sock");
+        let closed = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let mut holder = std::process::Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::os::fd::OwnedFd::from(closed))
+            .spawn()
+            .unwrap();
+        assert!(
+            std::os::unix::net::UnixStream::connect(&path).is_ok(),
+            "the child's copy of the listener accepts"
+        );
+        let mut release = holder.stdin.take();
+        let mut pauses = 0;
+        let bound = DaemonServer::bind_unix_probing(&path, || {
+            pauses += 1;
+            if release.take().is_some() {
+                holder.wait().unwrap();
+            } else {
+                std::thread::sleep(PROBE_PAUSE);
+            }
+            pauses <= PROBE_PAUSES
+        });
+        holder.wait().unwrap();
+        assert!(bound.is_ok(), "{:?}", bound.err());
+        assert!(std::os::unix::net::UnixStream::connect(&path).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_listener_that_keeps_answering_is_not_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("d.sock");
+        let _served = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let mut pauses = 0;
+        let bound = DaemonServer::bind_unix_probing(&path, || {
+            pauses += 1;
+            pauses <= 3
+        });
+        let err = bound.err().expect("refused");
+        assert_eq!(
+            err.downcast_ref::<std::io::Error>().map(|e| e.kind()),
+            Some(std::io::ErrorKind::AddrInUse)
+        );
+        assert_eq!(pauses, 4);
     }
 
     #[test]
