@@ -216,7 +216,9 @@ pub struct CompactionConfig {
     pub reactive: bool,
     /// Once an hour — the lifetime of the provider's prompt cache — blank all
     /// but the 20 newest tool results and send the provider `cache_edits`
-    /// for the ones it still holds.
+    /// for the ones it still holds. Only a compatible endpoint (a provider
+    /// whose `vendor` is not `anthropic`, at a `base_url` that is not
+    /// Anthropic's) is sent `cache_edits`; Anthropic's own API refuses them.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub clear_on_cache_expiry: bool,
     /// A tool result longer than this many characters is saved to a file in

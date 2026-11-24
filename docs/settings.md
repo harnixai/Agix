@@ -117,7 +117,7 @@
 | `model.tasks.web_search` | `fast` | 项目与场景 | 照用 | 立即 | `WebSearch` 要的档位 |
 | `model.tasks.web_fetch` | 无 | 项目与场景 | 照用 | 立即 | `WebFetch` 读页面时要的档位;不设则不用模型,直接返回页面文本 |
 | `model.effort` | `high` | 会话 | 照用 | 立即 | 推理强度:`low`、`medium`、`high`、`xhigh`、`max`,作为 `output_config.effort` 发出 |
-| `model.thinking` | `on` | 会话 | 照用 | 立即 | 思考开关:`auto`、`on`、`off` |
+| `model.thinking` | `on` | 会话 | 照用 | 立即 | 思考开关:`auto`、`on`、`off`。`off` 按模型族发:Claude Opus 5.5、Fable、Mythos 关不掉思考,不发 `thinking`,没设 `model.effort` 时发 `low`;Claude Sonnet 5.5 发 `between_tools`,Claude Opus 5 与 Haiku 5.5 发 `disabled`,这三者 effort 高于 `high` 的按 `high` 发;其余模型发 `disabled`。`on_budget` 只发给收 `budget_tokens` 的模型,Opus 4.7 起、Sonnet 5 起、Haiku 5.5、Fable、Mythos 改成自适应思考 |
 | `model.max_tokens` | `32000` | 会话 | 照用 | 立即 | 一次调用的 `max_tokens`;受 `providers[].models[].max_output` 封顶 |
 
 ### `providers`
@@ -238,7 +238,7 @@
 | `compaction.threshold_tokens` | 无(场景定:150000) | 会话 | 照用 | 立即 | 请求的上下文超过多少 token 就压缩;`0` 关闭自动压缩 |
 | `compaction.keep_recent` | 无(场景定:`code` 20、`harnix` 15、`mini` 10) | 会话 | 照用 | 立即 | 压缩时原样保留最近几轮 |
 | `compaction.reactive` | `false` | 会话 | 照用 | 立即 | 在一轮中途提前清旧工具结果:离阈值不足 5 万 token,或上下文涨得三次模型调用内就到阈值时,把早于最近 `keep_recent` 轮(至少 5 轮)的文件、shell、搜索类工具结果清空(`MicroCompact`);连续三次没释放出东西就在本会话停用 |
-| `compaction.clear_on_cache_expiry` | `false` | 会话 | 照用 | 立即 | 每过一小时(provider 提示缓存的寿命)清空除最新 20 条外的工具结果,并把 `cache_edits` 发给仍持有它们的 provider |
+| `compaction.clear_on_cache_expiry` | `false` | 会话 | 照用 | 立即 | 每过一小时(provider 提示缓存的寿命)清空除最新 20 条外的工具结果,并把 `cache_edits` 发给仍持有它们的 provider。`cache_edits` 只发给兼容端点(`vendor` 不是 `anthropic`、`base_url` 不是 Anthropic 官方的 provider);Anthropic 官方 API 不收这个块,对它只清本地结果 |
 | `compaction.inline_result_chars` | 无(`30000`) | 会话 | 信任之后才生效 | 立即 | 工具结果超过这么多字符就存到项目 `state/tool-results/` 下的文件,模型只拿到头、尾与路径;`0` 全部留在对话里。`Read`、`WebFetch`、`TaskOutput` 自己分页,从不转存 |
 
 ### `prompt`

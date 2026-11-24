@@ -59,6 +59,7 @@ mod skills_and_memory;
 mod stream_recovery;
 mod subagent_providers;
 mod team_lifecycle;
+mod thinking_off_wire;
 mod turn_limits;
 mod turn_throughput;
 mod worktree_location;

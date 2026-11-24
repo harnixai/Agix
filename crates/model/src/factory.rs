@@ -11,7 +11,7 @@ use base::interface::credentials::CredentialSource;
 use base::interface::exec::Network;
 use base::interface::model::Model;
 use base::interface::model_factory::{ModelFactory, ModelFactoryRegistry};
-use base::provider::ProviderConfig;
+use base::provider::{ProviderConfig, Vendor};
 
 use crate::adapter::AnthropicModel;
 use crate::client::{AnthropicClient, AuthMode, HttpAnthropicClient};
@@ -52,10 +52,27 @@ impl ModelFactory for AnthropicFactory {
             Some(net) => client.with_network(net.clone()),
             None => client,
         });
-        Ok(Arc::new(
-            AnthropicModel::new(client).with_provenance(provider_id),
-        ))
+        let model = AnthropicModel::new(client).with_provenance(provider_id);
+        Ok(Arc::new(if takes_cache_edits(cfg) {
+            model.with_cache_edits()
+        } else {
+            model
+        }))
     }
+}
+
+/// Whether compaction's `cache_edits` block goes to this provider: Anthropic's
+/// own API refuses it, so only an endpoint of another vendor at a base URL of
+/// its own gets it.
+fn takes_cache_edits(cfg: &ProviderConfig) -> bool {
+    if cfg.vendor == Vendor::Anthropic {
+        return false;
+    }
+    cfg.base_url
+        .as_deref()
+        .and_then(|u| url::Url::parse(u).ok())
+        .and_then(|u| u.host_str().map(|h| h != "api.anthropic.com"))
+        .unwrap_or(false)
 }
 
 /// OpenAI Chat Completions, and the gateways that only speak its shape.
@@ -199,5 +216,32 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{api}: {e}"));
             assert_eq!(model.provenance().as_deref(), Some(id));
         }
+    }
+
+    #[test]
+    fn only_a_compatible_endpoint_of_another_vendor_takes_cache_edits() {
+        let cfg = |vendor: Vendor, base_url: Option<&str>| ProviderConfig {
+            vendor,
+            base_url: base_url.map(str::to_string),
+            ..Default::default()
+        };
+        assert!(!takes_cache_edits(&cfg(Vendor::Anthropic, None)));
+        assert!(!takes_cache_edits(&cfg(
+            Vendor::Anthropic,
+            Some("https://relay.example")
+        )));
+        assert!(!takes_cache_edits(&cfg(Vendor::Generic, None)));
+        assert!(!takes_cache_edits(&cfg(
+            Vendor::Generic,
+            Some("https://api.anthropic.com/v1")
+        )));
+        assert!(takes_cache_edits(&cfg(
+            Vendor::Deepseek,
+            Some("https://api.deepseek.com/anthropic")
+        )));
+        assert!(takes_cache_edits(&cfg(
+            Vendor::Generic,
+            Some("https://relay.example")
+        )));
     }
 }

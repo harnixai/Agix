@@ -481,7 +481,7 @@ pub enum CacheTtl {
     OneHour,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ThinkingConfig {
     /// 模型自适应预算（部分新模型支持；不支持的模型会报错）
@@ -494,6 +494,9 @@ pub enum ThinkingConfig {
     /// flows where the client doesn't echo thinking blocks back — DS V4
     /// rejects with 400 in that case.
     Disabled,
+    /// Thinking off on a model that refuses `disabled` (Sonnet 5.5). Takes
+    /// no other field.
+    BetweenTools,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -606,6 +609,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&t).unwrap(),
             json!({"type": "disabled"})
+        );
+    }
+
+    #[test]
+    fn thinking_between_tools_serializes_with_no_other_field() {
+        assert_eq!(
+            serde_json::to_value(ThinkingConfig::BetweenTools).unwrap(),
+            json!({"type": "between_tools"})
         );
     }
 

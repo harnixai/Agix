@@ -31,6 +31,7 @@ pub mod parser;
 mod retry_after;
 pub mod routing;
 pub mod stream;
+mod thinking;
 pub mod tokens;
 pub mod types;
 

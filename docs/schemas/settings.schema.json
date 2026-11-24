@@ -117,7 +117,7 @@
       "description": "Context compaction, over what the scene asks for. A field left out keeps\nthe scene's own value (`SceneSpec::token_budget`).",
       "properties": {
         "clear_on_cache_expiry": {
-          "description": "Once an hour — the lifetime of the provider's prompt cache — blank all\nbut the 20 newest tool results and send the provider `cache_edits`\nfor the ones it still holds.",
+          "description": "Once an hour — the lifetime of the provider's prompt cache — blank all\nbut the 20 newest tool results and send the provider `cache_edits`\nfor the ones it still holds. Only a compatible endpoint (a provider\nwhose `vendor` is not `anthropic`, at a `base_url` that is not\nAnthropic's) is sent `cache_edits`; Anthropic's own API refuses them.",
           "type": "boolean"
         },
         "inline_result_chars": {

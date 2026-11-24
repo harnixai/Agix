@@ -1,9 +1,7 @@
 //! AnthropicModel — adapts `AnthropicClient` to implement `crate::Model`.
 
 use crate::client::AnthropicClient;
-use crate::types::{
-    BuiltinTool, CacheControl, MessageParam, MessagesRequest, SystemBlock, ThinkingConfig,
-};
+use crate::types::{BuiltinTool, CacheControl, MessageParam, MessagesRequest, SystemBlock};
 use async_trait::async_trait;
 use base::interface::model::ThinkingMode;
 use base::interface::model::{
@@ -23,6 +21,7 @@ const PROVIDER_SEARCH_TOOL: &str = "web_search";
 pub struct AnthropicModel {
     inner: Arc<dyn AnthropicClient>,
     provenance: Option<String>,
+    sends_cache_edits: bool,
 }
 
 impl AnthropicModel {
@@ -30,7 +29,15 @@ impl AnthropicModel {
         Self {
             inner: client,
             provenance: None,
+            sends_cache_edits: false,
         }
+    }
+
+    /// Send compaction's `cache_edits` block. Anthropic's own API refuses it,
+    /// so only a compatible endpoint that takes it is built with this.
+    pub fn with_cache_edits(mut self) -> Self {
+        self.sends_cache_edits = true;
+        self
     }
 
     /// See [`Model::provenance`].
@@ -67,7 +74,7 @@ impl Model for AnthropicModel {
             .filter(|m| !m.content.is_empty())
             .collect();
 
-        let has_cache_edits = !params.cache_edits.is_empty();
+        let has_cache_edits = self.sends_cache_edits && !params.cache_edits.is_empty();
         if has_cache_edits {
             attach_cache_edits(&mut message_params, &params.cache_edits);
         }
@@ -78,7 +85,7 @@ impl Model for AnthropicModel {
             betas.push("context-management-2025-06-27".into());
         }
         let anthropic_tools = wire_tools(tools);
-        let thinking = thinking_config(params.thinking_mode, params.max_tokens);
+        let (thinking, effort) = crate::thinking::of(&params);
 
         // A call that is only a search has nothing else to do, so it is told
         // to search rather than left to decide whether to.
@@ -98,7 +105,7 @@ impl Model for AnthropicModel {
             tool_choice,
             stream: true,
             thinking,
-            effort: params.effort,
+            effort,
             temperature: None,
             top_p: None,
             top_k: None,
@@ -200,40 +207,6 @@ pub fn thinking_mode_problem(mode: &ThinkingMode) -> Option<String> {
             "on_budget must be at least {MIN_THINKING_BUDGET}, got {n}"
         )),
         _ => None,
-    }
-}
-
-/// The budget is held under `max_tokens`, which Anthropic requires of it; a
-/// call whose `max_tokens` leaves no room for the least budget goes without
-/// thinking.
-fn thinking_config(mode: ThinkingMode, max_tokens: u32) -> Option<ThinkingConfig> {
-    match mode {
-        ThinkingMode::Auto => None,
-        ThinkingMode::Off => Some(ThinkingConfig::Disabled),
-        ThinkingMode::On => Some(ThinkingConfig::Adaptive),
-        ThinkingMode::OnBudget(n) if n < max_tokens => {
-            Some(ThinkingConfig::Enabled { budget_tokens: n })
-        }
-        ThinkingMode::OnBudget(n) => {
-            let room = max_tokens.saturating_sub(1);
-            if room < MIN_THINKING_BUDGET {
-                tracing::warn!(
-                    budget = n,
-                    max_tokens,
-                    "thinking budget left out: max_tokens leaves no room for one"
-                );
-                return Some(ThinkingConfig::Disabled);
-            }
-            tracing::warn!(
-                budget = n,
-                max_tokens,
-                held_to = room,
-                "thinking budget held under max_tokens"
-            );
-            Some(ThinkingConfig::Enabled {
-                budget_tokens: room,
-            })
-        }
     }
 }
 
@@ -1662,5 +1635,88 @@ mod cache_control_wire_tests {
             body["system"][0]["cache_control"],
             json!({"type": "ephemeral", "ttl": "1h"})
         );
+    }
+
+    async fn body_for(
+        model: AnthropicModel,
+        client: &MockAnthropicClient,
+        params: StreamParams,
+    ) -> Value {
+        let messages = vec![
+            ModelMessage {
+                role: MessageRole::User,
+                content: vec![ModelContentBlock::Text {
+                    text: "read".into(),
+                }],
+            },
+            ModelMessage {
+                role: MessageRole::Assistant,
+                content: vec![ModelContentBlock::ToolUse {
+                    id: "toolu_1".into(),
+                    name: "Read".into(),
+                    input: json!({}),
+                }],
+            },
+            ModelMessage {
+                role: MessageRole::User,
+                content: vec![ModelContentBlock::ToolResult {
+                    tool_use_id: "toolu_1".into(),
+                    content: "x".into(),
+                    is_error: None,
+                }],
+            },
+        ];
+        let _ = model
+            .stream(vec![], vec![], messages, params, CancellationToken::new())
+            .await
+            .expect("the request goes out");
+        serde_json::to_value(client.nth_request(0).expect("one request")).unwrap()
+    }
+
+    fn off_params(model: &str) -> StreamParams {
+        StreamParams {
+            model: model.into(),
+            max_tokens: 100,
+            thinking_mode: ThinkingMode::Off,
+            effort: None,
+            cache_edits: vec!["toolu_1".into()],
+            origin: None,
+            input_map: None,
+            provider_search: None,
+            usage_tap: Default::default(),
+        }
+    }
+
+    async fn off_body(model: &str, cache_edits: bool) -> Value {
+        let client = Arc::new(MockAnthropicClient::new());
+        client.push_turn(vec![StreamEvent::MessageStop]);
+        let mut adapter = AnthropicModel::new(client.clone());
+        if cache_edits {
+            adapter = adapter.with_cache_edits();
+        }
+        body_for(adapter, &client, off_params(model)).await
+    }
+
+    #[tokio::test]
+    async fn thinking_off_goes_out_in_the_shape_each_model_takes() {
+        let opus = off_body("claude-opus-5-5", false).await;
+        assert!(opus.get("thinking").is_none(), "{opus}");
+        assert_eq!(opus["output_config"], json!({"effort": "low"}));
+
+        let sonnet = off_body("us.anthropic.claude-sonnet-5-5-v1:0", false).await;
+        assert_eq!(sonnet["thinking"], json!({"type": "between_tools"}));
+        assert!(sonnet.get("output_config").is_none(), "{sonnet}");
+
+        let deepseek = off_body("deepseek-v4-pro", false).await;
+        assert_eq!(deepseek["thinking"], json!({"type": "disabled"}));
+    }
+
+    #[tokio::test]
+    async fn cache_edits_go_out_only_when_the_endpoint_takes_them() {
+        let has_block = |body: &Value| body.to_string().contains("\"cache_edits\"");
+        let official = off_body("claude-sonnet-5-5", false).await;
+        assert!(!has_block(&official), "{official}");
+        let compatible = off_body("deepseek-v4-pro", true).await;
+        assert!(has_block(&compatible), "{compatible}");
     }
 }
