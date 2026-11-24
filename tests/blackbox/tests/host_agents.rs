@@ -591,26 +591,34 @@ async fn two_agents_under_one_session_ask_with_their_own_task() -> anyhow::Resul
     let (_world, provider, daemon, mut client, session) = daemon_with("tasks", json!({})).await?;
     let mut watcher = daemon.connect().await?;
     watcher.session_subscribe(&session).await?;
-    provider.script([
-        Reply::Blocks(vec![Block::tool(
-            "b-1",
-            "Bash",
-            json!({ "command": "echo one > one.txt" }),
-        )]),
-        Reply::Blocks(vec![Block::tool(
-            "b-2",
-            "Bash",
-            json!({ "command": "echo two > two.txt" }),
-        )]),
-        Reply::text("done one"),
-        Reply::text("done two"),
-    ]);
+    provider.script_when(
+        "FIRST-MARK",
+        [
+            Reply::Blocks(vec![Block::tool(
+                "b-1",
+                "Bash",
+                json!({ "command": "echo one > one.txt" }),
+            )]),
+            Reply::text("done one"),
+        ],
+    );
+    provider.script_when(
+        "SECOND-MARK",
+        [
+            Reply::Blocks(vec![Block::tool(
+                "b-2",
+                "Bash",
+                json!({ "command": "echo two > two.txt" }),
+            )]),
+            Reply::text("done two"),
+        ],
+    );
     let mut started = Vec::new();
-    for prompt in ["first", "second"] {
+    for prompt in ["FIRST-MARK write one", "SECOND-MARK write two"] {
         started.push(
             start_agent(
                 &mut client,
-                json!({ "session_id": session, "prompt": prompt }),
+                json!({ "session_id": session, "prompt": prompt, "notify_parent": false }),
             )
             .await?,
         );
