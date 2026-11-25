@@ -594,7 +594,7 @@ ask 规则问的(含 managed 层的、宿主策略问的)和插件命令子调�
 输入一起算,见 ARCHITECTURE「调用之前估输入」),从剩余里扣掉,`max_tokens` 压到不超过扣完的数;扣完不到 1024
 时这次调用不发,这一轮以 `budget_exceeded` 结束,`turn_complete.message` 写明剩余与估计的输入。一次调用之后合计到达预算时同样结束;
 到达 90% 时往对话里加一条提醒,让模型收尾。子 Agent 判的是同一份合计:别的 agent 把预算用完后,在跑的子
-Agent 在下一次调用前以 `budget_exceeded` 收尾,交回父会话的结果末尾写明是这个原因。这一轮起的后台子 Agent
+Agent 在下一次调用前以 `budget_exceeded` 收尾,交回父会话的结果末尾写明是这个原因和谁的预算。这一轮起的后台子 Agent
 在这一轮结束之后仍记在这份合计上,照样会被它截停;下一轮有自己的一份。一次调用中途断开或失败、这一轮
 以错误结束时,provider 已经报出的那部分用量同样计入。宿主经库式用法注入的 `BudgetPolicy` 在这之外再判,
 两边都要过。
@@ -608,8 +608,9 @@ daemon 重启(累计即 `session.get` 的 `usage`,§6.3)。每次调用同样先
 团队成员判的是根会话的这份累计。
 
 **宿主起的子 Agent 的预算。** `session.startAgent` 给了 `token_budget` 时,这个子 Agent 另有一份上限,口径同上,
-挂在会话的这份下面:它的调用两份都计,判的是剩得最少的那份,用完时只截停它自己(任务结局见 §6.3
-`session.startAgent`)。
+挂在会话的这份下面:它的调用两份都计,判的是剩得最少的那份,用完时只截停它自己。宿主起的子 Agent 被
+任何一份预算截停时,任务以 `failed` 结束,`error` 是 `budget_exceeded: ` 加上那一轮 `turn_complete.message`
+的原文(§6.3 `session.startAgent`)。
 
 ---
 
@@ -3174,10 +3175,13 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
   `budget_exceeded` 结束,父会话与别的子 Agent 照常。`session.messageTask` 发去的消息进它正在跑的这一轮,
   用的是同一份上限。
 - 宿主起的子 Agent 被任何一份 token 预算截停(它自己的、会话的、它这一轮的)时,任务结局是
-  `status: "failed"`,`error` 为 `budget_exceeded: <谁的预算>`,如
-  `"budget_exceeded: the task's token budget of 200000 is used up"`(会话的是 `this session's`;说不出是哪份时只有
-  `budget_exceeded`);截停前它说的话照样在任务输出里,`notify_parent` 的通知是 `<status>failed</status>` 带
-  `<error>`。模型用 `Agent` 工具起的子 Agent 被预算截停仍是 `done`,结果末尾带说明。
+  `status: "failed"`,`error` 为 `budget_exceeded: ` 后接它那一轮 `turn_complete.message` 的原文(§4.8),
+  写明是谁的预算:`the task's`(`token_budget`)、`this session's`(`session.token_budget`)或
+  `this turn's`(它这一轮的 `turn.token_budget`)。用完时如
+  `"budget_exceeded: the task's token budget of 200000 is used up"`;剩下的付不起下一次调用的输入时如
+  `"budget_exceeded: the task's token budget of 200000 has 1500 left, too little for the next call's input of about 6000 tokens and its reply"`。
+  截停前它说的话照样在任务输出里,`notify_parent` 的通知是 `<status>failed</status>` 带
+  `<error>`。模型用 `Agent` 工具起的子 Agent 被预算截停仍是 `done`,结果末尾的说明同样写明是谁的预算。
 - `notify_parent: true` 的通知在父会话的下一轮开头读到;父会话空闲时不会因此自己开一轮。
 
 #### `session.respondToPrompt`
@@ -4435,7 +4439,7 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 | `task_started` | `{task}` | 这个会话的一件任务开始了(`task` 同 `session.tasks` 的条目)。Shell 命令与监视器只在跑过 1 秒后才报,短命令不报;MCP 任务在 server 建任务时立即报;不属于任何一轮,`turn_id` 为 `null` |
 | `task_updated` | `{task}` | 一件报过开始、还没结束的任务变了:子 Agent 每调完一次模型(`task.usage`,以及这次调用实际去的 `detail.model` / `detail.provider`),有询问开始或结束等待(`task.status` 在 `waiting` 与 `running` 之间);`turn_id` 为 `null` |
 | `task_progress` | `{task_id,appended,skipped_bytes,from_byte,next_byte}` | 一件报过开始的 Shell 命令、监视器、`RunCode` 程序或 MCP 任务(状态行 `[<mcp_status>] <status_message>`,每次变化一行,不受每秒一帧限制)新打出来的输出,`appended` 是偏移 `from_byte..next_byte` 那段(偏移同 `session.taskOutput`)。每件任务每秒至多一帧,结束时在 `task_finished` 之前补最后一帧;一帧至多 8 KiB,多出的只发结尾,`skipped_bytes` 是跳过的字节数,恒等于本帧 `from_byte` 减上一帧 `next_byte`;漏帧或跳过的用 `session.taskOutput {from_byte}` 补;`turn_id` 为 `null` |
-| `task_finished` | `{task}` | 一件报过开始的任务结束了,`task.status` 是结局,`failed` 时 `task.error` 写明原因(宿主起的子 Agent 被 token 预算截停是 `budget_exceeded: …`,§6.3 `session.startAgent`);此后没有它的 `task_progress`,输出不再长,`session.taskOutput` 的 `final` 为 `true`。被停掉的任务等工作收尾后才发(§6.3 `session.stopTask`);`turn_id` 为 `null` |
+| `task_finished` | `{task}` | 一件报过开始的任务结束了,`task.status` 是结局,`failed` 时 `task.error` 写明原因(宿主起的子 Agent 被 token 预算截停是 `budget_exceeded: <谁的预算…>`,即它那一轮 `turn_complete.message` 的原文,§6.3 `session.startAgent`);此后没有它的 `task_progress`,输出不再长,`session.taskOutput` 的 `final` 为 `true`。被停掉的任务等工作收尾后才发(§6.3 `session.stopTask`);`turn_id` 为 `null` |
 | `goal_changed` | `{goal}` | 会话目标变了(`goal` 同 `session.goal`,清除后为 `null`);`turn_id` 为 `null` |
 | `extension_entry` | `{entry}` | 宿主经 `session.appendEntry` 写了一条扩展条目(`entry` 同 `session.entries` 的条目);`turn_id` 为 `null` |
 | `permission_mode_changed` | `{mode,source}` | 会话的权限模式变了:`mode` 是变成的模式(§4.5),`source` 为 `host`(`session.setPermissionMode`,或 `session.rewind` 回到了 `plan` 里)或 `model`(模型的 `EnterPlanMode` / `ExitPlanMode`)。会话重建或恢复时按设置得到的模式不推,要知道读 `session.resume` 的 `permission.mode`。推给全部订阅者,包括发起切换的那条连接;`turn_id` 为 `null` |

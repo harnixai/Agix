@@ -235,7 +235,7 @@ impl AgentHookExecutor for DelegatorHookExecutor {
         match self.delegator.delegate(req).await {
             Ok(Delegated::Finished(outcome)) => match outcome.end {
                 DelegateEnd::Failed(e) => Err(AgentHookError::Failed(e)),
-                DelegateEnd::Completed | DelegateEnd::Cancelled | DelegateEnd::CutShort(_) => {
+                DelegateEnd::Completed | DelegateEnd::Cancelled | DelegateEnd::CutShort(..) => {
                     Ok(outcome.text)
                 }
             },

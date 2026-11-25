@@ -134,7 +134,7 @@ async fn run_member(
     req.started_by(ctx);
     match delegator.delegate(req).await {
         Ok(Delegated::Finished(outcome)) => match outcome.end {
-            DelegateEnd::Completed | DelegateEnd::CutShort(_) => (outcome.text, MemberEnd::Done),
+            DelegateEnd::Completed | DelegateEnd::CutShort(..) => (outcome.text, MemberEnd::Done),
             DelegateEnd::Cancelled => (outcome.text, MemberEnd::Cancelled),
             DelegateEnd::Failed(e) => (format!("ERROR: {e}"), MemberEnd::Failed),
         },

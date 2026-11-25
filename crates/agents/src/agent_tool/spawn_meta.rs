@@ -153,7 +153,7 @@ pub(crate) fn stop_reason_of(end: &DelegateEnd) -> &'static str {
     match end {
         DelegateEnd::Cancelled => "cancelled",
         DelegateEnd::Failed(_) => "error",
-        DelegateEnd::Completed | DelegateEnd::CutShort(_) => "end_turn",
+        DelegateEnd::Completed | DelegateEnd::CutShort(..) => "end_turn",
     }
 }
 

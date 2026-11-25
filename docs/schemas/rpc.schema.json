@@ -9220,7 +9220,7 @@
           "default": null,
           "description": "The sub-agent's own ceiling, counted as `turn.token_budget` is;\nit spends into the session as well. `0` is refused.",
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 1,
           "type": [
             "integer",
             "null"

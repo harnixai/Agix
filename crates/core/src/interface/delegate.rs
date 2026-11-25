@@ -199,8 +199,8 @@ pub enum DelegateEnd {
     Completed,
     Cancelled,
     Failed(String),
-    /// Ended by a ceiling before it finished — `max_turns`, say.
-    CutShort(&'static str),
+    /// Cut short by a ceiling (`max_turns`, say), and what its turn said of it.
+    CutShort(&'static str, Option<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

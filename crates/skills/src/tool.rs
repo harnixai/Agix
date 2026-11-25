@@ -255,7 +255,7 @@ impl SkillTool {
                 false,
             ),
             Ok(Delegated::Finished(outcome)) => match outcome.end {
-                DelegateEnd::Completed | DelegateEnd::CutShort(_) => (
+                DelegateEnd::Completed | DelegateEnd::CutShort(..) => (
                     format!(
                         "Skill '{skill_name}' executed in forked agent.\n\n{}",
                         outcome.text

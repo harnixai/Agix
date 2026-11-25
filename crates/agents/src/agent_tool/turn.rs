@@ -169,32 +169,39 @@ pub(crate) async fn run_one_turn(
         }
     }
 
-    let ran = match outcome {
-        Ok(o) if o.stop_reason == "cancelled" => {
-            (with_stop_note(text, &o.stop_reason), DelegateEnd::Cancelled)
-        }
-        Ok(o) => {
-            let end = match o.stop_reason.as_str() {
-                "max_turns" | "host_ceiling" => DelegateEnd::CutShort("max_turns"),
-                "budget_exceeded" => DelegateEnd::CutShort("budget_exceeded"),
-                "max_structured_output_retries" => {
-                    DelegateEnd::CutShort("max_structured_output_retries")
-                }
-                _ => DelegateEnd::Completed,
-            };
-            (with_stop_note(text, &o.stop_reason), end)
-        }
-        Err(runtime::turn::TurnError::Shutdown) => (text, DelegateEnd::Completed),
-        Err(e) => failed(anyhow!("sub: {e}")),
-    };
+    let ran = ended(text, outcome);
     if let Some(tag) = &tag {
         tag.completed(match &ran.1 {
             DelegateEnd::Cancelled => "cancelled",
             DelegateEnd::Failed(_) => "failed",
-            DelegateEnd::Completed | DelegateEnd::CutShort(_) => "completed",
+            DelegateEnd::Completed | DelegateEnd::CutShort(..) => "completed",
         });
     }
     ran
+}
+
+/// How a sub-agent's turn ended, as its answer and its end.
+fn ended(
+    text: String,
+    outcome: Result<runtime::turn::TurnOutcome, runtime::turn::TurnError>,
+) -> (String, DelegateEnd) {
+    let o = match outcome {
+        Ok(o) => o,
+        Err(runtime::turn::TurnError::Shutdown) => return (text, DelegateEnd::Completed),
+        Err(e) => return failed(anyhow!("sub: {e}")),
+    };
+    let ceiling = match o.stop_reason.as_str() {
+        "cancelled" => return (text, DelegateEnd::Cancelled),
+        "max_turns" | "host_ceiling" => Some("max_turns"),
+        "budget_exceeded" => Some("budget_exceeded"),
+        "max_structured_output_retries" => Some("max_structured_output_retries"),
+        _ => None,
+    };
+    let text = with_stop_note(text, &o.stop_reason, o.message.as_deref());
+    match ceiling {
+        Some(ceiling) => (text, DelegateEnd::CutShort(ceiling, o.message)),
+        None => (text, DelegateEnd::Completed),
+    }
 }
 
 /// A run that failed with `e`, as the tool error the parent reads.
@@ -208,19 +215,21 @@ pub(crate) fn failed(e: anyhow::Error) -> (String, DelegateEnd) {
 /// A sub-agent's answer, with a line saying so when its turn was cut off by
 /// a limit rather than finished — without it the parent reads a partial or
 /// empty answer as the whole one.
-pub(crate) fn with_stop_note(text: String, stop_reason: &str) -> String {
-    let note = match stop_reason {
-        "max_turns" | "host_ceiling" => {
-            "The sub-agent reached its limit of model calls (max_turns) before it finished"
+pub(crate) fn with_stop_note(text: String, stop_reason: &str, why: Option<&str>) -> String {
+    let note: std::borrow::Cow<str> = match (stop_reason, why) {
+        ("max_turns" | "host_ceiling", _) => {
+            "The sub-agent reached its limit of model calls (max_turns) before it finished".into()
         }
-        "max_structured_output_retries" => {
-            "The sub-agent stopped after too many attempts at its structured output"
+        ("max_structured_output_retries", _) => {
+            "The sub-agent stopped after too many attempts at its structured output".into()
         }
-        "budget_exceeded" => {
-            "The sub-agent stopped when a token budget it is held to — one it shares with the \
-             agent that started it (the turn's, the goal's or the session's), or the task's \
-             own — ran out (budget_exceeded)"
+        ("budget_exceeded", Some(why)) => {
+            format!("The sub-agent stopped because {why} (budget_exceeded)").into()
         }
+        ("budget_exceeded", None) => "The sub-agent stopped when a token budget it is held to \
+             — one it shares with the agent that started it (the turn's, the goal's or the \
+             session's), or the task's own — ran out (budget_exceeded)"
+            .into(),
         _ => return text,
     };
     if text.trim().is_empty() {
@@ -348,7 +357,7 @@ pub(crate) async fn mark_sidechain_terminal(
     let state = match end {
         DelegateEnd::Cancelled => return,
         DelegateEnd::Failed(_) => history::entry::SessionEndState::Failed,
-        DelegateEnd::Completed | DelegateEnd::CutShort(_) => {
+        DelegateEnd::Completed | DelegateEnd::CutShort(..) => {
             history::entry::SessionEndState::Completed
         }
     };

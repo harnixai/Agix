@@ -308,21 +308,20 @@ impl SessionPool {
         if !self.session_exists(session_id).await {
             return Err(not_found());
         }
-        let Some(delegator) = self
-            .with_live_ensured(session_id, None, |live| live.engine.delegator.clone())
+        let Some((Some(delegator), session)) = self
+            .with_live_ensured(session_id, None, |live| {
+                let spent = live.core.state().ledger().spent.clone();
+                (live.engine.delegator.clone(), spent)
+            })
             .await?
-            .flatten()
         else {
             return Err(not_found());
         };
         if request.spend.is_none() {
-            if let Some(state) = self.live_state(session_id).await {
-                let session = state.ledger().spent.clone();
-                request.spend = Some(match token_budget {
-                    Some(limit) => Arc::new(SpendNode::task(Some(limit), session)),
-                    None => session,
-                });
-            }
+            request.spend = Some(match token_budget {
+                Some(limit) => Arc::new(SpendNode::task(Some(limit), session)),
+                None => session,
+            });
         }
         match delegator.delegate(request).await {
             Ok(Delegated::Started(started)) => Ok(api::AgentStarted {

@@ -11,7 +11,7 @@ pub(crate) fn status_of(end: &DelegateEnd) -> base::context::RunningStatus {
     match end {
         DelegateEnd::Cancelled => base::context::RunningStatus::Cancelled,
         DelegateEnd::Failed(e) => base::context::RunningStatus::Failed(e.clone()),
-        DelegateEnd::Completed | DelegateEnd::CutShort(_) => {
+        DelegateEnd::Completed | DelegateEnd::CutShort(..) => {
             base::context::RunningStatus::Completed
         }
     }
@@ -91,7 +91,7 @@ pub(crate) fn task_notification(task: &base::context::RunningTask, end: &Delegat
     let status = match end {
         DelegateEnd::Cancelled => "stopped",
         DelegateEnd::Failed(_) => "failed",
-        DelegateEnd::Completed | DelegateEnd::CutShort(_) => "done",
+        DelegateEnd::Completed | DelegateEnd::CutShort(..) => "done",
     };
     let mut notice = format!(
         "<task-notification>\n<task-id>{}</task-id>\n<status>{status}</status>\n",

@@ -421,10 +421,19 @@ fn the_guide_says_what_the_tool_does() {
 
 #[test]
 fn a_sub_agent_cut_off_by_a_limit_says_so() {
-    assert_eq!(with_stop_note("done".into(), "end_turn"), "done");
-    assert!(with_stop_note(String::new(), "max_turns").contains("gave no answer"));
-    let partial = with_stop_note("half".into(), "max_turns");
+    assert_eq!(with_stop_note("done".into(), "end_turn", None), "done");
+    assert!(with_stop_note(String::new(), "max_turns", None).contains("gave no answer"));
+    let partial = with_stop_note("half".into(), "max_turns", None);
     assert!(partial.starts_with("half") && partial.contains("may be incomplete"));
+    let budget = with_stop_note(
+        "half".into(),
+        "budget_exceeded",
+        Some("the task's token budget of 8000 is used up"),
+    );
+    assert!(
+        budget.contains("because the task's token budget of 8000 is used up (budget_exceeded)"),
+        "{budget}"
+    );
 }
 
 pub(super) struct DummyModel;

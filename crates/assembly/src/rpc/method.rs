@@ -77,6 +77,7 @@ pub struct StartAgentParams {
     /// The sub-agent's own ceiling, counted as `turn.token_budget` is;
     /// it spends into the session as well. `0` is refused.
     #[serde(default)]
+    #[schemars(range(min = 1))]
     pub token_budget: Option<u64>,
 }
 
