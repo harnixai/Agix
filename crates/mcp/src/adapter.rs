@@ -843,6 +843,42 @@ mod tests {
         }
     }
 
+    /// A host's call (`mcp.callTool`) is handed what the server answered to
+    /// it: a status poll must reach the server every time, not get a
+    /// session's answer from the shared cache.
+    #[tokio::test]
+    async fn a_recording_copy_is_not_answered_from_the_shared_cache() {
+        let mut m = meta("status");
+        m.hints = McpToolHints {
+            read_only: Some(true),
+            idempotent: Some(true),
+            ..Default::default()
+        };
+        let client = Arc::new(MockMcpClient::new("s", vec![m.clone()]));
+        client.push_response("status", text("pending", false));
+        client.push_response("status", text("approved", false));
+        let adapter = McpToolAdapter::new(client.clone(), m);
+        adapter
+            .call(json!({"id": 1}), ctx(), ProgressSender::noop("t"))
+            .await
+            .unwrap();
+        let (host, record) = adapter.recording();
+        host.call(json!({"id": 1}), ctx(), ProgressSender::noop("t"))
+            .await
+            .unwrap();
+        assert_eq!(
+            client.calls.lock().unwrap().len(),
+            2,
+            "the server was not asked"
+        );
+        match record.take() {
+            Some(McpCallOutcome::Answered(kept)) => {
+                assert!(matches!(&kept.content[..], [McpContent::Text(t)] if t == "approved"))
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn a_recording_copy_keeps_a_failure_and_a_cancel() {
         let client = Arc::new(MockMcpClient::new("test", vec![meta("gone")]));

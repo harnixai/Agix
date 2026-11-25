@@ -29,6 +29,7 @@ mod import_sources;
 mod large_tool_results;
 mod mcp_boundaries;
 mod mcp_calls;
+mod mcp_calls_review;
 mod mcp_elicitation;
 mod mcp_project_root;
 mod mcp_tasks;
