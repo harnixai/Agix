@@ -405,7 +405,7 @@ impl SessionPool {
     }
 
     /// The binding `session_id` runs on, or would be brought back on.
-    async fn binding_of_session(&self, session_id: &str) -> Option<Arc<ProjectBinding>> {
+    pub(super) async fn binding_of_session(&self, session_id: &str) -> Option<Arc<ProjectBinding>> {
         if let Some(binding) = self.live_binding(session_id).await {
             return Some(binding);
         }

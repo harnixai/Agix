@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::blob::{BlobId, BlobStore};
 use super::format::CallRecord;
-use super::reader::{self, RecordedCall};
+use super::reader::{self, RecordedCall, Recording};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RerunError {
@@ -64,12 +64,20 @@ pub struct LoadedRequest {
 /// Blob content is read, not just referenced — that is the whole point, and it
 /// is what makes an edited blob take effect.
 pub fn load_request(dir: &Path, index: usize) -> Result<LoadedRequest, RerunError> {
-    let recording = reader::load(dir)?;
+    request_in(&reader::load(dir)?, &BlobStore::new(dir), index)
+}
+
+/// [`load_request`] over a recording the caller has already read.
+pub fn request_in(
+    recording: &Recording,
+    blobs: &BlobStore,
+    index: usize,
+) -> Result<LoadedRequest, RerunError> {
     let call = recording.calls.get(index).ok_or(RerunError::NoSuchCall {
         index,
         len: recording.calls.len(),
     })?;
-    request_of(&BlobStore::new(dir), index, call)
+    request_of(blobs, index, call)
 }
 
 /// Every call of the recording, in order.
@@ -439,17 +447,34 @@ pub fn diff(recorded: &[ModelEvent], live: &[ModelEvent]) -> ResponseDiff {
     }
 }
 
+/// What one rerun got back.
+pub struct Rerun {
+    pub diff: ResponseDiff,
+    /// The model's events in order: all of them, or up to `error`. A routed
+    /// model's `served` event is not among them — a recorded response never
+    /// carries one, so keeping it would make every rerun differ by an event.
+    pub live: Vec<ModelEvent>,
+    /// Provider and model the call went to, when the model was a routed one.
+    pub served: Option<(String, String)>,
+    /// Why the call did not open, or what ended its stream early.
+    pub error: Option<ModelError>,
+    pub ttft: Option<std::time::Duration>,
+    pub duration: std::time::Duration,
+}
+
 /// Send `request` to `model` and diff the answer against the recorded one.
 ///
 /// `model` must be a real provider, not a `RecorderModel` in replay mode —
 /// replaying the request would just hand back the recorded response and make
-/// every diff empty.
+/// every diff empty. A call that fails, to open or partway, is diffed as far
+/// as it got.
 pub async fn rerun_one(
     model: &Arc<dyn Model>,
     request: LoadedRequest,
     cancel: CancellationToken,
-) -> Result<(ResponseDiff, Vec<ModelEvent>), ModelError> {
-    let mut stream = model
+) -> Rerun {
+    let started = std::time::Instant::now();
+    let opened = model
         .stream(
             request.prompt_blocks,
             request.tools,
@@ -457,13 +482,38 @@ pub async fn rerun_one(
             request.params,
             cancel,
         )
-        .await?;
+        .await;
 
     let mut live = Vec::new();
-    while let Some(event) = stream.next().await {
-        live.push(event?);
+    let mut served = None;
+    let mut ttft = None;
+    let mut error = None;
+    match opened {
+        Err(e) => error = Some(e),
+        Ok(mut stream) => {
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(ModelEvent::Served { provider, model }) => served = Some((provider, model)),
+                    Ok(event) => {
+                        ttft.get_or_insert_with(|| started.elapsed());
+                        live.push(event);
+                    }
+                    Err(e) => {
+                        error = Some(e);
+                        break;
+                    }
+                }
+            }
+        }
     }
-    Ok((diff(&request.recorded_response, &live), live))
+    Rerun {
+        diff: diff(&request.recorded_response, &live),
+        live,
+        served,
+        error,
+        ttft,
+        duration: started.elapsed(),
+    }
 }
 
 #[cfg(test)]
@@ -638,9 +688,7 @@ mod tests {
 
         let model: Arc<dyn Model> = Arc::new(EchoSystem);
         let request = load_request(&dir, 0).unwrap();
-        let (diff, live) = rerun_one(&model, request, CancellationToken::new())
-            .await
-            .unwrap();
+        let Rerun { diff, live, .. } = rerun_one(&model, request, CancellationToken::new()).await;
 
         assert_eq!(text_of(&live), "you are a poet");
         assert!(!diff.identical());
@@ -652,6 +700,56 @@ mod tests {
             text_of(&reader::load(&dir).unwrap().calls[0].response),
             "recorded answer"
         );
+    }
+
+    /// A routed model names its provider first; a stream that fails partway
+    /// still answers with what came before the failure.
+    #[tokio::test]
+    async fn a_stream_cut_short_keeps_what_arrived_and_names_where_it_went() {
+        struct CutShort;
+        #[async_trait::async_trait]
+        impl Model for CutShort {
+            fn api_type(&self) -> ApiType {
+                ApiType::Anthropic
+            }
+            async fn stream(
+                &self,
+                _: Vec<PromptBlock>,
+                _: Vec<ToolDef>,
+                _: Vec<ModelMessage>,
+                _: StreamParams,
+                _: CancellationToken,
+            ) -> Result<base::interface::model::ModelStream, ModelError> {
+                Ok(Box::new(futures::stream::iter(vec![
+                    Ok(ModelEvent::Served {
+                        provider: "p1".into(),
+                        model: "m1".into(),
+                    }),
+                    Ok(ModelEvent::TextDelta {
+                        text: "recorded".into(),
+                    }),
+                    Err(ModelError::overloaded()),
+                ])))
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("run");
+        write_one_call(&dir);
+        let model: Arc<dyn Model> = Arc::new(CutShort);
+        let rerun = rerun_one(
+            &model,
+            load_request(&dir, 0).unwrap(),
+            CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(rerun.served, Some(("p1".into(), "m1".into())));
+        assert_eq!(rerun.live.len(), 1);
+        assert_eq!(rerun.diff.live_events, 1);
+        assert_eq!(rerun.diff.live_text, "recorded");
+        assert!(rerun.error.is_some());
+        assert!(rerun.ttft.is_some());
     }
 
     #[test]

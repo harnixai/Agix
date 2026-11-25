@@ -1,15 +1,17 @@
 //! 会话日志：`session.history` / `appendEntry` / `entries` / `export` / `import`；
-//! 录像：`session.calls` / `call` / `callBlob`；内容搜索：`session.search`。
+//! 录像：`session.calls` / `call` / `callBlob` / `rerunCall`；内容搜索：`session.search`。
 
 use super::*;
 use crate::rpc::methods::history::{
     AppendEntryParams, CallBlobParams, CallParams, CallsParams, EntriesParams, ExportParams,
-    HistoryParams, ImportParams, SearchParams,
+    HistoryParams, ImportParams, RerunCallParams, SearchParams, SystemEditParam,
 };
 use crate::session_pool::api::{
-    CallBlob, CallDetail, CallList, EntryList, EntryView, ExportSummary, HistoryPage,
-    ImportSummary, SearchRequest, SearchResult,
+    BlockSelector, CallBlob, CallDetail, CallList, EntryList, EntryView, ExportSummary,
+    HistoryPage, ImportSummary, RerunEdits, RerunRequest, RerunResult, SearchRequest, SearchResult,
+    SystemEdit,
 };
+use tokio_util::sync::CancellationToken;
 
 rpc_methods! {
     "session.history" => history(HistoryParams) -> HistoryPage;
@@ -20,6 +22,7 @@ rpc_methods! {
     "session.calls" => calls(CallsParams) -> CallList;
     "session.call" => call(CallParams) -> CallDetail;
     "session.callBlob" => call_blob(CallBlobParams) -> CallBlob;
+    "session.rerunCall" => rerun_call(RerunCallParams) -> RerunResult;
     "session.search" => search(SearchParams) -> SearchResult;
 }
 
@@ -141,6 +144,63 @@ async fn call_blob(
     s.pool
         .session_call_blob(&params.session_id, &params.blob)
         .await
+}
+
+async fn rerun_call(
+    s: &DaemonServer,
+    cx: &Call,
+    params: RerunCallParams,
+) -> Result<RerunResult, PoolError> {
+    let request = rerun_request(params)?;
+    let cancel = CancellationToken::new();
+    let running = s.pool.rerun_call(request, cancel.clone());
+    tokio::pin!(running);
+    tokio::select! {
+        result = &mut running => result,
+        _ = cx.client.closed() => {
+            cancel.cancel();
+            running.await
+        }
+    }
+}
+
+fn rerun_request(params: RerunCallParams) -> Result<RerunRequest, PoolError> {
+    let edits = params.edits.unwrap_or_default();
+    let system = edits
+        .system
+        .into_iter()
+        .enumerate()
+        .map(|(at, edit)| system_edit(at, edit))
+        .collect::<Result<_, _>>()?;
+    Ok(RerunRequest {
+        session_id: params.session_id,
+        index: clamp(params.index, u64::MAX),
+        generation: params.generation,
+        edits: RerunEdits {
+            system,
+            drop_messages: edits
+                .drop_messages
+                .into_iter()
+                .map(|n| clamp(n, u64::MAX))
+                .collect(),
+        },
+        provider: params.provider,
+        model: params.model,
+    })
+}
+
+fn system_edit(at: usize, edit: SystemEditParam) -> Result<SystemEdit, PoolError> {
+    let refuse = |why: &str| PoolError::InvalidRequest(format!("edits.system[{at}]: {why}"));
+    let block = match (edit.index, edit.source) {
+        (Some(index), None) => BlockSelector::Index(clamp(index, u64::MAX)),
+        (None, Some(source)) => BlockSelector::Source(source),
+        (Some(_), Some(_)) => return Err(refuse("give `index` or `source`, not both")),
+        (None, None) => return Err(refuse("give `index` or `source`")),
+    };
+    let text = edit.text.ok_or_else(|| {
+        refuse("`text` is required: a string replaces the block, null removes it")
+    })?;
+    Ok(SystemEdit { block, text })
 }
 
 async fn search(

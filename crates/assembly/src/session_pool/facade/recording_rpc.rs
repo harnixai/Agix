@@ -96,7 +96,7 @@ impl SessionPool {
     /// when the session records nothing or has written nothing yet. `read`
     /// is told whether the session is in memory, where a call without an end
     /// is still streaming rather than cut off.
-    async fn read_recording<T: Send + 'static>(
+    pub(super) async fn read_recording<T: Send + 'static>(
         &self,
         session_id: &str,
         read: impl FnOnce(&Opened, bool) -> Result<T, PoolError> + Send + 'static,
@@ -134,7 +134,7 @@ impl SessionPool {
     }
 }
 
-fn expect_generation(opened: &Opened, expected: Option<u64>) -> Result<(), PoolError> {
+pub(super) fn expect_generation(opened: &Opened, expected: Option<u64>) -> Result<(), PoolError> {
     match expected {
         Some(expected) if expected != opened.generation() => Err(PoolError::RecordingRestarted {
             generation: opened.generation(),
@@ -143,6 +143,6 @@ fn expect_generation(opened: &Opened, expected: Option<u64>) -> Result<(), PoolE
     }
 }
 
-fn not_recorded(session_id: &str) -> PoolError {
+pub(super) fn not_recorded(session_id: &str) -> PoolError {
     PoolError::InvalidRequest(format!("session `{session_id}` has no recording"))
 }

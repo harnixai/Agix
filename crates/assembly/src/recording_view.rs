@@ -1,7 +1,7 @@
 //! 录像到协议形状的投影：`session.calls` 的摘要行、`session.call` 的全文、
-//! `session.callBlob` 的引用解析。录像的行格式与 blob 存储是 telemetry 的内部格式，
-//! 宿主见到的只有这里产出的 `api::calls` 类型；投影是协议契约，由同目录的黄金用例钉住。
-//! 这里全是同步磁盘读，调用方放到阻塞线程上跑。
+//! `session.callBlob` 的引用解析，以及 `session.rerunCall` 的改写与差异（`rerun`）。
+//! 录像的行格式与 blob 存储是 telemetry 的内部格式，宿主见到的只有这里产出的 `api` 类型；
+//! 投影是协议契约，由同目录的黄金用例钉住。磁盘读全是同步的，调用方放到阻塞线程上跑。
 
 use crate::session_pool::api::{
     BlobRef, CallBlob, CallDetail, CallError, CallInput, CallOutput, CallPart, CallRequest,
@@ -100,7 +100,7 @@ impl Opened {
         results: &mut ResultFlags<'_>,
     ) -> CallSummary {
         let request = &call.request;
-        let response = Response::of(call);
+        let response = Response::of(&call.response);
         let flags = match follow_up {
             Some(next) if status == CallStatus::Ok && !response.tool_uses.is_empty() => results
                 .of(next)
@@ -188,7 +188,7 @@ impl Opened {
         let call = self.recording.calls.get(index)?;
         let request = &call.request;
         let (system, tools, messages) = self.request_parts(request);
-        let response = Response::of(call);
+        let response = Response::of(&call.response);
         Some(CallDetail {
             session_id: session_id.to_string(),
             index,
@@ -559,13 +559,13 @@ struct Response {
 }
 
 impl Response {
-    fn of(call: &RecordedCall) -> Self {
+    fn of(events: &[ModelEvent]) -> Self {
         let mut out = Self {
             text: String::new(),
             thinking_chars: 0,
             tool_uses: Vec::new(),
         };
-        for event in &call.response {
+        for event in events {
             match event {
                 ModelEvent::TextDelta { text } => out.text.push_str(text),
                 ModelEvent::ThinkingDelta { text } => out.thinking_chars += text.chars().count(),
@@ -604,13 +604,16 @@ fn status_of(call: &RecordedCall, writing: bool) -> CallStatus {
 }
 
 fn usage_of(call: &RecordedCall) -> Option<CallUsage> {
-    let usage: Usage = call.end.as_ref()?.usage?;
-    Some(CallUsage {
+    call.end.as_ref()?.usage.map(call_usage)
+}
+
+fn call_usage(usage: Usage) -> CallUsage {
+    CallUsage {
         input_tokens: usage.input_tokens.into(),
         output_tokens: usage.output_tokens.into(),
         cache_creation_input_tokens: usage.cache_creation_input_tokens.into(),
         cache_read_input_tokens: usage.cache_read_input_tokens.into(),
-    })
+    }
 }
 
 fn ttft_of(call: &RecordedCall) -> Option<u64> {
@@ -622,7 +625,11 @@ fn error_of(call: &RecordedCall) -> Option<CallError> {
     let Outcome::Error { error } = &call.end.as_ref()?.outcome else {
         return None;
     };
-    Some(CallError {
+    Some(call_error(error))
+}
+
+fn call_error(error: &telemetry::recorder::format::RecordedError) -> CallError {
+    CallError {
         kind: serde_json::to_value(error.error)
             .ok()
             .and_then(|v| v.as_str().map(str::to_string))
@@ -630,7 +637,7 @@ fn error_of(call: &RecordedCall) -> Option<CallError> {
         message: error.message.clone(),
         http_status: error.http_status,
         retry_after_ms: error.retry_after_ms,
-    })
+    }
 }
 
 fn rfc3339(ms: u64) -> String {
@@ -642,6 +649,9 @@ fn rfc3339(ms: u64) -> String {
         })
         .unwrap_or_default()
 }
+
+mod rerun;
+pub(crate) use rerun::{apply_edits, end_usage, rerun_result, RerunOf};
 
 #[cfg(test)]
 mod tests;

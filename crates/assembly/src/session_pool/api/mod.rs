@@ -12,6 +12,7 @@ mod mcp;
 mod options;
 mod plugin;
 mod plugin_call;
+mod rerun;
 mod rewind;
 mod scene;
 mod session;
@@ -56,6 +57,10 @@ pub use plugin::{
 };
 pub use plugin_call::{
     PluginCall, PluginCallError, PluginCallResult, PluginCallTarget, PluginFunctionInfo,
+};
+pub use rerun::{
+    ArgDiffView, BlockSelector, RerunDiff, RerunEdits, RerunRequest, RerunResult, StopReasonDiff,
+    SystemEdit, TextDiff, ToolStepDiff, ToolStepStatus, ToolUsesDiff, UsageDiff,
 };
 pub use rewind::{
     CheckpointFile, CheckpointList, CheckpointTurn, InterruptedRewind, RewindCut, RewindOutcome,

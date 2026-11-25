@@ -262,6 +262,7 @@ pub const CAPABILITIES: &[&str] = &[
     "session_calls",
     "calls_digest",
     "calls_preview",
+    "session_rerun",
     "session_search",
     "session_skill_dirs",
     "session_settings",

@@ -328,7 +328,7 @@ MCP server 的配置字段(`command`、`args`、`env`、`url`、`headers`、认�
 
 | 键 | 缺省 | 作用域 | 未受信项目 | 改后 | 说明 |
 |---|---|---|---|---|---|
-| `recorder.mode` | 无(写 `recorder` 时必填) | 项目与场景 | 信任之后才生效 | 立即 | `record`、`replay`,或 `rerun`(把录下的请求重新发给真实 provider) |
+| `recorder.mode` | 无(写 `recorder` 时必填) | 项目与场景 | 信任之后才生效 | 立即 | `record`、`replay`,或 `rerun`(会话本身直连 provider,不录不放;把录像里的一次调用改了重发用 `session.rerunCall`) |
 | `recorder.root` | 无(写 `recorder` 时必填) | 项目与场景 | 信任之后才生效 | 立即 | 录制放在哪;每份录制是它下面一个自成一体的目录,删掉目录即作废 |
 | `recorder.name` | 无(用会话 id) | 项目与场景 | 信任之后才生效 | 立即 | 这份录制在 `root` 下的目录名;测试用它指定名字以便重放时找到 |
 | `recorder.on_divergence` | `strict` | 项目与场景 | 信任之后才生效 | 立即 | 重放时实时请求与录下的不一致怎么办:`strict` 报错并指出差异字段,`warn` 报告差异后照放录下的回答 |

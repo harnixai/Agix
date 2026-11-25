@@ -54,6 +54,7 @@ mod session_calls;
 mod session_limits;
 mod session_permission_mode;
 mod session_prompt;
+mod session_rerun;
 mod session_rewind;
 mod session_settings;
 mod settings_take_effect;

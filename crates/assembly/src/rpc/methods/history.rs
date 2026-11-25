@@ -1,6 +1,6 @@
 //! 会话日志方法（`session.history` / `appendEntry` / `entries` / `export` /
-//! `import`）、录像读取（`calls` / `call` / `callBlob`）与内容搜索（`search`）的
-//! params。
+//! `import`）、录像读取（`calls` / `call` / `callBlob`）、录像重跑（`rerunCall`）与内容
+//! 搜索（`search`）的 params。
 
 use super::session::ProjectRootParam;
 use crate::session_pool::api::ArchiveFormat;
@@ -88,6 +88,55 @@ pub struct CallBlobParams {
     pub session_id: String,
     /// A `blob` reference from `session.call`.
     pub blob: String,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct RerunCallParams {
+    pub session_id: String,
+    pub index: u64,
+    /// As `session.call`'s.
+    #[serde(default)]
+    pub generation: Option<u64>,
+    #[serde(default)]
+    pub edits: Option<RerunEditsParam>,
+    /// The provider to start at; the recorded call's when omitted.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// The model to ask for; the recorded call's when omitted.
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RerunEditsParam {
+    #[serde(default)]
+    pub system: Vec<SystemEditParam>,
+    /// Positions in the recorded call's `messages`.
+    #[serde(default)]
+    pub drop_messages: Vec<u64>,
+}
+
+/// One system block, by `index` or by `source` (exactly one of them).
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SystemEditParam {
+    #[serde(default)]
+    pub index: Option<u64>,
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Required: the block's new text, or `null` to remove the block.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Option<String>")]
+    pub text: Option<Option<String>>,
+}
+
+/// Tells a `null` apart from a field left out, which `#[serde(default)]`
+/// makes the outer `None`.
+fn present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]

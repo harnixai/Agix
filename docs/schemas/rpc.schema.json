@@ -81,6 +81,25 @@
       ],
       "type": "string"
     },
+    "ArgDiffView": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "live": true,
+        "recorded": {
+          "description": "Absent on the side whose call has no such key."
+        },
+        "same": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "same"
+      ],
+      "type": "object"
+    },
     "AskKind": {
       "oneOf": [
         {
@@ -6388,6 +6407,154 @@
       ],
       "type": "object"
     },
+    "RerunCallParams": {
+      "properties": {
+        "edits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RerunEditsParam"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation": {
+          "default": null,
+          "description": "As `session.call`'s.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "index": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model": {
+          "default": null,
+          "description": "The model to ask for; the recorded call's when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "default": null,
+          "description": "The provider to start at; the recorded call's when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "index"
+      ],
+      "type": "object"
+    },
+    "RerunDiff": {
+      "description": "The rerun's answer against the recorded one. Tool calls and the stop\nreason compare exactly; text only as the same or not.",
+      "properties": {
+        "same": {
+          "description": "Text, tool calls and stop reason all as recorded.",
+          "type": "boolean"
+        },
+        "stop_reason": {
+          "$ref": "#/$defs/StopReasonDiff"
+        },
+        "text": {
+          "$ref": "#/$defs/TextDiff"
+        },
+        "tool_uses": {
+          "$ref": "#/$defs/ToolUsesDiff"
+        },
+        "usage": {
+          "$ref": "#/$defs/UsageDiff"
+        }
+      },
+      "required": [
+        "same",
+        "text",
+        "tool_uses",
+        "stop_reason",
+        "usage"
+      ],
+      "type": "object"
+    },
+    "RerunEditsParam": {
+      "additionalProperties": false,
+      "properties": {
+        "drop_messages": {
+          "default": [],
+          "description": "Positions in the recorded call's `messages`.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "system": {
+          "items": {
+            "$ref": "#/$defs/SystemEditParam"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RerunResult": {
+      "properties": {
+        "diff": {
+          "$ref": "#/$defs/RerunDiff"
+        },
+        "generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "description": "The provider that served the rerun and the model it was sent with;\n`None` when no provider took the call.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "response": {
+          "$ref": "#/$defs/CallResponse"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "index",
+        "generation",
+        "response",
+        "diff"
+      ],
+      "type": "object"
+    },
     "RespondHookParams": {
       "additionalProperties": false,
       "description": "The answer to a `hook_call` frame: what a hook response may say, but\napproving, rewriting the input, ending the turn or asking to be run again.",
@@ -9091,6 +9258,29 @@
         }
       ]
     },
+    "StopReasonDiff": {
+      "properties": {
+        "live": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recorded": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "same": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "same"
+      ],
+      "type": "object"
+    },
     "Stopped": {
       "properties": {
         "stopped": {
@@ -9245,6 +9435,37 @@
         "origin",
         "text"
       ],
+      "type": "object"
+    },
+    "SystemEditParam": {
+      "additionalProperties": false,
+      "description": "One system block, by `index` or by `source` (exactly one of them).",
+      "properties": {
+        "index": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "default": null,
+          "description": "Required: the block's new text, or `null` to remove the block.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "SystemKind": {
@@ -9492,6 +9713,25 @@
       ],
       "type": "object"
     },
+    "TextDiff": {
+      "properties": {
+        "live": {
+          "type": "string"
+        },
+        "recorded": {
+          "type": "string"
+        },
+        "same": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "same",
+        "recorded",
+        "live"
+      ],
+      "type": "object"
+    },
     "ThinkingMode": {
       "description": "Model thinking/reasoning mode.",
       "oneOf": [
@@ -9610,6 +9850,45 @@
       ],
       "description": "`tool_result.content` 字段：string 或 ContentBlock 数组。\n\n`#[serde(untagged)]` 让 JSON `\"hello\"` 直接解到 Text 变体，`[…]` 解到 Blocks。"
     },
+    "ToolStepDiff": {
+      "properties": {
+        "args": {
+          "description": "Every argument key of either side; only for `args_differ`.",
+          "items": {
+            "$ref": "#/$defs/ArgDiffView"
+          },
+          "type": "array"
+        },
+        "live": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recorded": {
+          "description": "The tool called at this position; `None` on the side with fewer calls.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ToolStepStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "ToolStepStatus": {
+      "enum": [
+        "same",
+        "args_differ",
+        "name_differs"
+      ],
+      "type": "string"
+    },
     "ToolUseRef": {
       "properties": {
         "id": {
@@ -9656,6 +9935,25 @@
         "id",
         "name",
         "input"
+      ],
+      "type": "object"
+    },
+    "ToolUsesDiff": {
+      "properties": {
+        "same": {
+          "type": "boolean"
+        },
+        "steps": {
+          "description": "One per position in the longer of the two sequences of tool calls.",
+          "items": {
+            "$ref": "#/$defs/ToolStepDiff"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "same",
+        "steps"
       ],
       "type": "object"
     },
@@ -9896,6 +10194,31 @@
         "input_tokens",
         "output_tokens"
       ],
+      "type": "object"
+    },
+    "UsageDiff": {
+      "properties": {
+        "live": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CallUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recorded": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CallUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
       "type": "object"
     },
     "Vendor": {
@@ -10693,6 +11016,14 @@
       },
       "result": {
         "$ref": "#/$defs/ProgressReported"
+      }
+    },
+    "session.rerunCall": {
+      "params": {
+        "$ref": "#/$defs/RerunCallParams"
+      },
+      "result": {
+        "$ref": "#/$defs/RerunResult"
       }
     },
     "session.respondHook": {

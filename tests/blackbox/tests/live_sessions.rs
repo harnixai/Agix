@@ -5,8 +5,8 @@
 //! the summary lands) and renamed over RPC, exported and deleted with its
 //! sidechain, its goal paused, edited and cleared, resumed across a daemon
 //! restart that took a background task down, given attachments, a 200 KB
-//! message, Unicode everywhere, an empty message, and a turn of file edits
-//! rewound.
+//! message, Unicode everywhere, an empty message, a turn of file edits
+//! rewound, and a recorded call rerun with an edited system block.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -1175,6 +1175,92 @@ async fn a_host_rewinds_a_turn_that_edited_three_files() -> anyhow::Result<()> {
             .all(|c| !c.messages_contain(&marker)),
         "the model still saw the rewound turn"
     );
+    run.finish().await;
+    Ok(())
+}
+
+/// A recorded turn's first conversation call rerun with its first system block replaced: the real
+/// model answers from the edited prompt, and the answer comes back diffed against the recorded one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recorded_call_reruns_with_one_system_block_replaced() -> anyhow::Result<()> {
+    let mut run = LiveRun::builder("rerun-call").start().await?;
+    let dir = run.world.root().join("recordings");
+    std::fs::create_dir_all(&dir)?;
+    let session = run
+        .session_with(json!({ "options": {
+            "auto_name": false,
+            "recorder": { "mode": "record", "dir": dir.to_string_lossy() },
+        } }))
+        .await?;
+    run.turn(
+        &session,
+        "Reply with exactly the word ALPHA and nothing else.",
+    )
+    .await?;
+
+    let list = run.client.session_calls(&session, 0, None).await?;
+    let list = list
+        .result
+        .ok_or_else(|| anyhow::anyhow!("{:?}", list.error))?;
+    let index = list["calls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| c["purpose"].is_null())
+        .and_then(|c| c["index"].as_u64())
+        .ok_or_else(|| anyhow::anyhow!("no conversation call: {list}"))?;
+    let detail = run.client.session_call(&session, index).await?;
+    let detail = detail
+        .result
+        .ok_or_else(|| anyhow::anyhow!("{:?}", detail.error))?;
+    let block = detail["request"]["system"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .position(|b| b["role"] == "system")
+        .ok_or_else(|| anyhow::anyhow!("no system block: {detail}"))?;
+
+    let mark = format!("RERUN{}", nonce().to_uppercase());
+    let instruction = format!(
+        "You are a test fixture. Whatever the user writes, reply with exactly the word {mark} \
+         and nothing else."
+    );
+    let sent_before = run.provider.calls().len();
+    let response = run
+        .client
+        .call(
+            "session.rerunCall",
+            json!({ "session_id": session, "index": index,
+                    "edits": { "system": [ { "index": block, "text": instruction } ] } }),
+        )
+        .await?;
+    let result = response
+        .result
+        .ok_or_else(|| anyhow::anyhow!("{:?}", response.error))?;
+
+    let sent = run.provider.calls();
+    assert_eq!(sent.len(), sent_before + 1, "one request went out");
+    assert!(
+        sent.last().is_some_and(|r| r.system_contains(&mark)),
+        "the edit did not go out"
+    );
+    assert_eq!(result["response"]["status"], "ok", "{result}");
+    assert!(
+        result["response"]["text"]
+            .as_str()
+            .is_some_and(|t| t.contains(&mark)),
+        "{result}"
+    );
+    assert!(result["provider"].is_string(), "{result}");
+    let diff = &result["diff"];
+    assert_eq!(diff["text"]["same"], false, "{result}");
+    assert!(
+        diff["text"]["recorded"]
+            .as_str()
+            .is_some_and(|t| t.contains("ALPHA")),
+        "{result}"
+    );
+    assert!(diff["usage"]["live"].is_object(), "{result}");
     run.finish().await;
     Ok(())
 }

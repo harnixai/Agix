@@ -19,6 +19,7 @@ mod plugin_call;
 mod plugins;
 pub(super) mod providers;
 mod recording_rpc;
+mod rerun_rpc;
 mod resume;
 mod rewind;
 mod scenes;

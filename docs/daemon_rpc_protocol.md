@@ -870,6 +870,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `session_calls` | 有 `session.calls` / `session.call` / `session.callBlob`,经协议读会话的模型调用录像;录制的 `recorder` 随会话保存(§6.3) |
 | `calls_digest` | `session.calls` 的 `input.system[].digest` 与 `input.tools_digest`(§6.3) |
 | `calls_preview` | `session.calls` 的 `output.text_preview`、`output.tool_uses[].input_preview` 与 `result_is_error`(§6.3) |
+| `session_rerun` | 有 `session.rerunCall`:录像里的一次调用改过系统块或删过消息后重发给真实 provider,答新应答与差异,不写录像、不改会话(§6.3) |
 | `session_search` | 有 `session.search`,按内容找会话(§6.3) |
 | `session_skill_dirs` | `options.skill_dirs` 与 `session.setSkillDirs`:会话自带的宿主 skill 目录;`session.get` 带 `skill_dirs`,`commands.list` 接受 `session_id`(§6.3) |
 | `session_settings` | `options.settings`:按会话给的设置覆盖层(形状同 settings.json,只收按会话决定的键,推理强度、思考开关与提示词都在这里),缺省只能收紧,放宽的被夹住并报在 `session.create` 的 `clamped_options`;`session.setModel` 的 `effort` / `thinking` 与 `session.setPrompt` 改的是同一层,被夹住的报在各自结果的 `clamped_options`;一轮的 token 预算与 `turn_complete.usage` 含子 Agent 与旁路调用,带 `usage_breakdown`(§4.8、§6.3、§7.2) |
@@ -1469,7 +1470,8 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用(`run_tur
     { "field": "settings.hooks", "error": "it is decided for each project and scene, not each session: set it in the settings, not in a session's options" } ] } }
 ```
 
-`recorder.mode` 取 `record` / `replay` / `rerun`。`dir` 是录像根目录,必须是绝对路径;省略时用
+`recorder.mode` 取 `record` / `replay` / `rerun`(`rerun` 的会话自己直连 provider,不录也不放;把录像里的
+一次调用改了重发用 `session.rerunCall`)。`dir` 是录像根目录,必须是绝对路径;省略时用
 daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名,必须是单独一段路径(不含 `/`、
 不是 `.` / `..`);录制时省略就用会话 id。两项不合要求都进 `invalid_options`(`field` 为
 `recorder.dir` / `recorder.name`)。
@@ -2397,6 +2399,73 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 `value` 就是 `session.call` 本该内联的那一块,形状相同。`blob` 只认 `session.call` 给出的形式,
 别的(包括带路径分隔符的)→ `INVALID_PARAMS`;录像里没有这一块、或者它大到一帧装不下(15 MiB 以上)
 → `INVALID_PARAMS`。
+
+#### `session.rerunCall`
+
+把录像里的一次调用重新发给真实 provider:取第 `index` 次调用发出去的请求,先套上 `edits`,
+再发,答新的应答与它和录下那次的差异。用来调提示词:改一块、重发、看差异。
+
+```jsonc
+// → params
+{ "session_id": "…", "index": 0,
+  "generation": 1763200000000,                 // 可选,同 session.call
+  "edits": {                                   // 可选
+    "system": [ { "index": 1, "text": "…" },   // 按位置换掉这一块的文字
+                { "source": "memory.session", "text": null } ],  // 按块名;null 删掉这一块
+    "drop_messages": [0, 1] },                 // 删掉这几条消息
+  "provider": "…",                             // 可选,缺省是录下那次调用的 provider
+  "model": "…" }                               // 可选,缺省是录下那次调用的模型
+// ← result
+{ "session_id": "…", "index": 0, "generation": 1763200000000,
+  "provider": "anthropic", "model": "…",       // 实际接下这次调用的;没有 provider 接下时为 null
+  "response": { "status": "ok", "text": "…", "thinking_chars": 0, "tool_uses": [ ],
+                "stop_reason": "end_turn", "usage": { }, "ttft_ms": 800, "duration_ms": 4200, "error": null },
+  "diff": { "same": false,
+            "text": { "same": false, "recorded": "…", "live": "…" },
+            "tool_uses": { "same": false, "steps": [
+                { "status": "same", "recorded": "Read", "live": "Read" },
+                { "status": "args_differ", "recorded": "Write", "live": "Write",
+                  "args": [ { "key": "content", "same": false, "recorded": "…", "live": "…" },
+                            { "key": "path", "same": true, "recorded": "a.c", "live": "a.c" } ] },
+                { "status": "name_differs", "recorded": "Bash", "live": null } ] },
+            "stop_reason": { "same": false, "recorded": "tool_use", "live": "end_turn" },
+            "usage": { "recorded": { }, "live": { } } } }
+```
+
+**取哪一次。** `index` 与 `session.call` 的同一坐标,会话就是 `session.call` 读的那份录像(会话不在
+内存时从日志读它记下的 `recorder`,不建引擎、不把会话带回内存)。一个会话的录像目录里只有一代:
+`calls.jsonl` 在每次运行的第一次调用时重写(见 `session.create` 的 `recorder`),`generation` 就是
+这一代开录的时刻(`session.calls` 的 `recording.generation`)。给了 `generation` 而录像已经重写过 →
+`INVALID_PARAMS`,`data.generation` 是当前的;不给就用现在这一代。`session_id` 只按会话查,不当路径用,
+格式不对 → `INVALID_PARAMS`。
+
+**改动。** `edits.system` 每项用 `index`(系统块在这次调用里的位置,即 `session.call` 的
+`request.system` 的下标)或 `source`(块名,即那里的 `source`)指定一块,两者只给一个;`text` 必须给,
+是字符串就换掉这一块的文字(角色、缓存标记照旧),是 `null` 就删掉这一块。`drop_messages` 是
+`request.messages` 的下标。所有位置都按录下的请求算,先全部解析再一起生效,所以删掉一块不会让后面
+的 `index` 错位。以下都是 `INVALID_PARAMS`,什么都不发:`index` 越界、没有这个名字的块、几块同名
+(改用 `index`)、同时给 `index` 与 `source` 或都不给、没给 `text`、两项改同一块;消息下标越界、重复,
+或把消息删光;`edits` 里不认识的字段。删消息会不会留下没有应答的工具调用,由宿主负责;provider
+拒收时见下。
+
+**怎么发。** 走会话所在(项目, 场景)对的 provider 路由:从 `provider` 起按 `model.order` 换,模型
+按 `model` 在各 provider 上的对应档位取,与会话自己的调用一样受各 provider 的 `quota` 约束、计入
+配额。`provider` 没有定义、`model` 不是它收的模型 → `INVALID_PARAMS`;录下那次的 provider 现在已经
+没有定义时同样,这时显式给 `provider`。别的请求参数(`max_tokens`、思考、推理强度、工具目录)照录下的。
+
+**不改什么。** 不写录像(录像目录下的文件逐字节不变),不改会话的日志、上下文与状态,不计入会话
+与它这一轮的花费(`session.get` 的 `usage`、token 预算);这次的用量只在结果里:`response.usage`,
+以及 `diff.usage` 里录下那次与这次的对照。会话正在跑一轮时也可以调。
+
+**结果。** `response` 与 `session.call` 的 `response` 同形,`status` 是 `ok`、`error`(没有 provider
+接下、provider 拒收或中途出错,`error` 写明)或 `cancelled`(连接断开时取消)。不是 `ok` 时 `diff` 比的是
+已经收到的那部分。`diff.tool_uses.steps` 按位置一一对照两边的工具调用:`same` 名字与参数都相同;
+`args_differ` 同名而参数不同,`args` 列出两边全部参数键(某一边没有这个键时省略那一边的值);
+`name_differs` 换了工具,或一边在这个位置没有调用(那一边为 `null`)。工具名、参数与 `stop_reason`
+逐字比较;`text` 只说相同与否,两边原文都给。`diff.same` 是三者都相同。
+
+会话没有录像 → `INVALID_PARAMS`;`index` 超出录像 → `INVALID_PARAMS`;录像里这次调用的某一块已经不在
+(`session.call` 里是 `missing`)→ `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`。
 
 #### `session.search`
 

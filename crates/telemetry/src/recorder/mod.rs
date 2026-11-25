@@ -567,7 +567,8 @@ impl Model for RecorderModel {
             }
             // Rerun drives the provider from a recording rather than from a
             // live session, so it does not sit on this path — see
-            // [`rerun::rerun_one`]. A session that somehow runs under this mode
+            // [`rerun::rerun_one`], which the daemon's `session.rerunCall`
+            // drives. A session that somehow runs under this mode
             // just talks to the model, which is the only honest thing to do
             // here: intercepting would mean answering a live request with a
             // response recorded for some other request.
