@@ -361,9 +361,11 @@ strategy?}`,`trigger` 是 `threshold`、`manual`(`/compact`、`session.compact`)
 
 - `session.startAgent` 收可选的 `token_budget`(口径同 `turn.token_budget`;`0` 以 `INVALID_PARAMS` 拒绝,不登记任务)。
   花费照常计入会话,下一次调用受链上剩得最少的那个限制,所以只能比会话的余额紧。
-- 用完时子 Agent 在下一次调用前停下,`task_finished.task`(与 `session.tasks`)是 `status: "failed"`、
-  `error: "budget_exceeded: the task's token budget of N is used up"`;停之前说过的话留在任务输出里。父会话与别的子 Agent
-  不受影响。
+- 用完(或剩下的放不下下一次调用)时子 Agent 在下一次调用前停下,`task_finished.task`(与 `session.tasks`)是
+  `status: "failed"`、`error: "budget_exceeded: <那一轮的 turn_complete.message>"`,如
+  `budget_exceeded: the task's token budget of N is used up` 或 `… has L left, too little for the next call's input of
+  about I tokens and its reply`;是谁的写在开头:`the task's`、`this session's`、`this turn's`。停之前说过的话留在任务输出里。
+  父会话与别的子 Agent 不受影响。模型用 `Agent` 工具起的子 Agent 仍以 `done` 结束,输出末尾的说明同样写明是谁的预算。
 - **行为变化**:宿主起的子 Agent 被任何预算截停(包括会话的预算)都以 `failed` 结束,`error` 写明是谁的预算;0.4.3 里被
   会话预算截停的是 `done`。模型用 `Agent` 工具起的子 Agent 不变。
 
@@ -418,6 +420,8 @@ hook,询问却发不到任何人、也答不回去。现在宿主登记的 hook 
   `McpElicitationPrompt` 多 `agent_session_id: Option<String>`。对它们穷举 `match` 或按字段构造的要补。
 - `base::interface::budget_policy::Scope::Task` 与 `SpendNode::task(limit, session)`;`SessionPool::start_agent` 多第三个
   参数 `token_budget: Option<u64>`。
+- `DelegateEnd::CutShort` 多第二个字段:`CutShort(&'static str, Option<String>)`,是那一轮的停止原因;匹配 `CutShort(_)` 的改成
+  `CutShort(..)`。
 - `ptc::PluginCallTool::time_limit()` 是宿主调用的上限(600 秒),新增 `default_time()`(120 秒)。
 - 提示词:`settings::PromptAppend` / `AppendBlock`(`agix::contracts::prompt` 导出);`PromptChange.append` 是
   `Option<Option<PromptAppend>>`,`PromptChoice.append` 是 `Option<PromptAppend>`;自己实现装配器的,

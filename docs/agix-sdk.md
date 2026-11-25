@@ -844,7 +844,7 @@ engine.shutdown().await;
 
 - **0.4.4**（相对 0.4.3；协议版本 5；详见 `upgrading-0.4.md`「0.4.4」）
   - **事件。** `AgentEvent` 多 `CompactStarted { turn_id, trigger: CompactCause, tokens_before, strategy }` 与 `CompactEnded { turn_id, outcome: CompactOutcome, reason }`（压缩的首尾两帧）；`PermissionPrompt`、`QuestionPrompt`、`McpElicitationPrompt` 多 `agent_session_id: Option<String>`。对它们穷举或按字段构造的要补。
-  - **子 Agent 的预算。** `Scope::Task` 与 `SpendNode::task(limit, session)`；`SessionPool::start_agent` 多第三个参数 `token_budget: Option<u64>`。
+  - **子 Agent 的预算。** `Scope::Task` 与 `SpendNode::task(limit, session)`；`SessionPool::start_agent` 多第三个参数 `token_budget: Option<u64>`。`DelegateEnd::CutShort` 多第二个字段 `Option<String>`（那一轮的停止原因），即 `CutShort(&'static str, Option<String>)`。
   - **插件函数的时限。** `ptc::PluginCallTool::time_limit()` 是宿主调用的上限（600 秒），新增 `default_time()`（120 秒）。
   - **提示词分块。** `settings::PromptAppend` / `AppendBlock`（`agix::contracts::prompt` 导出）；`PromptChange.append` 是 `Option<Option<PromptAppend>>`，`PromptChoice.append` 是 `Option<PromptAppend>`；`AssemblyRequest.prompt_append` 与 `managed_append` 改为拼好的 `&[PromptBlock]`；`BlockOrigin::Host`；`SystemPromptSettings` 删掉 `append` 与 `override_text`。
   - **重跑录像。** `SessionPool::rerun_call`（即 `session.rerunCall`）；`telemetry::recorder::rerun::rerun_one` 总是返回结果（收到的事件、实际的 provider、错误、时间与差异），新增 `request_in`。
