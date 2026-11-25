@@ -431,6 +431,33 @@ hook,询问却发不到任何人、也答不回去。现在宿主登记的 hook 
 `session.list {parent_session_id}` 的每一条带真的 `message_count`、`created_at`(第一行的写入时刻)与
 `last_active`(最后一行的),从那个子会话的日志读出;其余列表照旧不读日志、这几个字段为空。
 
+### 宿主不经会话调 MCP 工具(#111,`mcp_call`,`Agix-v0.4.4-2026112501` 起)
+
+三个新方法,用 Agix 已有的 MCP 连接、设置、凭据、MCP 策略与项目信任,不开会话:
+
+- `mcp.tools {server?, scene?, project_root? | session_id?}`:每台 server 的状态与工具(`input_schema`、
+  `output_schema`、`annotations`、规则与 hook 认的 `tool_name` 即 `mcp__<server>__<tool>`)。带 `session_id` 时
+  正好列出那个会话调得了的。
+- `mcp.callTool {server, tool, arguments?, scene?/project_root? | session_id?, timeout_ms?, run_id?}`:
+  `{ok: true, is_error, content, text, structured?}`,`content` 是 MCP `CallToolResult.content` **原样**(camelCase,
+  不转成 Agix 的块),工具自己报错是 `is_error: true` 仍 `ok: true`;没有结果时 `{ok: false, reached_server, error:
+  {code}}`,`code` 与 `plugin.call` 同一套(`refused`、`answered_by_middleware`、`timeout`、`cancelled`、`failed`,
+  开放集合)。`reached_server: true` 时 server 可能已经照做了,不幂等的工具不要盲目重调。时限缺省 120 秒、
+  至多 600 秒,server 自己的 `tool_timeout_ms` 更短时以它为准。
+- `mcp.cancel {run_id}`:与 `plugin.cancel` 共用这条连接上的 `run_id`,两者都能取消任何一种宿主调用。
+
+规矩与会话里调这个工具一样:deny 规则(`mcp__feishu__x`、`mcp__feishu`)、plan 模式、managed 的只能本人答的
+ask 拦下(`refused`),会话要问的视同宿主批准;`PreToolUse` / `PostToolUse`、`daemon.setHooks` 的 hook 照问
+(不带会话时 `hook_call` 带 `mcp_call: {server, tool, run_id?}`);未受信项目的 hook 不跑、自己的 server 不启动。
+场景须是现在建得了会话的。server 发起的提问一律答 `cancel`。每次调用都问到 server,不用工具输出缓存。
+server 不可调用时是新错误码 `MCP_SERVER_UNAVAILABLE`(-32029),`data: {server, state, error?}`,`state` 取
+`mcp.status` 的状态(开放集合)。每次有结果的调用向 `daemon.subscribeEvents` 发 `mcp_tool_called`(带
+`outcome`、`reached_server`、`duration_ms`,从不带参数与结果)。
+
+**`plugin.call` 的一处变化**:是不是中间件作答改用与 `mcp.callTool` 同一套判定(这一次调用里 `tool.around`
+交回的、`tool.result` 是否改了文本、图片或错误标记),判得更准;以前漏判、被改写过的结果照样当函数结果交回的,
+现在是 `answered_by_middleware`。
+
 ### 嵌入(`agix` crate)
 
 - `AgentEvent` 多 `CompactStarted { turn_id, trigger: CompactCause, tokens_before, strategy }` 与
@@ -455,3 +482,9 @@ hook,询问却发不到任何人、也答不回去。现在宿主登记的 hook 
   AgentEvent)` 与 `agix::session::PluginCallOrigin { function, run_id }`;`runtime::agent::Agent::serve_host_answers()`;
   `SessionPool::respond_hook` / `respond_tool_call` / `report_tool_progress` 在调用进行时也认临时会话 id。
 - `SessionPool::shutdown_session` 返回 `Result<(), PoolError>`(以前是删掉的侧链数),不再删侧链。
+- #111:`HostToolRunner` 多一个必须实现的 `tool(name) -> Option<Arc<dyn Tool>>`,`run` 改为返回
+  `HostCallOutcome { outcome, by_middleware, stopped }`;`SessionEvent::FromPluginCall` 改名 `FromHostCall(Arc<HostCallOrigin>,
+  AgentEvent)`,`HostCallOrigin { Plugin, Mcp }` 与 `McpCallOrigin` 由 `agix` 导出;`mcp` crate 的 `McpToolMeta.output_schema`、
+  `McpToolHints.open_world`、`McpCallResult.raw_content` 是新字段(按字段构造的要补),`McpManager::tool_adapters()` 返回
+  `Vec<Arc<dyn Tool>>`;新增 `SessionPool::mcp_tools` / `call_mcp_tool`、`PoolError::McpServerUnavailable`、
+  `DaemonEvent::McpToolCalled`。
