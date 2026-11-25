@@ -849,6 +849,7 @@ engine.shutdown().await;
   - **提示词分块。** `settings::PromptAppend` / `AppendBlock`（`agix::contracts::prompt` 导出）；`PromptChange.append` 是 `Option<Option<PromptAppend>>`，`PromptChoice.append` 是 `Option<PromptAppend>`；`AssemblyRequest.prompt_append` 与 `managed_append` 改为拼好的 `&[PromptBlock]`；`BlockOrigin::Host` 与 `BlockOrigin::ConfigEntry { config }`、`names::CONFIG_PREFIX`；`PromptAppend::blocks(by: Tier)`；`PromptSettings::append_blocks` 换成 `LoadedSettings::prompt_append_blocks` 与 `prompt_append_tier`；`SystemPromptSettings` 删掉 `append` 与 `override_text`。
   - **询问与压缩。** 构造 `ElicitRequest` 的补 `agent_session_id: None`；`Transcript::replace_messages_after_compact` 改为同步，写盘由 `write_compact_marker().await` 做。
   - **重跑录像。** `SessionPool::rerun_call`（即 `session.rerunCall`）；`telemetry::recorder::rerun::rerun_one` 总是返回结果（收到的事件、实际的 provider、错误、时间与差异），新增 `request_in`。
+  - **关闭不删侧链（#110）。** `SessionPool::shutdown_session` 返回 `Result<(), PoolError>`，只把会话移出内存；级联删除只在 `delete_session`。
   - **不带会话的插件调用问 hook。** `PluginCall.run_id: Option<String>`（`PluginCall::new` 给 `None`）；`SessionEvent::FromPluginCall(Arc<PluginCallOrigin>, AgentEvent)` 与 `agix::session::PluginCallOrigin { function, run_id }`；`Agent::serve_host_answers()`；`respond_hook` / `respond_tool_call` / `report_tool_progress` 在调用进行时也认临时会话 id。
 - **0.4.3**（相对 0.4.2；协议版本 5）
   - **agent 类型的检查。** `base::interface::delegate::Delegator` 多一个有缺省实现的 `check_agent_type(name) -> Result<(), DelegateError>`，包装别的 `Delegator` 的要转发它。

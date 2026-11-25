@@ -109,8 +109,8 @@ impl SessionPool {
     /// so a call made meanwhile finds no provider and ends at once.
     ///
     /// That is all a disconnect means: the turn keeps running, because
-    /// another connection may be watching and a teardown would cascade into
-    /// deleting the session's sidechain transcripts.
+    /// another connection may be watching and a teardown would cut its turn
+    /// and its running sub-agents short.
     pub async fn drop_watcher(&self, watcher: WatcherId) {
         let host = base::interface::host_call::HostId(watcher.0);
         self.factory.hosts().remove(host);

@@ -534,13 +534,14 @@ impl SessionPool {
             let sid_str = sid.to_string();
             let active = active_ids.contains(&sid_str);
             let (facts, resumable) = self.session_facts_and_resumable(&sid_str).await;
+            let read = read_of(store.as_ref(), sid).await;
             out.push(SessionInfo {
                 session_id: sid_str,
                 name: stats.title,
                 preview: None,
-                message_count: 0,
-                created_at: String::new(),
-                last_active: String::new(),
+                message_count: read.message_count,
+                created_at: read.created_at,
+                last_active: read.last_active,
                 status: if active {
                     SessionStatus::Active
                 } else {
@@ -626,4 +627,32 @@ pub(super) fn effective_settings_json(settings: &LoadedSettings) -> serde_json::
         );
     }
     value
+}
+
+/// A child's message count and first and last write, read off its log: a
+/// parent's children are few, so `session.list {parent_session_id}` reads
+/// them where the full listing leaves these fields empty.
+#[derive(Default)]
+struct ChildRead {
+    message_count: u32,
+    created_at: String,
+    last_active: String,
+}
+
+async fn read_of(
+    store: &dyn history::store::HistoryStore,
+    sid: base::session::SessionId,
+) -> ChildRead {
+    let Ok(entries) = store.load(sid).await else {
+        return ChildRead::default();
+    };
+    let stamp = |e: Option<&history::entry::EnvelopedEntry>| e.map(|e| format_time(e.ts));
+    ChildRead {
+        message_count: history::transcript::project_messages_with(&entries, store.projection())
+            .len()
+            .try_into()
+            .unwrap_or(u32::MAX),
+        created_at: stamp(entries.first()).unwrap_or_default(),
+        last_active: stamp(entries.last()).unwrap_or_default(),
+    }
 }

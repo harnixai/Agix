@@ -74,6 +74,7 @@ pub struct SessionList {
 pub struct Closed {
     /// The session id, not a flag.
     pub closed: String,
+    /// Always 0: closing deletes nothing; `session.delete` does.
     pub sidechains_deleted: usize,
 }
 

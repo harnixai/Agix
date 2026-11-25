@@ -641,7 +641,7 @@ async fn listing_by_parent_reports_each_child_as_what_it_is() {
 }
 
 #[tokio::test]
-async fn session_close_cascades_deletes_its_sidechains() {
+async fn session_close_keeps_its_sidechains() {
     let (srv, _seen) =
         start_scripted_server(vec![text_round("a")], ask_settings(), Duration::ZERO).await;
     let parent = run_turn(&srv.sock, None, "root").await;
@@ -655,11 +655,23 @@ async fn session_close_cascades_deletes_its_sidechains() {
     )
     .await;
     assert_eq!(closed["result"]["closed"], parent);
-    assert_eq!(closed["result"]["sidechains_deleted"], 1, "{closed}");
+    assert_eq!(closed["result"]["sidechains_deleted"], 0, "{closed}");
 
     assert!(
-        srv.store.load(child).await.is_err(),
-        "the sidechain's transcript must be gone after the parent closes"
+        srv.store.load(child).await.is_ok(),
+        "a closed parent's sidechain stays on disk; only session.delete removes it"
+    );
+    let listed = rpc(
+        &srv.sock,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"session.list","params":{{"parent_session_id":"{parent}"}},"id":2}}"#
+        ),
+    )
+    .await;
+    assert_eq!(
+        listed["result"]["sessions"][0]["session_id"],
+        child.to_string(),
+        "{listed}"
     );
     assert!(
         srv.store

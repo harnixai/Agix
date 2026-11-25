@@ -421,6 +421,16 @@ hook,询问却发不到任何人、也答不回去。现在宿主登记的 hook 
 - 调用结束后临时会话 id 即失效,迟到的回答得到 `SESSION_NOT_FOUND`;临时会话不进会话列表。
 - 登记者在调用中途断开,或询问根本送不到时,立刻按 hook 的 `on_error` 了结(`block` 即拒绝、`allow` 即放行),不再等满时限。
 
+### `session.close` 不再删侧链(#110,`Agix-v0.4.4-2026112405` 起)
+
+`session.close` 只把会话移出内存、停下它的引擎,不再级联删除侧链。父会话 close 之后,宿主 `session.startAgent` 起的
+与模型 `Agent` 工具起的子 Agent 的侧链照样在磁盘上:`session.list {parent_session_id}` 列得出,`session.get` /
+`session.history` 读得到。要连侧链一起删用 `session.delete`(级联照旧)。`session.close` 结果里的
+`sidechains_deleted` 恒为 `0`。靠 `close` 清理磁盘的宿主改调 `delete`。
+
+`session.list {parent_session_id}` 的每一条带真的 `message_count`、`created_at`(第一行的写入时刻)与
+`last_active`(最后一行的),从那个子会话的日志读出;其余列表照旧不读日志、这几个字段为空。
+
 ### 嵌入(`agix` crate)
 
 - `AgentEvent` 多 `CompactStarted { turn_id, trigger: CompactCause, tokens_before, strategy }` 与
@@ -444,3 +454,4 @@ hook,询问却发不到任何人、也答不回去。现在宿主登记的 hook 
 - `PluginCall.run_id: Option<String>`(`PluginCall::new` 给 `None`,按字段构造的要补);`SessionEvent::FromPluginCall(Arc<PluginCallOrigin>,
   AgentEvent)` 与 `agix::session::PluginCallOrigin { function, run_id }`;`runtime::agent::Agent::serve_host_answers()`;
   `SessionPool::respond_hook` / `respond_tool_call` / `report_tool_progress` 在调用进行时也认临时会话 id。
+- `SessionPool::shutdown_session` 返回 `Result<(), PoolError>`(以前是删掉的侧链数),不再删侧链。

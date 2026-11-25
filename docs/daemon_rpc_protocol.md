@@ -204,7 +204,7 @@ socket_path}`)。它是单实例锁,不是发现文件,客户端不要读它,用
 | `session_kind` | 谁发起 | 默认是否出现在 `session.list` |
 |---|---|---|
 | `primary` | 客户端(`session.create` / `session.run_turn`) | 是 |
-| `sidechain` | 模型(`Agent` 工具 / 团队成员) | 否 |
+| `sidechain` | 模型(`Agent` 工具 / 团队成员)或宿主(`session.startAgent`) | 否 |
 
 两者存储与查询机制完全一致,差异有三:
 
@@ -218,8 +218,8 @@ socket_path}`)。它是单实例锁,不是发现文件,客户端不要读它,用
 
   | 触发 | 侧链 |
   |---|---|
-  | `session.close` | **删除** |
-  | `session.delete` | 删除(连同父 transcript) |
+  | `session.close` | **保留**(只回收运行体,父会话的 transcript 也保留) |
+  | `session.delete` | **删除**(连同父 transcript) |
   | LRU 驱逐 / 空闲超时 / `daemon.shutdown` | **保留**(只回收运行体) |
   | daemon 崩溃 | 遗留在磁盘上 |
 
@@ -229,7 +229,8 @@ socket_path}`)。它是单实例锁,不是发现文件,客户端不要读它,用
   级联删除只删 `session_kind` 为 `sidechain` 的子会话。`session.fork` 出来的会话也记着
   源会话作父,但它是 `primary`,不受上表影响(见 `session.fork`)。
 
-  实际含义:**"打开子 Agent 的会话查 history"只在父会话还没 close 时可用。**
+  所以父会话 close、被驱逐或 daemon 重启之后,`session.list {parent_session_id}` 仍列得出它的侧链,
+  `session.get` / `session.history` 仍读得到;只有 `session.delete` 父会话(或手工删文件)才让它们没了。
   父会话 close 之后,它自己的 transcript 里仍留有 `Agent` 工具的 `tool_use` 与
   `tool_result`(含子 Agent 的最终输出),丢掉的只是中间步骤。
 
@@ -1844,7 +1845,9 @@ summary 为 `did not answer within 5s`,`session.get` 不再等它。
 **未激活会话的摘要字段几乎全是空的**:`name` 为 `null`,`created_at` / `last_active`
 是**空字符串**,`message_count` 为 `0`。这是设计如此 —— 列表不为了填几个摘要字段去
 逐个读 transcript。活跃会话的 `created_at` / `last_active` 是真的,`name` 在场景开启
-自动命名且已经跑过一轮时才有值。
+自动命名且已经跑过一轮时才有值。给了 `parent_session_id` 时例外:一个父会话的子会话不多,
+每一条的 `message_count`、`created_at`(第一行的写入时刻)、`last_active`(最后一行的)都从它的日志
+读出来,是真值。
 
 `parent_session_id` 是**事后**查子 Agent 的路径:它扫的是磁盘上的 `Meta`,daemon
 重启后仍然可用。拿到子会话 id 后用普通 `session.history` 读内容 —— 侧链与主线共用
@@ -2611,7 +2614,7 @@ managed 层(§10)也没有能让它询问的东西,不会有任何 `prompt_type:
 随切点之前的行一起复制。录制的 `recorder` 去掉 `name` 再记一条:分叉录在自己的 id 下,不去重写源会话的录像。
 
 分叉记着源会话作 `parent_session_id`,但它是 `"session_kind":"primary"`,不是侧链:对源会话
-调 `session.close` 或 `session.delete` 不会删它。`session.list {parent_session_id}` 会把它和
+调 `session.delete` 不会删它(`session.close` 什么都不删)。`session.list {parent_session_id}` 会把它和
 源会话的侧链一起列出,`session_kind` 照实标成 `primary`。
 
 #### `session.export`
@@ -2778,12 +2781,13 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
 { "session_id": "…" }
 // ← result
 { "closed": "…",              // 注意:是 session_id 字符串,不是布尔
-  "sidechains_deleted": 0 }
+  "sidechains_deleted": 0 }     // 恒为 0:关闭不删任何会话
 ```
 
-销毁运行实体并释放资源。**这个会话自己的 transcript 保留**,之后仍可 resume ——
-但**磁盘上记着它作父会话的那些会话全部被删除**:侧链,以及从它分叉出去的会话
-(§3.3)。仍在跑的先取消再删;删除失败只写日志,不会让 `close` 失败。返回时这个会话
+销毁运行实体并释放资源。**这个会话自己的 transcript 保留**,之后仍可 resume;**它的侧链同样保留**
+(§3.3),`session.list {parent_session_id}` 事后仍列得出、`session.history` 仍读得到。要连侧链一起删用
+`session.delete`。这一轮里仍在跑的后台子 Agent 随父会话的引擎一起停下,已写下的部分留在它的侧链里。
+`sidechains_deleted` 恒为 `0`,只是为了不让读它的宿主少一个字段。返回时这个会话
 目标的每次变化都已记进日志,紧接着的 `session.goal` 从日志读到的就是关闭前的目标。
 
 这个会话正在跑的一轮被截断:它在内存里的订阅者(发起者除外)收到这一轮的终止帧
@@ -5119,8 +5123,8 @@ TCP / WebSocket 上,第一件事是 `call("daemon.auth", {token})`。
 // 8. 会话还开着时:查它派生过哪些子 Agent(走磁盘,daemon 重启也有效)
 → {"jsonrpc":"2.0","method":"session.list","id":6,"params":{"parent_session_id":"S1"}}
 ← {"jsonrpc":"2.0","id":6,"result":{"sessions":[
-   {"session_id":"S1c1","name":null,"preview":null,"message_count":0,
-    "created_at":"","last_active":"","status":"inactive",
+   {"session_id":"S1c1","name":null,"preview":null,"message_count":2,
+    "created_at":"2026-11-25T01:02:03Z","last_active":"2026-11-25T01:02:09Z","status":"inactive",
     "session_kind":"sidechain","parent_session_id":"S1","resumable":false}]}}
 
 // 9. 读那个子 Agent 的内容 —— 和主线会话同一个 API
@@ -5180,4 +5184,4 @@ TCP / WebSocket 上,第一件事是 `call("daemon.auth", {token})`。
 - [ ] 断线重连按 subscribe → history → 补帧的顺序,不颠倒(§5.6)
 - [ ] 权限提问超时后 UI 能显示"已拒绝",不会一直转圈(§10)
 - [ ] 实现了宿主工具的,只在自己声明过的会话里执行 `host_tool_call`,看到 `host_tool_call_resolved` 就撤下(§7.4)
-- [ ] 关闭对话前想清楚要不要保留子 Agent 侧链记录 —— `session.close` 会删掉它们(§3.3)
+- [ ] 要清掉子 Agent 侧链记录用 `session.delete`(级联删除);`session.close` 只释放运行体,什么都不删(§3.3)

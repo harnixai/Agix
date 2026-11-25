@@ -58,10 +58,10 @@ async fn list(s: &DaemonServer, _: &Call, p: ListParams) -> Result<SessionList, 
 }
 
 async fn close(s: &DaemonServer, _: &Call, p: SessionRef) -> Result<Closed, PoolError> {
-    let sidechains_deleted = s.pool.shutdown_session(&p.session_id).await?;
+    s.pool.shutdown_session(&p.session_id).await?;
     Ok(Closed {
         closed: p.session_id,
-        sidechains_deleted,
+        sidechains_deleted: 0,
     })
 }
 

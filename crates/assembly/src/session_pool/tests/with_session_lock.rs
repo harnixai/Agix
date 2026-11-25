@@ -52,7 +52,7 @@ async fn test_pool() -> (Arc<SessionPool>, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// `session.close`'s cascade delete and a concurrent
+/// `session.delete`'s cascade and a concurrent
 /// `session.resume(..., create_if_missing: true)` on the same sidechain id
 /// must not interleave. This drives many concurrent critical sections for
 /// the *same* id and asserts they never overlap.

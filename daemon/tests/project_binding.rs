@@ -185,7 +185,7 @@ async fn a_project_bound_sessions_transcript_lands_in_that_projects_directory() 
 }
 
 #[tokio::test]
-async fn closing_a_project_bound_parent_still_cascades_to_its_sidechains() {
+async fn deleting_a_project_bound_parent_still_cascades_to_its_sidechains() {
     let (srv, _seen) =
         start_scripted_server(vec![text_round("a")], ask_settings(), Duration::ZERO).await;
 
@@ -206,16 +206,16 @@ async fn closing_a_project_bound_parent_still_cascades_to_its_sidechains() {
     run_turn(&srv.sock, Some(&parent), "root").await;
     let child = inject_sidechain(&srv, &parent).await;
 
-    let closed = rpc(
+    let deleted = rpc(
         &srv.sock,
         &format!(
-            r#"{{"jsonrpc":"2.0","method":"session.close","params":{{"session_id":"{parent}"}},"id":2}}"#
+            r#"{{"jsonrpc":"2.0","method":"session.delete","params":{{"session_id":"{parent}"}},"id":2}}"#
         ),
     )
     .await;
     assert_eq!(
-        closed["result"]["sidechains_deleted"], 1,
-        "a sidechain is found in its parent's project, not the daemon's: {closed}"
+        deleted["result"]["sidechains_deleted"], 1,
+        "a sidechain is found in its parent's project, not the daemon's: {deleted}"
     );
     assert!(srv.store.load(child).await.is_err());
 

@@ -425,8 +425,7 @@ impl SessionPool {
         // The turn is over. A client that vanished mid-stream is not part of
         // this: the turn ran to completion and landed in the transcript, and
         // whoever comes back reads it there. Cancelling on a broken writer
-        // would cascade into deleting sidechain transcripts another tab is
-        // still watching.
+        // would cut short the sub-agents another tab is still watching.
         let next_round = self
             .goal_round_after(&sid, ticket.core.state(), &ended_with)
             .await;

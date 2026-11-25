@@ -1,4 +1,4 @@
-//! 会话收尾：按会话加锁、驱逐、停止、删除、带子会话的关闭，以及整池 `shutdown_all`。
+//! 会话收尾：按会话加锁、驱逐、停止、关闭（不删侧链）、带子会话的删除，以及整池 `shutdown_all`。
 
 use crate::session_pool::*;
 
@@ -13,13 +13,13 @@ impl SessionPool {
 
     /// `parent_session_id`'s **sidechains**, or `[]` if there's no history
     /// store or the scan itself fails — logged either way so
-    /// `session.close`/`.delete` reporting "0 sidechains" is distinguishable
+    /// `session.delete` reporting "0 sidechains" is distinguishable
     /// in the daemon log from "there genuinely were none" instead of silently
     /// looking the same as the empty case.
     ///
     /// Children are filtered by `session_kind`, not taken whole.
     /// `parent_session_id` records two different relationships: a sidechain,
-    /// which the parent spawned and which cannot outlive it, and a fork,
+    /// which the parent spawned and which is deleted with it, and a fork,
     /// which merely records where it was copied from. Cascading over the raw
     /// child list deletes the forks too, which is the opposite of what a fork
     /// is for.
@@ -34,7 +34,7 @@ impl SessionPool {
         // number of sessions this project has ever recorded (full
         // load-and-parse per file — see its doc comment); there's no cheap
         // index to check "does this session have sidechains" first, so
-        // every `session.close`/`.delete` pays this once regardless of
+        // every `session.delete` pays this once regardless of
         // whether the session actually has any. `delete_session` (this
         // function's other caller) shares this one scan rather than running
         // it twice.
@@ -133,34 +133,19 @@ impl SessionPool {
         self.specs.forget(session_id);
     }
 
-    /// `session.close` — destroys the runtime entity; the parent's
-    /// transcript stays on disk and remains resumable. This
-    /// **cascades**: every sidechain of this session (sub-agent / team
-    /// member) is deleted too — a closed parent has no path left to reach
-    /// them (`session.list {parent_session_id}` only makes sense while the
-    /// parent might still resume that context; once it's gone, so are they).
-    /// Returns how many sidechains were
-    /// actually deleted.
-    ///
-    /// The parent's own engine is not waited for: its transcript stays. A
-    /// sidechain still mid-run (background / team member) is stopped and
-    /// waited for, within [`AGENT_EXIT_GRACE`], before its transcript is
-    /// deleted; whatever its engine writes after that is refused by the
-    /// store. A delete that fails is logged — it never fails
-    /// `session.close` itself.
+    /// `session.close` — takes the session out of memory and stops its
+    /// engine; its transcript stays on disk and remains resumable, and so do
+    /// its sidechains, which `session.list {parent_session_id}` keeps finding
+    /// afterwards. Only `session.delete` removes them.
     ///
     /// Waits out a rebuild or resume of the same id in flight: either would
     /// otherwise put the session back in memory after this returned.
-    pub async fn shutdown_session(&self, session_id: &str) -> Result<usize, PoolError> {
+    pub async fn shutdown_session(&self, session_id: &str) -> Result<(), PoolError> {
         self.refuse_scene_mismatch(session_id).await?;
-        let children = self.fetch_child_sidechains(session_id).await;
-        Ok(self
-            .live
-            .with_session_lock(session_id, async {
-                self.take_out(session_id).await;
-                self.delete_sidechain_list(session_id, children).await
-            })
-            .await)
+        self.live
+            .with_session_lock(session_id, self.take_out(session_id))
+            .await;
+        Ok(())
     }
 
     /// Where `session_id`'s lineage saves results: its root session's directory under

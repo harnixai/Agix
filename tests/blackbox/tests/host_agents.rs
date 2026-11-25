@@ -766,3 +766,66 @@ async fn an_agent_stopped_by_its_turns_budget_names_it() -> anyhow::Result<()> {
     daemon.stop().await;
     Ok(())
 }
+
+/// Closing the parent only takes it out of memory: the sidechain of an agent
+/// the host started is still listed under it, with its real counts, and
+/// still reads back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_agents_sidechain_outlives_its_parents_close() -> anyhow::Result<()> {
+    let (_world, provider, daemon, mut client, session) = daemon_with("kept", json!({})).await?;
+    provider.script([Reply::text("SIDECHAIN-SAID")]);
+    let started = start_agent(
+        &mut client,
+        json!({ "session_id": session, "prompt": "say it", "notify_parent": false }),
+    )
+    .await?;
+    assert_eq!(
+        settled(&mut client, &session, &started).await?["status"],
+        "done"
+    );
+    let agent_session = started["agent_session_id"].as_str().unwrap_or_default();
+
+    let closed = client
+        .call("session.close", json!({ "session_id": session }))
+        .await?
+        .result
+        .unwrap_or_default();
+    assert_eq!(closed["sidechains_deleted"], 0, "{closed}");
+
+    let listed = client
+        .call("session.list", json!({ "parent_session_id": session }))
+        .await?
+        .result
+        .unwrap_or_default();
+    let children = listed["sessions"].as_array().cloned().unwrap_or_default();
+    assert_eq!(children.len(), 1, "{listed}");
+    let child = &children[0];
+    assert_eq!(child["session_id"], agent_session, "{listed}");
+    assert!(child["message_count"].as_u64() >= Some(2), "{listed}");
+    assert!(
+        child["created_at"].as_str().is_some_and(|t| !t.is_empty()),
+        "{listed}"
+    );
+    assert!(
+        child["last_active"].as_str().is_some_and(|t| !t.is_empty()),
+        "{listed}"
+    );
+
+    let history = client
+        .call(
+            "session.history",
+            json!({ "session_id": agent_session, "limit": 20 }),
+        )
+        .await?;
+    assert!(history.error.is_none(), "{history:?}");
+    assert!(
+        history
+            .result
+            .unwrap_or_default()
+            .to_string()
+            .contains("SIDECHAIN-SAID"),
+        "the sidechain still holds what the agent said"
+    );
+    daemon.stop().await;
+    Ok(())
+}
