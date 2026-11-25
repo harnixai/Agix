@@ -2456,6 +2456,11 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 `INVALID_PARAMS`,`data.generation` 是当前的;不给就用现在这一代。`session_id` 只按会话查,不当路径用,
 格式不对 → `INVALID_PARAMS`。
 
+录像目录由 `recorder.dir` 与 `recorder.name` 定。几个会话给了同一个固定的 `name`(与同一个 `dir`)就共用一个
+目录、同一份 `calls.jsonl`:这时对其中一个会话 `rerunCall`,取到的可能是另一个会话录下的
+调用,并经这个会话的(项目, 场景)对的 provider 重发。看得到的范围与 `session.call` 对这些会话已经给出的
+一样,没有多出别的;要各看各的,就让每个会话用自己的 `name`(省略即用会话 id)。
+
 **改动。** `edits.system` 每项用 `index`(系统块在这次调用里的位置,即 `session.call` 的
 `request.system` 的下标)或 `source`(块名,即那里的 `source`)指定一块,两者只给一个;`text` 必须给,
 是字符串就换掉这一块的文字(角色、缓存标记照旧),是 `null` 就删掉这一块。`drop_messages` 是
@@ -4188,7 +4193,10 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 当场按 hook 的 `on_error` 了结(`allow` 继续,`block` 拦下,结果是 `refused`),不等 `timeout_ms`。
 
 与 `RunCode` / `RunExt` 共用同时运行脚本的名额;不带会话的调用先等到名额再建临时引擎,同时在的临时引擎
-因此不超过名额数。`code` 取值:
+因此不超过名额数。名额是整个 daemon 的(各会话共用,本机 CPU 数的两倍),一次调用从开始到真正结束
+一直占着一个——`timeout` 之后还在后台收尾的那段也算;带 `session_id` 时这整段还占着会话:它不算空闲,
+不被重建、回滚或驱逐。`timeout_ms` 可到 600000,几个长调用同时在跑就能把名额占满,这时模型的
+`RunCode` / `RunExt` 只能等名额,等到它们结束或那一轮被打断。宿主自己限制同时在跑的长调用数。`code` 取值:
 
 | `code` | 含义 |
 |---|---|
