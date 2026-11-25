@@ -669,3 +669,100 @@ async fn two_agents_under_one_session_ask_with_their_own_task() -> anyhow::Resul
     daemon.stop().await;
     Ok(())
 }
+
+/// A budgeted sub-agent stopped because its next call's input no longer fits
+/// what its own budget leaves (1500 of 8000 left, about 6000 to send) is
+/// stopped by the task's budget, and its error says so, as it does when the
+/// budget is used up to the last token.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_stopped_by_its_budget_before_it_is_used_up_names_it() -> anyhow::Result<()> {
+    let (_world, provider, daemon, mut client, session) =
+        daemon_with("budget-input", json!({})).await?;
+    let mut watcher = daemon.connect().await?;
+    watcher.session_subscribe(&session).await?;
+    provider.script_when(
+        "INPUT-MARK",
+        [
+            Reply::spent(
+                6000,
+                500,
+                Reply::calls("g-1", "Glob", json!({ "pattern": "*" })),
+            ),
+            Reply::text("never sent"),
+        ],
+    );
+    let budgeted = start_agent(
+        &mut client,
+        json!({
+            "session_id": session,
+            "prompt": "INPUT-MARK look around",
+            "token_budget": 8000,
+            "notify_parent": false
+        }),
+    )
+    .await?;
+    let frame = event_where(&mut watcher, |e| {
+        e["kind"] == "task_finished" && e["task"]["task_id"] == budgeted["task_id"]
+    })
+    .await?;
+    let task = frame["event"]["task"].clone();
+    let calls = provider
+        .calls()
+        .iter()
+        .filter(|c| c.body.to_string().contains("INPUT-MARK"))
+        .count();
+    assert_eq!(calls, 1, "the sub-agent called past its budget: {task}");
+    assert_eq!(task["status"], "failed", "{task}");
+    assert!(
+        task["error"]
+            .as_str()
+            .is_some_and(|e| e.starts_with("budget_exceeded: the task's token budget of 8000")),
+        "the error does not say whose budget stopped it: {task}"
+    );
+    daemon.stop().await;
+    Ok(())
+}
+
+/// A host's sub-agent its own turn's `turn.token_budget` stops ends
+/// `failed` naming that budget, one of the three §6.3 lists.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_stopped_by_its_turns_budget_names_it() -> anyhow::Result<()> {
+    let (_world, provider, daemon, mut client, session) =
+        daemon_with("budget-turn", json!({ "turn": { "token_budget": 3000 } })).await?;
+    let mut watcher = daemon.connect().await?;
+    watcher.session_subscribe(&session).await?;
+    provider.script_when(
+        "TURN-MARK",
+        [
+            Reply::spent(
+                4000,
+                500,
+                Reply::calls("g-1", "Glob", json!({ "pattern": "*" })),
+            ),
+            Reply::text("never sent"),
+        ],
+    );
+    let started = start_agent(
+        &mut client,
+        json!({
+            "session_id": session,
+            "prompt": "TURN-MARK look around",
+            "notify_parent": false
+        }),
+    )
+    .await?;
+    let frame = event_where(&mut watcher, |e| {
+        e["kind"] == "task_finished" && e["task"]["task_id"] == started["task_id"]
+    })
+    .await?;
+    let task = frame["event"]["task"].clone();
+    assert_eq!(task["status"], "failed", "{task}");
+    assert!(
+        task["error"]
+            .as_str()
+            .is_some_and(|e| e.starts_with("budget_exceeded: this turn's token budget of 3000")),
+        "the error does not say whose budget stopped it: {task}"
+    );
+    daemon.stop().await;
+    Ok(())
+}

@@ -1258,3 +1258,59 @@ impl PermissionPolicy for PromptsForEverything {
         }
     }
 }
+
+/// A question from a sub-agent's own sub-agent reaches the parent's host with
+/// a `tool_use_id` and an `agent_session_id` that name the same session: the
+/// host looks the call up in the sidechain the frame names.
+#[tokio::test]
+async fn a_nested_sub_agents_question_names_the_session_its_call_is_in() {
+    use crate::agent_tool::permission::{ParentElicitation, QuestionRoute};
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let pending: runtime::agent::PendingPermissions = Arc::default();
+    let parent_session: Arc<dyn base::context::Session> =
+        Arc::new(session_state::SessionState::for_tests("/tmp".into()));
+    let agent_tool = TestParent {
+        state: parent_session.clone(),
+        events: Some(runtime::event_bus::EventBus::new(tx)),
+        pending: pending.clone(),
+        ..test_parent()
+    }
+    .agent_tool();
+    let task = parent_session.register_task(
+        "task-1".into(),
+        base::context::TaskType::Agent,
+        tokio_util::sync::CancellationToken::new(),
+        serde_json::json!({}),
+    );
+    let outer = agent_tool.sub_relay(Some(task)).elicitation;
+    let inner: Arc<dyn base::interface::elicitation::Elicitation> = Arc::new(ParentElicitation {
+        delegate_id: "inner".into(),
+        route: QuestionRoute::Upstream(outer),
+        task: None,
+    });
+    let mut request = authorization("p3", "run the nested probe?");
+    if let base::interface::elicitation::ElicitKind::Authorization { tool_use_id, .. } =
+        &mut request.kind
+    {
+        *tool_use_id = Some("toolu_inner".into());
+    }
+    let asked = tokio::spawn(async move { inner.ask(request).await });
+    let (tool_use_id, agent_session_id) = loop {
+        match rx.recv().await.expect("the question reaches the parent") {
+            AgentEvent::PermissionPrompt {
+                tool_use_id,
+                agent_session_id,
+                ..
+            } => break (tool_use_id, agent_session_id),
+            _ => continue,
+        }
+    };
+    asked.abort();
+    if tool_use_id.as_deref() == Some("toolu_inner") {
+        assert_eq!(
+            agent_session_id.as_deref(),
+            Some("inner"),
+            "the frame's tool_use_id is a call of session `inner`, but it names session {agent_session_id:?}"
+        );
+    }
+}
