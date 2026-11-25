@@ -340,7 +340,7 @@
 ## 0.4.4
 
 协议版本不变(仍是 5)。新增能力位 `compact_events`、`prompt_task`、`agent_token_budget`、`plugin_call_long`、
-`prompt_append_blocks`、`session_rerun`;用到的应用先查 `daemon.ping` 的 `capabilities`。
+`prompt_append_blocks`、`session_rerun`、`plugin_call_hooks`;用到的应用先查 `daemon.ping` 的 `capabilities`。
 
 ### 压缩的首尾两帧(#103,`compact_events`)
 
@@ -399,6 +399,18 @@ strategy?}`,`trigger` 是 `threshold`、`manual`(`/compact`、`session.compact`)
   录像里的 provider 已不在设置里且没给 `provider`:`INVALID_PARAMS`,什么都不发。provider 报错时照常返回,
   `response.status` 为 `"error"`。
 
+### 不带会话的 `plugin.call` 与连接登记的 hook(#109,`plugin_call_hooks`)
+
+0.4.3 里连接用 `daemon.setHooks` 登记了 hook 之后,不带 `session_id` 的 `plugin.call` 会一直等到自己的超时:临时引擎照样问
+hook,询问却发不到任何人、也答不回去。现在宿主登记的 hook 对这种调用照样生效(否则任何一条连接都能借它绕开别的宿主设的
+`PreToolUse`):
+
+- 登记者收到 `hook_call`,`session_id` 与 `input.session_id` 是这次调用的临时会话 id,多一个
+  `plugin_call: {function, run_id?}`;照常用 `session.respondHook {session_id, call_id, …}` 作答,只有登记它的连接能答。
+  带会话的调用的帧不变。
+- 调用结束后临时会话 id 即失效,迟到的回答得到 `SESSION_NOT_FOUND`;临时会话不进会话列表。
+- 登记者在调用中途断开,或询问根本送不到时,立刻按 hook 的 `on_error` 了结(`block` 即拒绝、`allow` 即放行),不再等满时限。
+
 ### 嵌入(`agix` crate)
 
 - `AgentEvent` 多 `CompactStarted { turn_id, trigger: CompactCause, tokens_before, strategy }` 与
@@ -413,3 +425,6 @@ strategy?}`,`trigger` 是 `threshold`、`manual`(`/compact`、`session.compact`)
   `Host`(算本地来源)。`SystemPromptSettings` 删掉没人读的 `append` 与 `override_text`。
 - `SessionPool::rerun_call`;`telemetry::recorder::rerun::rerun_one` 总是返回一份结果(收到的事件、实际的 provider、
   错误、首个事件的时间、时长与差异),中途出错时不再丢掉已收到的事件;新增 `request_in`。
+- `PluginCall.run_id: Option<String>`(`PluginCall::new` 给 `None`,按字段构造的要补);`SessionEvent::FromPluginCall(Arc<PluginCallOrigin>,
+  AgentEvent)` 与 `agix::session::PluginCallOrigin { function, run_id }`;`runtime::agent::Agent::serve_host_answers()`;
+  `SessionPool::respond_hook` / `respond_tool_call` / `report_tool_progress` 在调用进行时也认临时会话 id。
