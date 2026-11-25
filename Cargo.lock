@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agix"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-assembly",
  "agix-base",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "agix-agents"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-history",
@@ -66,7 +66,7 @@ dependencies = [
 
 [[package]]
 name = "agix-assembly"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-agents",
  "agix-base",
@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "agix-base"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "agix-compaction"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "async-trait",
@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "agix-history"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "async-trait",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "agix-hooks"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-permissions",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "agix-js-lib"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "globset",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "agix-mcp"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-platform",
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "agix-memory"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "async-trait",
@@ -263,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "agix-model"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-platform",
@@ -285,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "agix-packages"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-platform",
@@ -309,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "agix-permissions"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-session-state",
@@ -328,7 +328,7 @@ dependencies = [
 
 [[package]]
 name = "agix-platform"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-platform",
@@ -351,7 +351,7 @@ dependencies = [
 
 [[package]]
 name = "agix-prompt-files"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "tempfile",
@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "agix-ptc"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-js-lib",
@@ -384,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "agix-runtime"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-compaction",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "agix-scene"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "serde",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "agix-script-host"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-js-lib",
@@ -449,7 +449,7 @@ dependencies = [
 
 [[package]]
 name = "agix-session"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-history",
@@ -463,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "agix-session-state"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "serde",
@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "agix-settings"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "globset",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "agix-skills"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-permissions",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "agix-team"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-memory",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "agix-telemetry"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "async-trait",
@@ -560,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "agix-tools"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-permissions",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "agixd"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-agents",
  "agix-assembly",
@@ -863,7 +863,7 @@ checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
 
 [[package]]
 name = "blackbox"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-history",
@@ -1162,7 +1162,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "demo-rust-plugin"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-runtime",
@@ -1573,7 +1573,7 @@ dependencies = [
 
 [[package]]
 name = "guards"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-hooks",
  "agix-telemetry",
@@ -1642,7 +1642,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hostile-plugins"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-runtime",
@@ -2271,7 +2271,7 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
 name = "mcp-oauth-mock"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "base64 0.22.1",
  "reqwest",
@@ -2284,7 +2284,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-toy-server"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "anyhow",
  "hyper",
@@ -3116,7 +3116,7 @@ dependencies = [
 
 [[package]]
 name = "rpc-client"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-base",
  "agix-history",
@@ -3755,7 +3755,7 @@ dependencies = [
 
 [[package]]
 name = "test-runner"
-version = "0.4.4-2026112502"
+version = "0.4.4-2026112503"
 dependencies = [
  "agix-agents",
  "agix-base",
