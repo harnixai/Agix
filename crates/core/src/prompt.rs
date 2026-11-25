@@ -64,7 +64,10 @@ pub mod names {
     pub const MCP_INSTRUCTIONS: &str = "mcp.instructions";
     /// `settings.prompt.append` given as one text.
     pub const CONFIG_PROMPT_APPEND: &str = "config.prompt_append";
-    /// Prefix of each block of a `settings.prompt.append` list, by its name.
+    /// Prefix of the configuration's blocks, among them each block of a
+    /// `settings.prompt.append` list a settings file gave.
+    pub const CONFIG_PREFIX: &str = "config.";
+    /// Prefix of each block of a `settings.prompt.append` list the host gave.
     pub const HOST_PREFIX: &str = "host.";
     /// `settings.prompt.override`, which replaces everything else.
     pub const CONFIG_PROMPT_OVERRIDE: &str = "config.prompt_override";
@@ -84,8 +87,13 @@ pub enum BlockOrigin {
     Plugin(String),
     /// Contributed by a script in this project, named by its path.
     Script(String),
-    /// An entry of a `settings.prompt.append` list, named as the host named it.
+    /// An entry of a `settings.prompt.append` list the host gave, named as
+    /// the host named it.
     Host(String),
+    /// An entry of a `settings.prompt.append` list a settings file gave,
+    /// named as the file named it: `{"config": "<name>"}`.
+    #[serde(untagged)]
+    ConfigEntry { config: String },
 }
 
 impl BlockOrigin {
@@ -100,7 +108,11 @@ impl BlockOrigin {
     pub fn is_local(&self) -> bool {
         matches!(
             self,
-            Self::Kernel | Self::Config | Self::Script(_) | Self::Host(_)
+            Self::Kernel
+                | Self::Config
+                | Self::ConfigEntry { .. }
+                | Self::Script(_)
+                | Self::Host(_)
         )
     }
 }
@@ -185,5 +197,24 @@ mod tests {
         assert_eq!(names::CONFIG_PROMPT_APPEND, "config.prompt_append");
         assert_eq!(names::CONFIG_PROMPT_OVERRIDE, "config.prompt_override");
         assert_eq!(names::HOST_PREFIX, "host.");
+        assert_eq!(names::CONFIG_PREFIX, "config.");
+    }
+
+    #[test]
+    fn a_settings_file_entry_reads_and_writes_as_config_with_its_name() {
+        let entry = BlockOrigin::ConfigEntry {
+            config: "review".into(),
+        };
+        let json = serde_json::json!({"config": "review"});
+        assert_eq!(serde_json::to_value(&entry).unwrap(), json);
+        assert_eq!(serde_json::from_value::<BlockOrigin>(json).unwrap(), entry);
+        assert_eq!(
+            serde_json::from_value::<BlockOrigin>(serde_json::json!("config")).unwrap(),
+            BlockOrigin::Config
+        );
+        assert_eq!(
+            serde_json::from_value::<BlockOrigin>(serde_json::json!({"host": "a"})).unwrap(),
+            BlockOrigin::Host("a".into())
+        );
     }
 }

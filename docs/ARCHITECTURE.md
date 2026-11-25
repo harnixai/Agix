@@ -1643,7 +1643,9 @@ bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值�
   `permissions.client_may_loosen`;会话要的值被它压住时报在 `clamped_options`。唯一的例外是键表信任列
   给了松紧次序的键:下层写得比它更严时下层的值留下(会话要更小的预算、项目要更严的沙箱),managed 定的是最宽能到哪。它写的
   `prompt.append` 总接在系统提示词末尾:下层(会话、宿主、项目、用户)的 `prompt.override` 换掉了基础提示词,
-  也换不掉这一段;managed 自己写的 `prompt.override` 照样压过下层的。`LoadedSettings::with_managed`
+  也换不掉这一段;managed 自己写的 `prompt.override` 照样压过下层的。`prompt.append` 写成数组时块名跟着
+  给出这个值的那一层走(加载器、overlay 与这里各自记下 `LoadedSettings::prompt_append_tier`):会话层与
+  `cli` 层、宿主覆盖给的是 `host.<name>`,设置文件与 managed 给的是 `config.<name>`。`LoadedSettings::with_managed`
   是唯一套它的地方:读盘(`settings_source::read_pair`,它也作为 `Tier::Managed` 一层进加载器)、宿主覆盖与
   会话覆盖层(`LoadedSettings::overlay`)之后都重新套一遍;子 Agent 的 agent 类型改过 `effort` / `max_turns`
   之后,`SessionConfig::tuned_for_delegate` 先把它们压在会话层写的值之下,再用同一段(`lay_managed_values`)把

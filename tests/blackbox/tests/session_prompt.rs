@@ -199,9 +199,11 @@ async fn inspect(client: &mut rpc_client::DaemonRpcClient, session: &str) -> any
         .ok_or_else(|| anyhow::anyhow!("inspectContext refused: {:?}", report.error))
 }
 
-/// `prompt.append` given as a list is one block per entry, each with the
-/// host's name, its own origin and its own token count, in the list's order;
-/// a session's list replaces the settings file's whole.
+/// `prompt.append` given as a list is one block per entry, each with its own
+/// name, origin and token count, in the list's order; a session's list
+/// replaces the settings file's whole. The session's list is the host's
+/// (`host.<name>`); the list of an untrusted project's settings file is the
+/// file's (`config.<name>`), even under a name a host extension would use.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_listed_append_is_one_block_per_entry_each_named_and_counted() -> anyhow::Result<()> {
     let world = World::new()?;
@@ -209,7 +211,7 @@ async fn a_listed_append_is_one_block_per_entry_each_named_and_counted() -> anyh
     world.write_project_settings(
         "listed",
         &json!({ "memory": { "enabled": false },
-                 "prompt": { "append": [ { "name": "project", "text": "FROM-THE-FILE" } ] } }),
+                 "prompt": { "append": [ { "name": "harnix:review", "text": "FROM-THE-FILE" } ] } }),
     )?;
     let provider = ProviderStub::start().await?;
     let daemon = Daemon::start(&world, &provider, DaemonOptions::new(project.clone())).await?;
@@ -264,16 +266,26 @@ async fn a_listed_append_is_one_block_per_entry_each_named_and_counted() -> anyh
         .session_create(json!({ "project_root": root, "options": { "auto_name": false } }))
         .await?;
     let report = inspect(&mut client, &plain).await?;
-    let file: Vec<(String, Value, String)> = host_blocks(&report)
-        .into_iter()
-        .map(|(n, o, _, t)| (n, o, t))
+    assert!(host_blocks(&report).is_empty(), "{report}");
+    let file: Vec<(&str, &Value, &str)> = report["system"]
+        .as_array()
+        .expect("system")
+        .iter()
+        .filter(|b| b["origin"].get("config").is_some())
+        .map(|b| {
+            (
+                b["name"].as_str().unwrap_or_default(),
+                &b["origin"],
+                b["text"].as_str().unwrap_or_default(),
+            )
+        })
         .collect();
     assert_eq!(
         file,
         [(
-            "host.project".to_string(),
-            json!({ "host": "project" }),
-            "FROM-THE-FILE".to_string()
+            "config.harnix:review",
+            &json!({ "config": "harnix:review" }),
+            "FROM-THE-FILE"
         )],
         "{report}"
     );

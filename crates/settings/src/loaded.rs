@@ -61,6 +61,9 @@ pub struct LoadedSettings {
     /// The `cli` tier's layers as given, merged; `None` without one.
     pub cli_layer: Option<serde_json::Value>,
     project_layer: ProjectLayer,
+    /// The layer whose `prompt.append` is in `values`; `None` when none
+    /// recorded one.
+    prompt_append_by: Option<Tier>,
 }
 
 /// Where a provider was defined.
@@ -104,6 +107,7 @@ impl LoadedSettings {
             provider_origins: BTreeMap::new(),
             cli_layer: None,
             project_layer: ProjectLayer::default(),
+            prompt_append_by: None,
         };
         loaded.settle_providers();
         loaded
@@ -286,6 +290,7 @@ impl LoadedSettings {
             providers: Vec::new(),
             provider_origins: BTreeMap::new(),
             cli_layer: None,
+            prompt_append_by: None,
         };
         for layer in layers {
             fold.apply(layer);
@@ -299,6 +304,7 @@ impl LoadedSettings {
             mcp_secret_vars,
             provider_origins,
             cli_layer,
+            prompt_append_by,
             ..
         } = fold;
         project_layer.dedup_requires_trust();
@@ -330,6 +336,7 @@ impl LoadedSettings {
             main_model: default_model.to_string(),
             cli_layer,
             project_layer,
+            prompt_append_by,
         };
         loaded.settle_providers();
         if let Err(e) = loaded.place_worktrees() {
@@ -406,6 +413,30 @@ impl LoadedSettings {
     pub fn bypass_disabled(&self) -> bool {
         self.managed.as_ref().is_some_and(|m| m.disable_bypass)
     }
+
+    /// The layer whose `values.prompt.append` is in force: the last of the
+    /// loader's tiers, a host's overlay ([`Tier::Cli`]), a session's own
+    /// ([`Tier::Session`]) or the managed layer to set it. `None` when none
+    /// of them did — the value, if any, was put in `values` directly.
+    pub fn prompt_append_tier(&self) -> Option<Tier> {
+        self.prompt_append_by
+    }
+
+    /// The system blocks `values.prompt.append` adds, named for
+    /// [`prompt_append_tier`](Self::prompt_append_tier); a value no layer
+    /// recorded is named as a settings file's.
+    pub fn prompt_append_blocks(&self) -> Vec<base::prompt::PromptBlock> {
+        self.values
+            .prompt
+            .append
+            .as_ref()
+            .map(|append| append.blocks(self.prompt_append_by.unwrap_or(Tier::Project)))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn note_prompt_append_by(&mut self, tier: Tier) {
+        self.prompt_append_by = Some(tier);
+    }
 }
 
 /// A section's defaults are in the merge from the start, so a project that is
@@ -473,6 +504,7 @@ struct LayerFold<'a> {
     providers: Vec<ProviderConfig>,
     provider_origins: BTreeMap<String, ProviderOrigin>,
     cli_layer: Option<serde_json::Value>,
+    prompt_append_by: Option<Tier>,
 }
 
 impl LayerFold<'_> {
@@ -537,7 +569,12 @@ impl LayerFold<'_> {
             self.take_providers(&layer.origin, layer.tier, layer.machine_local, providers);
         }
         self.note_mcp_servers(layer.tier, &layer_json);
-        for (key, error) in merge_fitting(&mut self.merged_json, layer_json, self.sections) {
+        let append = crate::prompt_append::append_of(&layer_json).cloned();
+        let ignored = merge_fitting(&mut self.merged_json, layer_json, self.sections);
+        if crate::prompt_append::took(append.as_ref(), &self.merged_json) {
+            self.prompt_append_by = Some(layer.tier);
+        }
+        for (key, error) in ignored {
             let error = crate::renamed::explain(&key, error);
             tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, error, "settings value does not fit its setting, ignoring it");
             self.ignored.push(IgnoredValue {

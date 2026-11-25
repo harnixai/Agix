@@ -108,6 +108,7 @@ impl Authority {
             BlockOrigin::Plugin(name) => format!("plugin '{name}'"),
             BlockOrigin::Script(path) => format!("script '{path}'"),
             BlockOrigin::Host(name) => format!("host block '{name}'"),
+            BlockOrigin::ConfigEntry { config } => format!("configuration block '{config}'"),
             BlockOrigin::Config => "configuration".to_string(),
             BlockOrigin::Kernel => "the engine".to_string(),
         }

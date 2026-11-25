@@ -1034,15 +1034,16 @@ handle.dispose();
 | `rules` | `.agix/rules/` 的发现索引 |
 | `mcp.instructions` | 来自已连接 MCP server 的指令 |
 | `config.prompt_append` | `settings.prompt.append` 给成一段文字时 |
-| `host.<name>` | `settings.prompt.append` 给成 `[{name, text}]` 时,每项一块,按数组次序,整组在 `config.prompt_append` 的位置(order 500);`origin` 是 `Host(name)` |
-| `config.prompt_override` | `settings.prompt.override`,它把一切都替掉——managed 层写的 `prompt.append` 除外,那一段仍以 `config.prompt_append`(数组则是各 `host.<name>`)接在它后面 |
+| `host.<name>` | `settings.prompt.append` 由宿主给的层(会话层、`cli` 层)给成 `[{name, text}]` 时,每项一块,按数组次序,整组在 `config.prompt_append` 的位置(order 500);`origin` 是 `Host(name)` |
+| `config.<name>` | 同上,但数组由设置文件或 managed 层给出;`origin` 是 `ConfigEntry { config: name }`(JSON `{"config": name}`) |
+| `config.prompt_override` | `settings.prompt.override`,它把一切都替掉——managed 层写的 `prompt.append` 除外,那一段仍以 `config.prompt_append`(数组则是各 `config.<name>`)接在它后面 |
 
 块的 `role` 决定它送到哪里：`System` 进系统提示；`User` 不进系统提示，而是每次调用都作为
 对话开头的一条 `<system-reminder>` 消息送出。有的端点（DeepSeek）按 system → tools →
 messages 的顺序做前缀缓存，系统提示里一段随项目变化的内容会让其后整张工具表都失去缓存，
 `skills.catalog` 因此是 `User` 块。扩展照常按名字定位、修改、删除它。
 
-每个块还带一个 `origin`——`Kernel`、`Config`、`Plugin(name)`、`Script(path)` 或 `Host(name)`
+每个块还带一个 `origin`——`Kernel`、`Config`、`ConfigEntry { config }`、`Plugin(name)`、`Script(path)` 或 `Host(name)`
 ——组装 hook 的权限规则读的就是它。
 
 ### 在会话日志里放自己的状态 — `history.extension_entry`
@@ -1114,7 +1115,7 @@ assembler,把它的系统块折成一个。一个请求最多四个 `cache_contr
 
 assembler 收到的是一个 `AssemblyRequest`——registry、scene、settings、记忆 store、
 scene 上下文,以及已经渲染好的 skill 清单和 MCP 指令;`prompt.append` 已经是命名好的块
-(`prompt_append`,文字一块 `config.prompt_append`,数组每项一块 `host.<name>`),managed 层的
+(`prompt_append`,文字一块 `config.prompt_append`,数组每项一块 `host.<name>` 或 `config.<name>`,看是哪一层给的),managed 层的
 `prompt.append` 同样成块单独给出(`managed_append`),有 `prompt_override` 时也要接上。它是个 struct(十个字段),这样只读其中
 两项的实现不必把其余的重述一遍。
 

@@ -1,13 +1,18 @@
-//! The value of `settings.prompt.append`: one text, or a list of blocks each
-//! named by the host that gave it, so a report can say whose each block is;
-//! and the prompt blocks either becomes. A list that does not hold together
-//! does not read at all.
+//! The value of `settings.prompt.append`: one text, or a list of named
+//! blocks, so a report can say whose each block is; and the prompt blocks
+//! either becomes. A list's blocks are named for the layer that gave it — the
+//! host's (`host.<name>`) only when the host gave it, a settings file's
+//! (`config.<name>`) otherwise — so a cloned project cannot pass its text off
+//! as a host extension's. A list that does not hold together does not read
+//! at all.
 
 use std::collections::HashSet;
 
+use base::interface::config_source::Tier;
 use base::prompt::{names, BlockOrigin, PromptBlock};
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
@@ -15,7 +20,8 @@ use serde::{Deserialize, Serialize};
 pub enum PromptAppend {
     /// One block, `config.prompt_append`.
     Text(String),
-    /// One block per entry, `host.<name>`, in this order.
+    /// One block per entry, in this order: `host.<name>` when the host gave
+    /// the list, `config.<name>` when a settings file did.
     Blocks(Vec<AppendBlock>),
 }
 
@@ -52,9 +58,12 @@ impl From<String> for PromptAppend {
 }
 
 impl PromptAppend {
-    /// The system blocks this appends, in order: one `config.prompt_append`
-    /// for a text, one `host.<name>` per entry of a list.
-    pub fn blocks(&self) -> Vec<PromptBlock> {
+    /// The system blocks this appends when `by` gave it, in order: one
+    /// `config.prompt_append` for a text; for a list, one block per entry,
+    /// `host.<name>` / `{"host": name}` when `by` is a layer the host sets (a
+    /// session's own, the `cli` layer), `config.<name>` / `{"config": name}`
+    /// when it is a settings file or the managed layer.
+    pub fn blocks(&self, by: Tier) -> Vec<PromptBlock> {
         match self {
             Self::Text(text) => vec![PromptBlock::system(text.clone())
                 .named(names::CONFIG_PROMPT_APPEND)
@@ -62,9 +71,18 @@ impl PromptAppend {
             Self::Blocks(blocks) => blocks
                 .iter()
                 .map(|block| {
+                    let name = block.name.clone();
+                    let (prefix, origin) = if set_by_host(by) {
+                        (names::HOST_PREFIX, BlockOrigin::Host(name))
+                    } else {
+                        (
+                            names::CONFIG_PREFIX,
+                            BlockOrigin::ConfigEntry { config: name },
+                        )
+                    };
                     PromptBlock::system(block.text.clone())
-                        .named(format!("{}{}", names::HOST_PREFIX, block.name))
-                        .from_origin(BlockOrigin::Host(block.name.clone()))
+                        .named(format!("{prefix}{}", block.name))
+                        .from_origin(origin)
                 })
                 .collect(),
         }
@@ -84,6 +102,11 @@ impl PromptAppend {
                     "[{i}].name {name:?} has {c:?}; a name is letters, digits and `_ . : -`"
                 ));
             }
+            if RESERVED.contains(&name.as_str()) {
+                return Err(format!(
+                    "[{i}].name {name:?} is reserved: `config.{name}` is the engine's own block"
+                ));
+            }
             if !seen.insert(name.as_str()) {
                 return Err(format!("[{i}].name {name:?} is given twice"));
             }
@@ -95,8 +118,27 @@ impl PromptAppend {
     }
 }
 
+/// Entry names that would read as the text form's or the override's block
+/// once prefixed with `config.`.
+const RESERVED: [&str; 2] = ["prompt_append", "prompt_override"];
+
 fn name_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '-')
+}
+
+fn set_by_host(tier: Tier) -> bool {
+    matches!(tier, Tier::Session | Tier::Cli)
+}
+
+/// `prompt.append` of a settings layer, as JSON.
+pub(crate) fn append_of(layer: &Value) -> Option<&Value> {
+    layer.get("prompt")?.get("append")
+}
+
+/// Whether merging `given` — a layer's `prompt.append` — left it the value
+/// `merged` holds: a value that did not fit was not merged, and does not win.
+pub(crate) fn took(given: Option<&Value>, merged: &Value) -> bool {
+    given.is_some() && given == append_of(merged)
 }
 
 impl<'de> Deserialize<'de> for PromptAppend {
@@ -152,6 +194,42 @@ mod tests {
     }
 
     #[test]
+    fn a_list_is_named_for_the_host_only_when_a_host_layer_gave_it() {
+        let list = read(json!([{"name": "harnix:review", "text": "x"}])).unwrap();
+        let named = |by| {
+            let block = list.blocks(by).remove(0);
+            (block.name.unwrap(), block.origin)
+        };
+        for by in [Tier::Session, Tier::Cli] {
+            assert_eq!(
+                named(by),
+                (
+                    "host.harnix:review".to_string(),
+                    BlockOrigin::Host("harnix:review".into())
+                ),
+                "{by:?}"
+            );
+        }
+        for by in [Tier::Global, Tier::Scene, Tier::Project, Tier::Managed] {
+            assert_eq!(
+                named(by),
+                (
+                    "config.harnix:review".to_string(),
+                    BlockOrigin::ConfigEntry {
+                        config: "harnix:review".into()
+                    }
+                ),
+                "{by:?}"
+            );
+        }
+        let text = PromptAppend::from("t").blocks(Tier::Session).remove(0);
+        assert_eq!(
+            (text.name.as_deref(), text.origin),
+            (Some(names::CONFIG_PROMPT_APPEND), BlockOrigin::Config)
+        );
+    }
+
+    #[test]
     fn a_list_that_does_not_hold_together_is_refused_with_the_entry() {
         for (value, says) in [
             (json!([{"name": "", "text": "x"}]), "[0].name is empty"),
@@ -167,6 +245,14 @@ mod tests {
             (
                 json!([{"name": "a", "text": ""}]),
                 "[0].text of \"a\" is empty",
+            ),
+            (
+                json!([{"name": "prompt_override", "text": "x"}]),
+                "[0].name \"prompt_override\" is reserved",
+            ),
+            (
+                json!([{"name": "prompt_append", "text": "x"}]),
+                "is reserved",
             ),
             (json!([{"name": "a"}]), "missing field `text`"),
             (

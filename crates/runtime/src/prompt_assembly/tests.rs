@@ -1,4 +1,5 @@
 use super::*;
+use base::interface::config_source::Tier;
 use base::interface::scene::{FixedPrompt, TokenBudget};
 use settings::{AppendBlock, PromptAppend};
 use std::borrow::Cow;
@@ -6,6 +7,7 @@ use std::borrow::Cow;
 #[derive(Clone)]
 struct TestSettings {
     prompt_append: Option<PromptAppend>,
+    append_by: Tier,
     prompt_override: Option<String>,
     managed_append: Option<PromptAppend>,
     memory_enabled: bool,
@@ -52,13 +54,13 @@ fn assemble_for_test(
 ) -> Vec<PromptBlock> {
     let memory = settings.memory_enabled.then_some("memory instructions");
     let blocks_of =
-        |a: &Option<PromptAppend>| a.as_ref().map(PromptAppend::blocks).unwrap_or_default();
+        |a: &Option<PromptAppend>, by: Tier| a.as_ref().map(|a| a.blocks(by)).unwrap_or_default();
     assemble(&AssemblyRequest {
         registry,
         scene,
         prompt_override: settings.prompt_override.as_deref(),
-        prompt_append: &blocks_of(&settings.prompt_append),
-        managed_append: &blocks_of(&settings.managed_append),
+        prompt_append: &blocks_of(&settings.prompt_append, settings.append_by),
+        managed_append: &blocks_of(&settings.managed_append, Tier::Managed),
         memory_prompt: memory,
         ctx,
         rules,
@@ -87,6 +89,7 @@ fn assemble_prompt(
 fn test_settings() -> TestSettings {
     TestSettings {
         prompt_append: None,
+        append_by: Tier::Session,
         prompt_override: None,
         managed_append: None,
         memory_enabled: true,
@@ -157,9 +160,10 @@ fn a_listed_append_is_one_block_per_entry_in_order_where_the_text_would_be() {
         orders::CONFIG_PROMPT_APPEND + 1,
         "after",
     ));
-    let assembled = |append: PromptAppend| {
+    let assembled_by = |append: PromptAppend, by: Tier| {
         let mut settings = test_settings();
         settings.prompt_append = Some(append);
+        settings.append_by = by;
         assemble_for_test(
             registry.as_ref(),
             &test_scene(),
@@ -169,6 +173,7 @@ fn a_listed_append_is_one_block_per_entry_in_order_where_the_text_would_be() {
             (Some("skills"), Some("mcp")),
         )
     };
+    let assembled = |append: PromptAppend| assembled_by(append, Tier::Session);
 
     let listed = assembled(host_blocks(&[("b", "second"), ("a", "first")]));
     let named: Vec<(&str, &str, &BlockOrigin)> = listed
@@ -187,6 +192,14 @@ fn a_listed_append_is_one_block_per_entry_in_order_where_the_text_would_be() {
             ("host.a", "first", &BlockOrigin::Host("a".into())),
             ("mine.after", "after", &BlockOrigin::Kernel),
         ]
+    );
+
+    let from_a_file = assembled_by(host_blocks(&[("b", "second")]), Tier::Project);
+    let file_block = from_a_file.iter().find(|b| b.content == "second").unwrap();
+    assert_eq!(file_block.name.as_deref(), Some("config.b"));
+    assert_eq!(
+        file_block.origin,
+        BlockOrigin::ConfigEntry { config: "b".into() }
     );
 
     let text = assembled("first\n\nsecond".into());
@@ -228,7 +241,7 @@ fn a_listed_managed_append_follows_an_override_block_by_block() {
         named,
         [
             (Some(names::CONFIG_PROMPT_OVERRIDE), "OVERRIDE"),
-            (Some("host.policy"), "MANAGED")
+            (Some("config.policy"), "MANAGED")
         ]
     );
 }

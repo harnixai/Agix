@@ -577,7 +577,7 @@
           "type": "string"
         },
         {
-          "description": "One block per entry, `host.<name>`, in this order.",
+          "description": "One block per entry, in this order: `host.<name>` when the host gave\nthe list, `config.<name>` when a settings file did.",
           "items": {
             "$ref": "#/$defs/AppendBlock"
           },
@@ -597,7 +597,7 @@
               "type": "null"
             }
           ],
-          "description": "Appended to the end of the system prompt: one text, or a list of\n`{name, text}` blocks, each its own block `host.<name>` in that order.\nA layer that sets it replaces what the layers beneath set, list or\ntext alike."
+          "description": "Appended to the end of the system prompt: one text, or a list of\n`{name, text}` blocks, each its own block in that order: `host.<name>`\nwhen a host gave the list (a session's own settings, the `cli` layer),\n`config.<name>` when a settings file or the managed layer did.\nA layer that sets it replaces what the layers beneath set, list or\ntext alike."
         },
         "instruction_files": {
           "description": "More instruction files (e.g. a `CLAUDE.md` outside the project), read\nin order when the session is built and given to the model alongside\nthe discovered `AGENTS.md` files. A root session with a `FileChanged`\nhook watches them.",

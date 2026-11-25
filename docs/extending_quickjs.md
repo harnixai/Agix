@@ -210,9 +210,9 @@ function onBlock() {
 300(`rules`)、400(`mcp.instructions`)和 500(`config.prompt_append`)。`content`
 必须是字符串——正文要随会话变的,该去 `prompt.context`。
 
-已经属于内核块的名字——`scene.` 与 `host.` 开头的任何一个,以及 `skills.catalog`、
-`memory.session`、`rules`、`mcp.instructions`、`config.prompt_append`、
-`config.prompt_override`——会被拒绝。块是按名字寻址的,先匹配到的那个赢,所以一个
+已经属于内核块的名字——`scene.`、`host.` 与 `config.` 开头的任何一个(其中有
+`config.prompt_append`、`config.prompt_override`),以及 `skills.catalog`、
+`memory.session`、`rules`、`mcp.instructions`——会被拒绝。块是按名字寻址的,先匹配到的那个赢,所以一个
 占了内核名字的贡献会悄悄把本该落在真块上的编辑吸走。
 
 这次调用要是失败了,或者答出来的东西没有能用的 `name`,或者 `order` 不是数字,

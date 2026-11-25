@@ -61,7 +61,7 @@ impl LoadedSettings {
             .filter(|m| m.error.is_none())
             .and_then(|m| m.values.get("prompt")?.get("append"))
             .and_then(|append| serde_json::from_value::<crate::PromptAppend>(append.clone()).ok());
-        append.map(|a| a.blocks()).unwrap_or_default()
+        append.map(|a| a.blocks(Tier::Managed)).unwrap_or_default()
     }
 
     /// `mode` held to the managed layer: no wider than the `permissions.mode`
@@ -134,11 +134,17 @@ impl LoadedSettings {
                 base::interface::exec::env::hold_back_credential(&var);
             }
         }
-        for (key, error) in merge_fitting(&mut merged, Value::Object(layer), sections) {
+        let layer = Value::Object(layer);
+        let append = crate::prompt_append::append_of(&layer).cloned();
+        for (key, error) in merge_fitting(&mut merged, layer, sections) {
             tracing::warn!(origin = %managed.origin, key, error, "managed settings value does not fit; ignoring it");
         }
+        let took_append = crate::prompt_append::took(append.as_ref(), &merged);
         match serde_json::from_value::<Settings>(merged) {
             Ok(values) => {
+                if took_append {
+                    self.note_prompt_append_by(Tier::Managed);
+                }
                 let before = std::mem::replace(&mut self.values, values);
                 self.settle_providers();
                 if let Err(e) = self.place_worktrees() {

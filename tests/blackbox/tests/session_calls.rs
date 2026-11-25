@@ -225,20 +225,7 @@ async fn a_listed_append_is_one_system_block_per_entry_in_the_call() -> anyhow::
         { "name": "ext", "text": "EXT-BLOCK" },
         { "name": "user", "text": "USER-BLOCK" },
     ] } });
-    let session = run.session_with(extra).await?;
-    run.turn(&session, "hi").await?;
-    let list = until_calls(&mut run, &session, |r| !r.is_empty()).await?;
-    let index = conversation_rows(&list, &session)[0]["index"]
-        .as_u64()
-        .expect("index");
-    let detail = ok(run.client.session_call(&session, index).await?)?;
-    let hosted: Vec<(Value, Value, Value)> = detail["request"]["system"]
-        .as_array()
-        .expect("system")
-        .iter()
-        .filter(|b| b["source"].as_str().is_some_and(|s| s.starts_with("host.")))
-        .map(|b| (b["source"].clone(), b["origin"].clone(), b["text"].clone()))
-        .collect();
+    let (hosted, detail) = first_call_blocks_named(&mut run, extra, "host.").await?;
     assert_eq!(
         hosted,
         [
@@ -249,6 +236,63 @@ async fn a_listed_append_is_one_system_block_per_entry_in_the_call() -> anyhow::
     );
     run.finish().await;
     Ok(())
+}
+
+/// A project settings file's listed `prompt.append` is the file's, not a host's: `config.<name>`, origin `config:<name>`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_settings_files_listed_append_is_named_as_the_files_in_the_call() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("calls-file-append", &stub)
+        .settings(json!({ "prompt": { "append": [
+            { "name": "harnix:review", "text": "FILE-BLOCK" },
+        ] } }))
+        .start()
+        .await?;
+    stub.script([Reply::text("hello")]);
+    let extra = recorded(&run)?;
+    let (blocks, detail) = first_call_blocks_named(&mut run, extra, "config.").await?;
+    assert_eq!(
+        blocks,
+        [(
+            json!("config.harnix:review"),
+            json!("config:harnix:review"),
+            json!("FILE-BLOCK")
+        )],
+        "{detail}"
+    );
+    let hosted = detail["request"]["system"]
+        .as_array()
+        .expect("system")
+        .iter()
+        .filter(|b| b["origin"].as_str().is_some_and(|o| o.starts_with("host:")))
+        .count();
+    assert_eq!(hosted, 0, "{detail}");
+    run.finish().await;
+    Ok(())
+}
+
+/// The system blocks of a new session's first conversation call whose name
+/// starts with `prefix`, as (source, origin, text), and the call.
+async fn first_call_blocks_named(
+    run: &mut LiveRun,
+    extra: Value,
+    prefix: &str,
+) -> anyhow::Result<(Vec<(Value, Value, Value)>, Value)> {
+    let session = run.session_with(extra).await?;
+    run.turn(&session, "hi").await?;
+    let list = until_calls(run, &session, |r| !r.is_empty()).await?;
+    let index = conversation_rows(&list, &session)[0]["index"]
+        .as_u64()
+        .expect("index");
+    let detail = ok(run.client.session_call(&session, index).await?)?;
+    let blocks = detail["request"]["system"]
+        .as_array()
+        .expect("system")
+        .iter()
+        .filter(|b| b["source"].as_str().is_some_and(|s| s.starts_with(prefix)))
+        .map(|b| (b["source"].clone(), b["origin"].clone(), b["text"].clone()))
+        .collect();
+    Ok((blocks, detail))
 }
 
 /// Between two turns only the prompt append changes: the rows' digests tell which system block moved and that the tool table did not.

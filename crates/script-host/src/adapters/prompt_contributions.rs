@@ -324,18 +324,19 @@ fn encode(ctx: &ScenePromptContext<'_>) -> serde_json::Value {
 }
 
 fn is_taken(name: &str) -> bool {
-    const KERNEL: [&str; 7] = [
-        names::SCENE_SKELETON,
+    const KERNEL: [&str; 4] = [
         names::SKILLS_CATALOG,
         names::MEMORY_SESSION,
         names::RULES,
         names::MCP_INSTRUCTIONS,
-        names::CONFIG_PROMPT_APPEND,
-        names::CONFIG_PROMPT_OVERRIDE,
     ];
-    [names::SCENE_PREFIX, names::HOST_PREFIX]
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
+    [
+        names::SCENE_PREFIX,
+        names::HOST_PREFIX,
+        names::CONFIG_PREFIX,
+    ]
+    .iter()
+    .any(|prefix| name.starts_with(prefix))
         || KERNEL.contains(&name)
 }
 
@@ -681,6 +682,7 @@ mod tests {
             names::SCENE_SKELETON,
             "scene.anything",
             "host.anything",
+            "config.anything",
         ] {
             let carrier = local(move |_| {
                 Ok(serde_json::json!({"name": taken, "order": 1, "content": "mine"}))

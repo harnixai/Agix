@@ -1,6 +1,9 @@
 //! Default values, list-valued keys and the JSON merge rule between layers.
 
 use super::*;
+use crate::overlay::Subject;
+use base::interface::config_source::Tier;
+use base::prompt::BlockOrigin;
 
 #[test]
 fn default_turn_and_agents_settings() {
@@ -79,6 +82,13 @@ fn a_listed_append_replaces_a_lower_tiers_whole_and_a_bad_list_is_left_out() {
             AppendBlock::new("b", "y")
         ]))
     );
+    assert_eq!(load().prompt_append_tier(), Some(Tier::Scene));
+    let names: Vec<_> = load()
+        .prompt_append_blocks()
+        .into_iter()
+        .map(|b| b.name.unwrap())
+        .collect();
+    assert_eq!(names, ["config.a", "config.b"]);
 
     write_settings(
         &scene,
@@ -92,6 +102,90 @@ fn a_listed_append_replaces_a_lower_tiers_whole_and_a_bad_list_is_left_out() {
         .map(|i| (i.key.as_str(), i.error.contains("letters, digits")))
         .collect();
     assert_eq!(ignored, [("prompt.append", true)], "{:?}", settings.ignored);
+}
+
+/// A cloned project's list is named as a settings file's, however it names
+/// its entries; only the layers a host sets name a list `host.<name>`.
+#[test]
+fn a_listed_appends_blocks_are_named_for_the_layer_that_gave_it() {
+    use base::interface::config_source::InMemoryLayers;
+    use serde_json::json;
+
+    let list = |name: &str| json!({"prompt": {"append": [{"name": name, "text": "x"}]}});
+    let load = |layers: &[(Tier, serde_json::Value)]| {
+        let source = layers
+            .iter()
+            .fold(InMemoryLayers::new(), |source, (tier, value)| {
+                source.with(*tier, false, tier.name(), value.clone())
+            });
+        let root = tempfile::tempdir().unwrap();
+        LoadedSettings::load_from(crate::LoadRequest {
+            source: &source,
+            global_dir: root.path().join("global"),
+            scene_dir: root.path().join("scene"),
+            local_dir: root.path().join("project").join(".agix"),
+            scope: "code",
+            default_model: "m",
+            sections: &Sections::none(),
+            layout: Default::default(),
+        })
+    };
+    let named = |settings: &LoadedSettings| -> Vec<(String, BlockOrigin)> {
+        settings
+            .prompt_append_blocks()
+            .into_iter()
+            .map(|b| (b.name.unwrap(), b.origin))
+            .collect()
+    };
+    let host = |name: &str| (format!("host.{name}"), BlockOrigin::Host(name.into()));
+    let config = |name: &str| {
+        (
+            format!("config.{name}"),
+            BlockOrigin::ConfigEntry {
+                config: name.into(),
+            },
+        )
+    };
+
+    let cloned = load(&[
+        (Tier::Global, json!({"app": {"trust_all_projects": false}})),
+        (Tier::Project, list("harnix:review")),
+    ]);
+    assert!(cloned.trust().is_untrusted());
+    assert_eq!(cloned.prompt_append_tier(), Some(Tier::Project));
+    assert_eq!(named(&cloned), [config("harnix:review")]);
+
+    let unfit = json!({"prompt": {"append": [{"name": "a b", "text": "x"}]}});
+    let under_unfit = load(&[(Tier::Global, list("g")), (Tier::Project, unfit)]);
+    assert_eq!(under_unfit.prompt_append_tier(), Some(Tier::Global));
+    assert_eq!(named(&under_unfit), [config("g")]);
+
+    let under_cli = load(&[(Tier::Project, list("p")), (Tier::Cli, list("op"))]);
+    assert_eq!(under_cli.prompt_append_tier(), Some(Tier::Cli));
+    assert_eq!(named(&under_cli), [host("op")]);
+
+    let session_layer = list("mine").as_object().unwrap().clone();
+    let (session, _) = cloned.overlay(&session_layer, Subject::Session, &Sections::none());
+    assert_eq!(named(&session), [host("mine")]);
+    let untouched = json!({"prompt": {"language": "fr"}});
+    let (session, _) = cloned.overlay(
+        untouched.as_object().unwrap(),
+        Subject::Session,
+        &Sections::none(),
+    );
+    assert_eq!(named(&session), [config("harnix:review")]);
+    let (in_memory, _) = cloned.overlay(&session_layer, Subject::Host, &Sections::none());
+    assert_eq!(in_memory.prompt_append_tier(), Some(Tier::Cli));
+
+    let managed = load(&[(Tier::Cli, list("op")), (Tier::Managed, list("policy"))]);
+    assert_eq!(managed.prompt_append_tier(), Some(Tier::Managed));
+    assert_eq!(named(&managed), [config("policy")]);
+    assert_eq!(
+        managed.managed_prompt_append()[0].name.as_deref(),
+        Some("config.policy")
+    );
+    let (session, _) = managed.overlay(&session_layer, Subject::Session, &Sections::none());
+    assert_eq!(named(&session), [config("policy")]);
 }
 
 #[test]

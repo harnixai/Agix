@@ -44,6 +44,14 @@ impl Subject {
             Self::Session => Tier::Session.name(),
         }
     }
+
+    /// The tier this layer's rules and `prompt.append` are recorded as.
+    fn tier(self) -> Tier {
+        match self {
+            Self::Host => Tier::Cli,
+            Self::Session => Tier::Session,
+        }
+    }
 }
 
 /// A key of a session's layer the settings held to their own value, because
@@ -170,11 +178,17 @@ impl LoadedSettings {
         if let Some(providers) = layer.remove("providers") {
             lower["providers"] = crate::loaded::providers_first(&providers, &lower);
         }
-        for (key, error) in merge_fitting(&mut lower, Value::Object(layer), sections) {
+        let layer = Value::Object(layer);
+        let append = crate::prompt_append::append_of(&layer).cloned();
+        for (key, error) in merge_fitting(&mut lower, layer, sections) {
             out.ignore_overlaid(subject, key, error);
         }
+        let took_append = crate::prompt_append::took(append.as_ref(), &lower);
         match serde_json::from_value::<Settings>(lower) {
             Ok(mut values) => {
+                if took_append {
+                    out.note_prompt_append_by(subject.tier());
+                }
                 values.sections.retain(|key, _| sections.get(key).is_some());
                 let before = std::mem::replace(&mut out.values, values);
                 out.settle_providers();
@@ -211,10 +225,7 @@ impl LoadedSettings {
         else {
             return;
         };
-        let tier = match subject {
-            Subject::Host => Tier::Cli,
-            Subject::Session => Tier::Session,
-        };
+        let tier = subject.tier();
         for (list, value) in take_rule_lists(block) {
             let (rules, unread) = read_rule_list(list, value.clone());
             for (key, error) in unread {

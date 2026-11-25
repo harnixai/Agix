@@ -607,7 +607,7 @@ impl Agent {
                 registry: self.prompt.registry().as_ref(),
                 scene: self.scene.as_ref(),
                 prompt_override: values.prompt.override_text.as_deref(),
-                prompt_append: &values.prompt.append_blocks(),
+                prompt_append: &self.settings().prompt_append_blocks(),
                 managed_append: &self.settings().managed_prompt_append(),
                 memory_prompt: memory_prompt.as_deref(),
                 ctx: &ctx,

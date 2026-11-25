@@ -166,7 +166,9 @@ impl Default for AgentsSettings {
 #[non_exhaustive]
 pub struct PromptSettings {
     /// Appended to the end of the system prompt: one text, or a list of
-    /// `{name, text}` blocks, each its own block `host.<name>` in that order.
+    /// `{name, text}` blocks, each its own block in that order: `host.<name>`
+    /// when a host gave the list (a session's own settings, the `cli` layer),
+    /// `config.<name>` when a settings file or the managed layer did.
     /// A layer that sets it replaces what the layers beneath set, list or
     /// text alike.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -192,16 +194,6 @@ pub struct PromptSettings {
     /// (`SceneSpec::path_style`: `harnix` is relative, the rest absolute).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path_style: Option<base::context::config::PathStyle>,
-}
-
-impl PromptSettings {
-    /// The system blocks `append` adds; none when it is unset.
-    pub fn append_blocks(&self) -> Vec<base::prompt::PromptBlock> {
-        self.append
-            .as_ref()
-            .map(crate::PromptAppend::blocks)
-            .unwrap_or_default()
-    }
 }
 
 /// MCP servers, keyed by server name.

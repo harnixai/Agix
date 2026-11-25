@@ -245,7 +245,7 @@
 
 | 键 | 缺省 | 作用域 | 未受信项目 | 改后 | 说明 |
 |---|---|---|---|---|---|
-| `prompt.append` | 无 | 会话 | 照用 | 立即 | 追加到系统提示词末尾。字符串是一块 `config.prompt_append`;数组 `[{"name": "…", "text": "…"}]` 是每项一块 `host.<name>`(origin `{"host": "<name>"}`),按数组次序、整组在同一位置。`name` 非空、只含字母数字与 `_ . : -`、组内不重复,`text` 非空,不合的整个值放不进;`[]` 是什么都不追加。高层写了就整个替换低层的,不按项合并 |
+| `prompt.append` | 无 | 会话 | 照用 | 立即 | 追加到系统提示词末尾。字符串是一块 `config.prompt_append`;数组 `[{"name": "…", "text": "…"}]` 是每项一块,按数组次序、整组在同一位置;块名按给出数组的那一层:会话层与 `cli` 层(宿主给的)是 `host.<name>`(origin `{"host": "<name>"}`),设置文件与 managed 层是 `config.<name>`(origin `{"config": "<name>"}`)。`name` 非空、只含字母数字与 `_ . : -`、组内不重复、不是 `prompt_append` / `prompt_override`,`text` 非空,不合的整个值放不进;`[]` 是什么都不追加。高层写了就整个替换低层的,不按项合并 |
 | `prompt.override` | 无 | 会话 | 信任之后才生效 | 立即 | 整个替换系统提示词 |
 | `prompt.instruction_files` | 无 | 会话 | 信任之后才生效 | 立即 | 再加几份指令文件(如项目外的 `CLAUDE.md`),会话构建时按序读入,与发现的 `AGENTS.md` 一样交给模型;根会话带 `FileChanged` hook 时会监视它们 |
 | `prompt.language` | 无 | 会话 | 照用 | 立即 | 用户语言偏好,如 `zh-CN`、`ja` |

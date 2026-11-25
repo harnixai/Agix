@@ -238,8 +238,7 @@
       "type": "object"
     },
     "BlockOrigin": {
-      "description": "Where a prompt block came from.",
-      "oneOf": [
+      "anyOf": [
         {
           "const": "kernel",
           "description": "The engine itself.",
@@ -278,7 +277,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "An entry of a `settings.prompt.append` list, named as the host named it.",
+          "description": "An entry of a `settings.prompt.append` list the host gave, named as\nthe host named it.",
           "properties": {
             "host": {
               "type": "string"
@@ -288,8 +287,21 @@
             "host"
           ],
           "type": "object"
+        },
+        {
+          "description": "An entry of a `settings.prompt.append` list a settings file gave,\nnamed as the file named it: `{\"config\": \"<name>\"}`.",
+          "properties": {
+            "config": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "config"
+          ],
+          "type": "object"
         }
-      ]
+      ],
+      "description": "Where a prompt block came from."
     },
     "BlockRole": {
       "description": "Where a block is delivered. `User` blocks open the conversation, as one\n`<system-reminder>` message ahead of everything else, instead of joining\nthe system prompt: endpoints that cache the prefix in the order system,\ntools, messages (DeepSeek) would otherwise re-read the whole tool table\nwhenever such a block differs, as the skills inventory does between\nprojects.",
@@ -5846,7 +5858,7 @@
           "type": "string"
         },
         {
-          "description": "One block per entry, `host.<name>`, in this order.",
+          "description": "One block per entry, in this order: `host.<name>` when the host gave\nthe list, `config.<name>` when a settings file did.",
           "items": {
             "$ref": "#/$defs/AppendBlock"
           },
