@@ -120,15 +120,29 @@ pub struct RerunEditsParam {
 /// One system block, by `index` or by `source` (exactly one of them).
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(transform = text_is_required)]
 pub struct SystemEditParam {
     #[serde(default)]
     pub index: Option<u64>,
     #[serde(default)]
     pub source: Option<String>,
-    /// Required: the block's new text, or `null` to remove the block.
+    /// The block's new text, or `null` to remove the block.
+    // Defaulted so that leaving it out reaches `rerunCall`'s own refusal,
+    // which names the edit; the schema still says it is required.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "Option<String>")]
     pub text: Option<Option<String>>,
+}
+
+fn text_is_required(schema: &mut schemars::Schema) {
+    if let Some(text) = schema
+        .get_mut("properties")
+        .and_then(|properties| properties.get_mut("text"))
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        text.remove("default");
+    }
+    schema.insert("required".into(), serde_json::json!(["text"]));
 }
 
 /// Tells a `null` apart from a field left out, which `#[serde(default)]`

@@ -9470,14 +9470,16 @@
           ]
         },
         "text": {
-          "default": null,
-          "description": "Required: the block's new text, or `null` to remove the block.",
+          "description": "The block's new text, or `null` to remove the block.",
           "type": [
             "string",
             "null"
           ]
         }
       },
+      "required": [
+        "text"
+      ],
       "type": "object"
     },
     "SystemKind": {
