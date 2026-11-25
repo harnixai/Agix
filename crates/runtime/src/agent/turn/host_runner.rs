@@ -5,14 +5,13 @@
 //! may run beside one.
 
 use super::tool_env::host_call_ctx;
-use super::tool_exec::{execute_given_tool, ToolExecCtx};
+use super::tool_exec::{execute_given_tool, AnswerTrail, ToolExecCtx};
 use crate::agent::Agent;
 use base::interface::permission::{
     Delegate, PathDenial, PathDenials, PermissionOutcome, PermissionPolicy, PermissionRequest,
     PermissionSet,
 };
-use base::interface::plugin_call::HostToolRunner;
-use base::interface::tool_middleware::ToolOutcome;
+use base::interface::plugin_call::{HostCallOutcome, HostToolRunner};
 use base::permission::PermissionRule;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -44,9 +43,13 @@ impl HostToolRunner for SessionToolRunner {
         input: serde_json::Value,
         rules: Vec<PermissionRule>,
         cancel: CancellationToken,
-    ) -> ToolOutcome {
+    ) -> HostCallOutcome {
         if self.session_ended.is_cancelled() {
-            return Err("the session has ended".into());
+            return HostCallOutcome {
+                outcome: Err("the session has ended".into()),
+                by_middleware: false,
+                stopped: true,
+            };
         }
         let stop = self.session_ended.child_token();
         let permission = match rules.is_empty() {
@@ -54,17 +57,24 @@ impl HostToolRunner for SessionToolRunner {
             false => with_rules(&self.outside_a_turn.permission, rules),
         };
         let id = format!("host-{}", self.environment.new_id());
-        let call = host_call_ctx(&self.outside_a_turn, id, stop.clone(), permission);
+        let trail = Arc::new(AnswerTrail::new(&id));
+        let mut call = host_call_ctx(&self.outside_a_turn, id, stop.clone(), permission);
+        call.answer_trail = Some(trail.clone());
         let run = execute_given_tool(&call, tool, input);
         tokio::pin!(run);
         // The call is not dropped when the host cancels: it is told to stop,
         // and ends the way any cancelled call does, its hooks included.
-        tokio::select! {
+        let outcome = tokio::select! {
             outcome = &mut run => outcome,
             _ = cancel.cancelled() => {
                 stop.cancel();
                 run.await
             }
+        };
+        HostCallOutcome {
+            by_middleware: trail.by_middleware(&outcome, !call.tool_middleware.is_empty()),
+            stopped: stop.is_cancelled(),
+            outcome,
         }
     }
 

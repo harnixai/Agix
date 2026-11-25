@@ -2420,13 +2420,19 @@
               "type": "string"
             },
             "outcome": {
-              "$ref": "#/$defs/McpToolCallOutcome"
+              "description": "`ok`, `tool_error`, or the result's `error.code`; more may come.",
+              "type": "string"
             },
             "project_root": {
+              "description": "`null` for a session with no project.",
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "reached_server": {
+              "description": "As on the result; `true` for `ok` and `tool_error`.",
+              "type": "boolean"
             },
             "run_id": {
               "type": [
@@ -2460,7 +2466,9 @@
             "tool",
             "tool_name",
             "scene",
+            "project_root",
             "outcome",
+            "reached_server",
             "duration_ms"
           ],
           "type": "object"
@@ -4313,7 +4321,7 @@
       "type": "object"
     },
     "McpCallToolParams": {
-      "description": "The `(scene, project_root)` pair a configuration method acts on. Omitted\nmeans this daemon's own; a named `project_root` reaches another project\nthe daemon serves. `null` is refused: these methods act on the *project*\ntier, and a session with no project has none.",
+      "description": "One tool of a server of a pair or of a session, as for `mcp.tools`.",
       "properties": {
         "arguments": {
           "additionalProperties": true,
@@ -4326,10 +4334,8 @@
         },
         "project_root": {
           "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "A project the daemon serves.",
+          "type": "string"
         },
         "run_id": {
           "default": null,
@@ -4808,36 +4814,57 @@
       "description": "The server's hints about a tool; one it says nothing about is absent.",
       "properties": {
         "destructive": {
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "idempotent": {
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "open_world": {
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "read_only": {
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         }
       },
+      "type": "object"
+    },
+    "McpToolAnswer": {
+      "description": "The server's `CallToolResult`, as it sent it. `is_error` is the tool\nitself reporting a failure.",
+      "properties": {
+        "content": {
+          "description": "`content` verbatim, in the shape of the MCP spec revision the server\nspeaks.",
+          "items": true,
+          "type": "array"
+        },
+        "is_error": {
+          "description": "`isError`; `false` when the server left it out.",
+          "type": "boolean"
+        },
+        "ok": {
+          "const": true,
+          "description": "Always `true`.",
+          "type": "boolean"
+        },
+        "structured": {
+          "description": "`structuredContent` verbatim; absent when the server gave none."
+        },
+        "text": {
+          "description": "The `text` of the `type: \"text\"` blocks joined with `\\n`; `\"\"` when\nthere are none.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "is_error",
+        "content",
+        "text"
+      ],
       "type": "object"
     },
     "McpToolCallError": {
       "properties": {
         "code": {
-          "description": "`refused`, `timeout`, `cancelled` or `failed`; more may come.",
+          "description": "`refused`, `answered_by_middleware`, `timeout`, `cancelled` or\n`failed`; more may come.",
           "type": "string"
         },
         "message": {
@@ -4850,63 +4877,38 @@
       ],
       "type": "object"
     },
-    "McpToolCallOutcome": {
-      "description": "How a host's call of an MCP tool ended, for `mcp_tool_called`.",
-      "enum": [
-        "ok",
-        "tool_error",
-        "refused",
-        "timeout",
-        "cancelled",
-        "failed"
-      ],
-      "type": "string"
-    },
-    "McpToolCallResult": {
-      "description": "What a host's call of a tool came to. `ok` with `is_error` is the tool\nitself reporting a failure.",
+    "McpToolCallFailure": {
       "properties": {
-        "content": {
-          "description": "The result's blocks: `text` and `image` as in a message, any other\nkind as the server sent it.",
-          "items": true,
-          "type": [
-            "array",
-            "null"
-          ]
-        },
         "error": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/McpToolCallError"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "is_error": {
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "$ref": "#/$defs/McpToolCallError"
         },
         "ok": {
+          "const": false,
+          "description": "Always `false`.",
           "type": "boolean"
         },
-        "structured": {
-          "description": "The server's `structuredContent`, as it sent it."
-        },
-        "text": {
-          "description": "The text blocks joined with `\\n`.",
-          "type": [
-            "string",
-            "null"
-          ]
+        "reached_server": {
+          "description": "The request was handed to the server, which may have acted on it: a\ntool that is not idempotent is not simply called again.",
+          "type": "boolean"
         }
       },
       "required": [
-        "ok"
+        "ok",
+        "error",
+        "reached_server"
       ],
       "type": "object"
+    },
+    "McpToolCallResult": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/McpToolAnswer"
+        },
+        {
+          "$ref": "#/$defs/McpToolCallFailure"
+        }
+      ],
+      "description": "What a host's call of a tool came to: the server's answer, or why there\nis none."
     },
     "McpToolInfo": {
       "properties": {
@@ -4956,10 +4958,8 @@
       "properties": {
         "project_root": {
           "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "A project the daemon serves.",
+          "type": "string"
         },
         "scene": {
           "default": null,
@@ -11744,13 +11744,19 @@
               "type": "string"
             },
             "outcome": {
-              "$ref": "#/$defs/McpToolCallOutcome"
+              "description": "`ok`, `tool_error`, or the result's `error.code`; more may come.",
+              "type": "string"
             },
             "project_root": {
+              "description": "`null` for a session with no project.",
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "reached_server": {
+              "description": "As on the result; `true` for `ok` and `tool_error`.",
+              "type": "boolean"
             },
             "run_id": {
               "type": [
@@ -11784,7 +11790,9 @@
             "tool",
             "tool_name",
             "scene",
+            "project_root",
             "outcome",
+            "reached_server",
             "duration_ms"
           ],
           "type": "object"

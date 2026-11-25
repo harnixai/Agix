@@ -176,6 +176,7 @@ pub(super) fn test_exec_ctx_with_permission(
         events: None,
         turn: Default::default(),
         checkpoints: None,
+        answer_trail: None,
     }
 }
 

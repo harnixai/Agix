@@ -20,14 +20,23 @@ use crate::permission::PermissionRule;
 
 #[async_trait::async_trait]
 pub trait HostToolRunner: Send + Sync {
-    /// `Err`: no answer — refused, invalid, failed, the session gone; it says which.
     async fn run(
         &self,
         tool: Arc<dyn Tool>,
         input: Value,
         permission_rules: Vec<PermissionRule>,
         cancel: CancellationToken,
-    ) -> ToolOutcome;
+    ) -> HostCallOutcome;
     /// The session's tool `name`, if its tool policy lets it have one.
     fn tool(&self, name: &str) -> Option<Arc<dyn Tool>>;
+}
+
+/// `outcome` `Err`: no answer — refused, invalid, failed, the session gone. `by_middleware`: the
+/// answer is not the tool's own — a `tool.around` gave or changed it, or a `tool.result` rewrote
+/// it. `stopped`: the host or the session's end told the call to stop.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostCallOutcome {
+    pub outcome: ToolOutcome,
+    pub by_middleware: bool,
+    pub stopped: bool,
 }

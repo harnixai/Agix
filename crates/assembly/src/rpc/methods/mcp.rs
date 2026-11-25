@@ -4,6 +4,7 @@
 use super::ConfigTarget;
 use crate::session_pool::api::SettingsTier;
 use serde::Deserialize;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct McpPutServerParams {
@@ -92,9 +93,31 @@ pub struct McpToolsParams {
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(flatten)]
-    pub target: ConfigTarget,
+    pub pair: McpPairParams,
 }
 
+/// A pair, as `mcp.status` names one: omitted is this daemon's own scene and
+/// project.
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+pub struct McpPairParams {
+    #[serde(default)]
+    pub scene: Option<String>,
+    /// A project the daemon serves.
+    #[serde(default, deserialize_with = "a_project")]
+    #[schemars(with = "String")]
+    pub project_root: Option<PathBuf>,
+}
+
+fn a_project<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<PathBuf>, D::Error> {
+    match serde_json::Value::deserialize(d)? {
+        serde_json::Value::String(path) => Ok(Some(PathBuf::from(path))),
+        _ => Err(serde::de::Error::custom(
+            "project_root is a path; leave it out for this daemon's own project",
+        )),
+    }
+}
+
+/// One tool of a server of a pair or of a session, as for `mcp.tools`.
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct McpCallToolParams {
     /// The server's key in settings, as `mcp.status` names it.
@@ -107,7 +130,7 @@ pub struct McpCallToolParams {
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(flatten)]
-    pub target: ConfigTarget,
+    pub pair: McpPairParams,
     /// Default 120000, at most 600000.
     #[serde(default)]
     pub timeout_ms: Option<u64>,

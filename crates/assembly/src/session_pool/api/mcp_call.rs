@@ -1,5 +1,5 @@
 //! 宿主不经会话直接调一个 MCP 工具（`mcp.callTool`）与列出能调的工具（`mcp.tools`）：
-//! 请求、结局、工具的描述，审计事件里的结局，以及这种调用的 hook 调用带的 `mcp_call` 标记。
+//! 请求、结局、工具的描述，以及这种调用的 hook 调用带的 `mcp_call` 标记。
 
 use super::McpServerState;
 use serde::Serialize;
@@ -66,76 +66,69 @@ pub struct McpCallOrigin {
     pub run_id: Option<String>,
 }
 
-/// What a host's call of a tool came to. `ok` with `is_error` is the tool
+/// What a host's call of a tool came to: the server's answer, or why there
+/// is none.
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum McpToolCallResult {
+    Answered(McpToolAnswer),
+    NotAnswered(McpToolCallFailure),
+}
+
+/// The server's `CallToolResult`, as it sent it. `is_error` is the tool
 /// itself reporting a failure.
 #[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
-pub struct McpToolCallResult {
+pub struct McpToolAnswer {
+    /// Always `true`.
+    #[schemars(extend("const" = true))]
     pub ok: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub is_error: Option<bool>,
-    /// The result's blocks: `text` and `image` as in a message, any other
-    /// kind as the server sent it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content: Option<Vec<serde_json::Value>>,
-    /// The text blocks joined with `\n`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    /// The server's `structuredContent`, as it sent it.
+    /// `isError`; `false` when the server left it out.
+    pub is_error: bool,
+    /// `content` verbatim, in the shape of the MCP spec revision the server
+    /// speaks.
+    pub content: Vec<serde_json::Value>,
+    /// The `text` of the `type: "text"` blocks joined with `\n`; `""` when
+    /// there are none.
+    pub text: String,
+    /// `structuredContent` verbatim; absent when the server gave none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<McpToolCallError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+pub struct McpToolCallFailure {
+    /// Always `false`.
+    #[schemars(extend("const" = false))]
+    pub ok: bool,
+    pub error: McpToolCallError,
+    /// The request was handed to the server, which may have acted on it: a
+    /// tool that is not idempotent is not simply called again.
+    pub reached_server: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct McpToolCallError {
-    /// `refused`, `timeout`, `cancelled` or `failed`; more may come.
+    /// `refused`, `answered_by_middleware`, `timeout`, `cancelled` or
+    /// `failed`; more may come.
     pub code: String,
     pub message: String,
 }
 
 impl McpToolCallResult {
-    /// How the call ended, as the audit event says it.
-    pub fn outcome(&self) -> McpToolCallOutcome {
-        match (&self.error, self.is_error) {
-            (None, Some(true)) => McpToolCallOutcome::ToolError,
-            (None, _) => McpToolCallOutcome::Ok,
-            (Some(error), _) => McpToolCallOutcome::from_code(&error.code),
-        }
-    }
-}
-
-/// How a host's call of an MCP tool ended, for `mcp_tool_called`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum McpToolCallOutcome {
-    Ok,
-    ToolError,
-    Refused,
-    Timeout,
-    Cancelled,
-    Failed,
-}
-
-impl McpToolCallOutcome {
-    pub fn as_str(self) -> &'static str {
+    /// How the call ended, as the audit event says it: `ok`, `tool_error`,
+    /// or the error's `code`.
+    pub fn outcome(&self) -> &str {
         match self {
-            Self::Ok => "ok",
-            Self::ToolError => "tool_error",
-            Self::Refused => "refused",
-            Self::Timeout => "timeout",
-            Self::Cancelled => "cancelled",
-            Self::Failed => "failed",
+            Self::Answered(answer) if answer.is_error => "tool_error",
+            Self::Answered(_) => "ok",
+            Self::NotAnswered(failure) => &failure.error.code,
         }
     }
 
-    fn from_code(code: &str) -> Self {
-        match code {
-            "refused" => Self::Refused,
-            "timeout" => Self::Timeout,
-            "cancelled" => Self::Cancelled,
-            _ => Self::Failed,
+    pub fn reached_server(&self) -> bool {
+        match self {
+            Self::Answered(_) => true,
+            Self::NotAnswered(failure) => failure.reached_server,
         }
     }
 }
@@ -173,11 +166,15 @@ pub struct McpToolInfo {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct McpToolAnnotations {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
     pub read_only: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
     pub destructive: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
     pub idempotent: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
     pub open_world: Option<bool>,
 }

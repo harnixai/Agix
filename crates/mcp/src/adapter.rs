@@ -49,15 +49,35 @@ pub struct McpToolAdapter {
 /// was handed, as the server answered it: empty until the call reached the
 /// server, so a call the pipeline refused leaves nothing here.
 #[derive(Clone, Default)]
-pub struct McpCallRecord(Arc<Mutex<Option<McpCallOutcome>>>);
+pub struct McpCallRecord(Arc<Recorded>);
+
+#[derive(Default)]
+struct Recorded {
+    outcome: Mutex<Option<McpCallOutcome>>,
+    sent: std::sync::atomic::AtomicBool,
+}
 
 impl McpCallRecord {
     pub fn take(&self) -> Option<McpCallOutcome> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
+        self.0
+            .outcome
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+    }
+
+    /// Whether the request was handed to the server, answered or not: from
+    /// then on the server may have acted on it.
+    pub fn reached_server(&self) -> bool {
+        self.0.sent.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn put(&self, outcome: McpCallOutcome) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(outcome);
+        *self.0.outcome.lock().unwrap_or_else(|e| e.into_inner()) = Some(outcome);
+    }
+
+    fn sending(&self) {
+        self.0.sent.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -134,15 +154,21 @@ impl McpToolAdapter {
             .collect()
     }
 
-    /// This tool, keeping what its one call comes to in the record handed
-    /// back beside it.
+    /// This tool as a host calls it, keeping what its one call comes to in
+    /// the record handed back beside it. It always asks the server: the
+    /// shared cache answers the model's repeated reads, not a host polling a
+    /// state.
     pub fn recording(&self) -> (Self, McpCallRecord) {
         let record = McpCallRecord::default();
-        let tool = Self {
-            record: Some(record.clone()),
+        (self.recording_into(record.clone()), record)
+    }
+
+    /// [`Self::recording`] into a record the caller already holds.
+    pub fn recording_into(&self, record: McpCallRecord) -> Self {
+        Self {
+            record: Some(record),
             ..self.clone()
-        };
-        (tool, record)
+        }
     }
 
     /// Go by `full_name` instead — what [`crate::naming::tool_names`] gave
@@ -241,10 +267,9 @@ impl Tool for McpToolAdapter {
         let args = input.as_object().cloned().unwrap_or_default();
         let cacheable = self.is_cacheable();
 
-        if cacheable {
+        if cacheable && self.record.is_none() {
             let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(cached) = cache.get(&self.server_name, &self.tool_name, &args) {
-                self.keep(&Ok(cached.clone()));
                 return Ok(into_tool_result(cached));
             }
         }
@@ -264,6 +289,14 @@ impl Tool for McpToolAdapter {
             }),
             ..Default::default()
         };
+        let send = async {
+            if let Some(record) = &self.record {
+                record.sending();
+            }
+            self.client
+                .call_tool(&self.tool_name, args.clone(), &scope)
+                .await
+        };
         let result = tokio::select! {
             biased;
             _ = ctx.cancel.cancelled() => {
@@ -272,7 +305,7 @@ impl Tool for McpToolAdapter {
                 }
                 return Err(ToolError::Cancelled);
             }
-            r = self.client.call_tool(&self.tool_name, args.clone(), &scope) => r,
+            r = send => r,
         };
         self.keep(&result);
 
@@ -567,6 +600,7 @@ mod tests {
                 is_error: false,
                 meta: None,
                 structured: None,
+                raw_content: Vec::new(),
             },
         );
         let adapter = McpToolAdapter::new(client.clone(), meta("echo"));
@@ -610,6 +644,7 @@ mod tests {
                 is_error: true,
                 meta: None,
                 structured: None,
+                raw_content: Vec::new(),
             },
         );
         let adapter = McpToolAdapter::new(client, meta("fail"));
@@ -626,6 +661,7 @@ mod tests {
             is_error,
             meta: None,
             structured: None,
+            raw_content: Vec::new(),
         }
     }
 
@@ -710,6 +746,7 @@ mod tests {
                 is_error: false,
                 meta: None,
                 structured: None,
+                raw_content: Vec::new(),
             },
         );
         let adapter = McpToolAdapter::new(client, meta("multi"));
@@ -736,6 +773,7 @@ mod tests {
                 is_error: false,
                 meta: None,
                 structured: None,
+                raw_content: Vec::new(),
             },
         );
         let adapter = McpToolAdapter::new(client, meta("img"));
@@ -776,6 +814,7 @@ mod tests {
                 is_error: false,
                 meta: None,
                 structured: None,
+                raw_content: Vec::new(),
             },
         );
         let adapter = McpToolAdapter::new(client, meta("shot"));
@@ -824,6 +863,7 @@ mod tests {
             is_error: true,
             meta: None,
             structured: Some(json!({"id": 1})),
+            raw_content: Vec::new(),
         };
         client.push_response("put", answer.clone());
         let adapter = McpToolAdapter::new(client, meta("put"));

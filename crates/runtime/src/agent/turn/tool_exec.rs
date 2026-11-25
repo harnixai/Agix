@@ -12,8 +12,10 @@ use base::context::Session;
 use base::event::AgentEvent;
 use std::sync::Arc;
 
+mod answer_trail;
 mod result_transform;
 pub(crate) use super::caller::{Caller, CommandCalls};
+pub(crate) use answer_trail::AnswerTrail;
 pub(in crate::agent::turn) use result_transform::apply_result_transformers;
 
 /// Context bundle for tool execution — owned to survive async closures.
@@ -93,6 +95,7 @@ pub(crate) struct ToolExecCtx {
     /// Where a file tool's write is recorded before it happens; `None` when
     /// the session keeps no checkpoints.
     pub checkpoints: Option<Arc<crate::checkpoint::Checkpoints>>,
+    pub answer_trail: Option<Arc<AnswerTrail>>,
 }
 
 /// Deliver a host's answer to the `execute_tool_inner` call awaiting it.
@@ -333,7 +336,11 @@ async fn dispatch(
             let name = name.to_string();
             let input = input.clone();
             let given = given.cloned();
-            async move { execute_tool_inner(&ctx, &name, given.as_ref(), input).await }
+            async move {
+                let outcome = execute_tool_inner(&ctx, &name, given.as_ref(), input).await;
+                AnswerTrail::note_inner(&ctx, &outcome);
+                outcome
+            }
         },
     )
     .await

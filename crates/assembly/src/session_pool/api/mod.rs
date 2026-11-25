@@ -47,9 +47,9 @@ pub use mcp::{
     McpServerWritten, McpStatusList,
 };
 pub use mcp_call::{
-    McpCallOrigin, McpServerTools, McpToolAnnotations, McpToolCall, McpToolCallError,
-    McpToolCallOutcome, McpToolCallResult, McpToolCallTarget, McpToolInfo, McpToolList,
-    MCP_CALL_DEFAULT_TIME, MCP_CALL_TIME_LIMIT,
+    McpCallOrigin, McpServerTools, McpToolAnnotations, McpToolAnswer, McpToolCall,
+    McpToolCallError, McpToolCallFailure, McpToolCallResult, McpToolCallTarget, McpToolInfo,
+    McpToolList, MCP_CALL_DEFAULT_TIME, MCP_CALL_TIME_LIMIT,
 };
 pub(crate) use options::requested_permission_mode;
 pub use options::{

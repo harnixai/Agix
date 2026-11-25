@@ -1,7 +1,7 @@
 //! 工具结果变换器的应用：在所有钩子之后、结果交给调用方之前，对文本与图片做最后一道改写。
 
 use super::super::tool_result::PendingToolImage;
-use super::ToolExecCtx;
+use super::{AnswerTrail, ToolExecCtx};
 
 impl ToolExecCtx {
     /// What this call read is not what the model is shown, so a repeat of the
@@ -66,7 +66,7 @@ pub(in crate::agent::turn) fn apply_result_transformers(
             .collect(),
         is_error,
     };
-    base::interface::tool_result::apply(&ctx.result_transformers, &call, &mut draft);
+    transform(ctx, &call, &mut draft);
     // The structured form is the same answer as the text; once a transformer
     // has rewritten the text (a redaction, say), handing a program the
     // untouched structure would undo it.
@@ -98,6 +98,18 @@ pub(in crate::agent::turn) fn apply_result_transformers(
         })
     };
     (outcome, images)
+}
+
+/// The transformers over `draft`, noting on a host call's trail whether
+/// they changed it.
+fn transform(
+    ctx: &ToolExecCtx,
+    call: &base::interface::tool_middleware::ToolCall,
+    draft: &mut base::interface::tool_result::ToolResultDraft,
+) {
+    let before = AnswerTrail::watches(ctx).then(|| draft.clone());
+    base::interface::tool_result::apply(&ctx.result_transformers, call, draft);
+    AnswerTrail::note_transformed(ctx, before.is_some_and(|before| before != *draft));
 }
 
 /// Whether the transformers would rewrite the diff itself: the call's text

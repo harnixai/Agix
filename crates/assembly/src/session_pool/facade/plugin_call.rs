@@ -13,8 +13,7 @@ use api::{
     PluginCallTarget, PluginFunctionInfo,
 };
 use base::command::PluginFunction;
-use base::interface::plugin_call::HostToolRunner;
-use base::interface::tool_middleware::ToolOutcome;
+use base::interface::plugin_call::{HostCallOutcome, HostToolRunner};
 use base::permission::PermissionRule;
 
 impl SessionPool {
@@ -278,15 +277,14 @@ fn failure(code: &str, message: String) -> PluginCallResult {
 }
 
 /// The pipeline's answer as the host reads it: the function's own result
-/// when it ran, else why the pipeline did not run it. Only the function's
-/// tool gives a structured result, so an answer without one was made up or
-/// rewritten on the way — by a `tool.around` that answered in its place or a
-/// result transformer — and is a failure, never the function's success.
-fn result_of(function: &str, outcome: ToolOutcome) -> PluginCallResult {
-    match outcome {
+/// when it ran, else why the pipeline did not run it. An answer made up or
+/// changed on the way — by a `tool.around` that answered in its place or a
+/// result transformer — is a failure, never the function's success.
+fn result_of(function: &str, host: HostCallOutcome) -> PluginCallResult {
+    match host.outcome {
         Ok(answer) => match answer.structured {
-            Some(structured) => parse_structured(structured),
-            None => failure(
+            Some(structured) if !host.by_middleware => parse_structured(structured),
+            _ => failure(
                 "answered_by_middleware",
                 format!(
                     "`{function}`'s own result did not come back: a tool.around script \

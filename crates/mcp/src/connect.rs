@@ -395,6 +395,11 @@ impl StdioMcpClient {
             is_error: result.is_error.unwrap_or(false),
             meta: None,
             structured: result.structured_content.clone(),
+            raw_content: result
+                .content
+                .iter()
+                .map(|block| serde_json::to_value(block).unwrap_or(serde_json::Value::Null))
+                .collect(),
         })
     }
 

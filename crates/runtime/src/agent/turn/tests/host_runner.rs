@@ -217,6 +217,7 @@ async fn host_calls(session: &Session, tool: PluginCall) -> ToolOutcome {
             CancellationToken::new(),
         )
         .await
+        .outcome
 }
 
 #[tokio::test]
@@ -322,6 +323,7 @@ async fn the_rules_a_call_brings_hold_for_it_and_its_calls_only() {
         vec![rule(RuleBehavior::Deny, "PluginCall")],
     )
     .await
+    .outcome
     .unwrap_err();
     assert!(refused.contains("denied by rule"), "{refused}");
     let again = host_calls(&s, PluginCall::new(true)).await;
@@ -332,6 +334,7 @@ async fn the_rules_a_call_brings_hold_for_it_and_its_calls_only() {
         vec![rule(RuleBehavior::Allow, "Touch")],
     )
     .await
+    .outcome
     .expect("the entry runs");
     assert_eq!(allowed.text, "Touch done");
 
@@ -340,6 +343,7 @@ async fn the_rules_a_call_brings_hold_for_it_and_its_calls_only() {
         vec![rule(RuleBehavior::Deny, "Look")],
     )
     .await
+    .outcome
     .expect("the entry runs");
     assert!(denied.text.contains("denied by rule"), "{}", denied.text);
 }
@@ -357,6 +361,7 @@ async fn a_runner_of_an_ended_session_runs_nothing() {
             CancellationToken::new(),
         )
         .await
+        .outcome
         .unwrap_err();
     assert!(refused.contains("ended"), "{refused}");
 }
@@ -476,7 +481,7 @@ async fn a_host_call_runs_beside_a_turn_that_is_running_a_call() {
     )
     .await
     .expect("the host's call waits on nothing the turn holds");
-    assert_eq!(beside.expect("it runs").text, "Touch done");
+    assert_eq!(beside.outcome.expect("it runs").text, "Touch done");
 
     release.notify_one();
     tokio::time::timeout(hang_guard, async {
@@ -491,4 +496,111 @@ async fn a_host_call_runs_beside_a_turn_that_is_running_a_call() {
     .expect("the turn completes once its call is released");
     drop(input);
     engine.abort();
+}
+
+struct AnswersInstead;
+
+#[async_trait::async_trait]
+impl base::interface::tool_middleware::ToolMiddleware for AnswersInstead {
+    async fn around(&self, _: &ToolCall, _: &mut ToolExec, _: NextDispatch<'_>) -> ToolOutcome {
+        Ok(base::interface::tool_middleware::ToolAnswer::text(
+            "from the ring",
+        ))
+    }
+}
+
+/// Rewrites `.0` wherever a result says it.
+struct Rewrites(&'static str);
+
+impl base::interface::tool_result::ToolResultTransformer for Rewrites {
+    fn transform(&self, _: &ToolCall, draft: &mut base::interface::tool_result::ToolResultDraft) {
+        draft.text = draft.text.replace(self.0, "[rewritten]");
+    }
+}
+
+fn runner_with(
+    build: impl FnOnce(Builder) -> Builder,
+) -> (
+    Arc<dyn HostToolRunner>,
+    crate::agent::Agent,
+    tempfile::TempDir,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = Arc::new(InMemoryToolRegistry::new());
+    tools.register(Arc::new(SubTool("Touch")));
+    let model = super::support::FixedUsageModel {
+        usage: Default::default(),
+    };
+    let builder = Builder::new()
+        .scene(Arc::new(scene::code::spec(
+            scene::code::Interaction::Interactive,
+        )))
+        .model(Arc::new(model))
+        .settings(Arc::new(recall_test_settings(dir.path())))
+        .tools(tools)
+        .permission(PermissionSet::of(Arc::new(
+            permissions::policy::Policy::new(permissions::ruleset::RuleSet::new(Vec::new())),
+        )))
+        .skip_warmup(true);
+    let (agent, _events, _input) = build(builder).build().expect("build should succeed");
+    (agent.host_tool_runner(), agent, dir)
+}
+
+async fn host_call(
+    runner: &Arc<dyn HostToolRunner>,
+    tool: PluginCall,
+) -> base::interface::plugin_call::HostCallOutcome {
+    runner
+        .run(
+            Arc::new(tool),
+            json!({}),
+            vec![rule(RuleBehavior::Allow, "Touch")],
+            CancellationToken::new(),
+        )
+        .await
+}
+
+#[tokio::test]
+async fn an_answer_the_tool_did_not_give_is_told_apart_from_its_own() {
+    let s = session(Vec::new());
+    let through = s
+        .runner
+        .run(
+            Arc::new(PluginCall::new(false)),
+            json!({}),
+            Vec::new(),
+            CancellationToken::new(),
+        )
+        .await;
+    assert_eq!(through.outcome.as_ref().expect("runs").text, "ran");
+    assert!(!through.by_middleware && !through.stopped, "{through:?}");
+
+    let (runner, _agent, _dir) = runner_with(|b| b.tool_middleware(Arc::new(AnswersInstead)));
+    let answered = host_call(&runner, PluginCall::new(false)).await;
+    assert_eq!(
+        answered.outcome.as_ref().expect("answered").text,
+        "from the ring"
+    );
+    assert!(answered.by_middleware, "{answered:?}");
+
+    let (runner, _agent, _dir) =
+        runner_with(|b| b.tool_result_transformer(Arc::new(Rewrites("ran"))));
+    let rewritten = host_call(&runner, PluginCall::new(false)).await;
+    assert!(rewritten.by_middleware, "{rewritten:?}");
+
+    let (runner, _agent, _dir) =
+        runner_with(|b| b.tool_result_transformer(Arc::new(Rewrites("nothing like it"))));
+    let untouched = host_call(&runner, PluginCall::new(false)).await;
+    assert!(!untouched.by_middleware, "{untouched:?}");
+}
+
+/// What a transformer does to a call the tool makes is what the tool was
+/// handed, not a rewrite of the answer the host gets.
+#[tokio::test]
+async fn a_rewrite_of_a_call_the_tool_makes_is_not_a_rewrite_of_its_answer() {
+    let (runner, _agent, _dir) =
+        runner_with(|b| b.tool_result_transformer(Arc::new(Rewrites("Touch done"))));
+    let outcome = host_call(&runner, PluginCall::calling("Touch", false)).await;
+    assert_eq!(outcome.outcome.as_ref().expect("runs").text, "[rewritten]");
+    assert!(!outcome.by_middleware, "{outcome:?}");
 }

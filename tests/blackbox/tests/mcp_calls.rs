@@ -196,6 +196,27 @@ async fn a_call_hands_back_what_the_server_answered_and_is_audited() -> anyhow::
         "{report}"
     );
     assert!(report.get("error").is_none(), "{report}");
+    assert!(report.get("reached_server").is_none(), "{report}");
+
+    let blocks = call_tool(
+        &mut run.client,
+        json!({ "server": "toy", "tool": "blocks" }),
+    )
+    .await?;
+    assert_eq!(
+        blocks["content"],
+        json!([
+            { "type": "text", "text": "first",
+              "annotations": { "audience": ["user"], "priority": 0.5 },
+              "_meta": { "toy/origin": "blocks" } },
+            { "type": "image", "data": "aGk=", "mimeType": "image/png" },
+            { "type": "text", "text": "second" }
+        ]),
+        "the server's blocks, verbatim: {blocks}"
+    );
+    assert_eq!(blocks["text"], "first\nsecond", "{blocks}");
+    assert_eq!(blocks["is_error"], false, "{blocks}");
+    assert!(blocks.get("structured").is_none(), "{blocks}");
 
     let failed = call_tool(
         &mut run.client,
@@ -264,6 +285,8 @@ async fn a_call_hands_back_what_the_server_answered_and_is_audited() -> anyhow::
     assert_eq!(first["tool_name"], "mcp__toy__report", "{first}");
     assert_eq!(first["run_id"], "r-1", "{first}");
     assert_eq!(first["scene"], "code", "{first}");
+    assert_eq!(first["reached_server"], true, "{first}");
+    assert!(first["project_root"].is_string(), "{first}");
     assert!(first["duration_ms"].is_u64(), "{first}");
     assert!(first.get("session_id").is_none(), "{first}");
     for event in events.all() {
@@ -412,6 +435,7 @@ async fn deny_rules_and_plan_mode_refuse_a_call_before_the_server_hears_of_it() 
         .await?;
         assert_eq!(result["ok"], false, "{result}");
         assert_eq!(error_code(&result), "refused", "{result}");
+        assert_eq!(result["reached_server"], false, "{result}");
     }
     let echoed = call_tool(
         &mut run.client,
@@ -535,6 +559,7 @@ async fn a_connection_hook_is_asked_with_the_mcp_call_marker_and_can_block() -> 
     let params = json!({ "server": "toy", "tool": "ping", "arguments": { "message": "b" } });
     let (result, asked) = call_answering(&mut host, params, Some("the host says no")).await?;
     assert_eq!(error_code(&result), "refused", "{result}");
+    assert_eq!(result["reached_server"], false, "{result}");
     assert!(
         result["error"]["message"]
             .as_str()

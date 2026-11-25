@@ -610,6 +610,23 @@ impl ToyServer {
         result.structured_content = Some(body);
         result
     }
+
+    #[tool(
+        description = "Answer with a text block carrying annotations and _meta, an image, and a \
+                       second text block."
+    )]
+    fn blocks(&self, Parameters(Empty {}): Parameters<Empty>) -> CallToolResult {
+        self.state.record("blocks");
+        let blocks: Vec<ContentBlock> = serde_json::from_value(json!([
+            { "type": "text", "text": "first",
+              "annotations": { "audience": ["user"], "priority": 0.5 },
+              "_meta": { "toy/origin": "blocks" } },
+            { "type": "image", "data": "aGk=", "mimeType": "image/png" },
+            { "type": "text", "text": "second" }
+        ]))
+        .unwrap_or_default();
+        CallToolResult::success(blocks)
+    }
 }
 
 fn report_schema() -> Arc<rmcp::model::JsonObject> {

@@ -1,8 +1,9 @@
 //! 宿主不经会话调 MCP 工具：`mcp.tools` 列出一对 (项目, 场景) 或一个会话能调的工具，
 //! `mcp.callTool` 用它们已有的连接调一个。调用作为一次 `mcp__<server>__<tool>` 走宿主调用的
-//! 那条工具管线（权限、hook、`tool.around`、遥测）：带会话时在会话的引擎上，不带会话时在
-//! 只拿到这一个 server 的临时引擎上，不占脚本名额。结果是 server 答的原样；每次有结果的调用
-//! 发一条 `mcp_tool_called`，不带参数和结果。
+//! 那条工具管线（权限、hook、`tool.around`、`tool.result`、遥测）：带会话时在会话的引擎上，
+//! 不带会话时在只拿到这一个 server 的临时引擎上，不占脚本名额。交给宿主的只有 server 的原样
+//! 答复，管线里有谁替它作答或改了它，就答 `answered_by_middleware`；每次有结果的调用发一条
+//! `mcp_tool_called`，不带参数和结果。
 
 use super::connect::McpServersOf;
 use super::*;
@@ -10,11 +11,19 @@ use crate::session_pool::facade::host_call::TransientEngine;
 use crate::session_pool::parts::specs::SessionSpec;
 use crate::session_pool::*;
 use api::{
-    HostCallOrigin, McpCallOrigin, McpServerState, McpServerTools, McpToolCall, McpToolCallOutcome,
-    McpToolCallResult, McpToolCallTarget, McpToolInfo, McpToolList,
+    HostCallOrigin, McpCallOrigin, McpServerState, McpServerTools, McpToolCall, McpToolCallResult,
+    McpToolCallTarget, McpToolInfo, McpToolList,
 };
-use mcp::adapter::{McpCallOutcome, McpToolAdapter};
-use mcp::client::{McpCallResult, McpContent};
+use base::interface::plugin_call::{HostCallOutcome, HostToolRunner};
+use mcp::adapter::{McpCallOutcome, McpCallRecord, McpToolAdapter};
+use mcp::client::McpCallResult;
+use std::sync::OnceLock;
+
+const REFUSED: &str = "refused";
+const ANSWERED_BY_MIDDLEWARE: &str = "answered_by_middleware";
+const TIMEOUT: &str = "timeout";
+const CANCELLED: &str = "cancelled";
+const FAILED: &str = "failed";
 
 /// Where a host's call or listing finds its servers.
 struct McpPlace {
@@ -24,10 +33,24 @@ struct McpPlace {
     kept: McpServersOf,
 }
 
+/// One call on its way to the pipeline: the server's tools are looked up
+/// inside the call's time, where `mcp.cancel` reaches it too.
+struct McpCallRun {
+    place: McpPlace,
+    one: McpManager,
+    server: String,
+    tool: String,
+    input: serde_json::Value,
+    origin: Arc<HostCallOrigin>,
+    record: McpCallRecord,
+    named: Arc<OnceLock<String>>,
+}
+
 impl SessionPool {
     /// The servers of the pair or session and the tools each offers there,
     /// connecting the pair as its first session would. `server` narrows the
-    /// list to that one, which must be configured.
+    /// list to that one, which must be configured. A session's list is what
+    /// that session could call.
     pub async fn mcp_tools(
         &self,
         server: Option<&str>,
@@ -41,6 +64,14 @@ impl SessionPool {
         if let Some(name) = server {
             self.listed_server(&place, &statuses, name)?;
         }
+        let runner = match &place.session_id {
+            Some(id) => Some(self.session_runner(id).await?.0),
+            None => None,
+        };
+        let offered = |adapter: &McpToolAdapter| match &runner {
+            Some(runner) => runner.tool(adapter.full_name()).is_some(),
+            None => runtime::scene_permits(&place.scene, adapter),
+        };
         let wanted = |name: &str| place.kept.gets(name) && server.is_none_or(|n| n == name);
         let mut view = central.share_where(wanted);
         view.refresh_tools().await;
@@ -52,8 +83,7 @@ impl SessionPool {
                     McpServerState::Connected | McpServerState::Disconnected => view
                         .adapters()
                         .iter()
-                        .filter(|a| a.server_name() == status.name)
-                        .filter(|a| runtime::scene_permits(&place.scene, a.as_ref()))
+                        .filter(|a| a.server_name() == status.name && offered(a))
                         .map(|a| tool_info(a))
                         .collect(),
                     _ => Vec::new(),
@@ -71,9 +101,9 @@ impl SessionPool {
     }
 
     /// Call one tool of a connected server and hand back what it answered,
-    /// or why it was not called. `Err` is a call that cannot be made: an
-    /// unknown server or tool, a server in no state to be called, a time
-    /// over the limit, no such scene, project or session.
+    /// or why it did not. `Err` is a call that cannot be made: an unknown
+    /// server or tool, a server in no state to be called, a time over the
+    /// limit, no such scene, project or session.
     pub async fn call_mcp_tool(
         &self,
         call: McpToolCall,
@@ -87,32 +117,39 @@ impl SessionPool {
             .await;
         let statuses = self.statuses_at(&place, &central).await;
         callable(self.listed_server(&place, &statuses, &call.server)?)?;
-        let mut one = central.share_where(|name| name == call.server);
-        one.refresh_tools().await;
-        let adapter = tool_named(&one, &call.server, &call.tool)?;
         let audit = Audit {
+            tool_name: Arc::default(),
             server: call.server.clone(),
             tool: call.tool.clone(),
-            tool_name: adapter.full_name().to_string(),
             scene: place.scene.id.clone(),
             project_root: place.project_root.clone(),
             session_id: place.session_id.clone(),
             run_id: call.run_id.clone(),
         };
-        let origin = Arc::new(HostCallOrigin::Mcp(McpCallOrigin {
+        let record = McpCallRecord::default();
+        let run = McpCallRun {
+            one: central.share_where(|name| name == call.server),
+            place,
+            input: serde_json::Value::Object(call.arguments),
+            origin: Arc::new(HostCallOrigin::Mcp(McpCallOrigin {
+                server: call.server.clone(),
+                tool: call.tool.clone(),
+                run_id: call.run_id,
+            })),
             server: call.server,
             tool: call.tool,
-            run_id: call.run_id,
-        }));
-        let input = serde_json::Value::Object(call.arguments);
-        let run = move |pool: Arc<SessionPool>, stop: CancellationToken| async move {
-            pool.run_mcp_call(place, one, adapter, input, origin, stop)
-                .await
+            record: record.clone(),
+            named: audit.tool_name.clone(),
         };
         let result = self
-            .within_time(time, &cancel, run, |ended| ran_out(time, ended))
+            .within_time(
+                time,
+                &cancel,
+                move |pool: Arc<SessionPool>, stop| pool.run_mcp_call(run, stop),
+                |ended| ran_out(time, ended, record.reached_server()),
+            )
             .await?;
-        self.emit_event(audit.event(result.outcome(), started.elapsed()));
+        self.emit_event(audit.event(&result, started.elapsed()));
         Ok(result)
     }
 
@@ -122,15 +159,16 @@ impl SessionPool {
                 project_root,
                 scene,
             } => {
-                self.check_pair(project_root.as_deref(), scene)?;
+                let scene = self.active_scene(scene)?;
+                self.check_pair(project_root.as_deref(), &scene.id)?;
                 let project_root = project_root.clone().unwrap_or_else(|| self.cwd().into());
                 let plugins = self.session_plugins(&SessionSpec::default());
                 Ok(McpPlace {
                     kept: self
-                        .mcp_servers_of(Some(&project_root), scene, &plugins)
+                        .mcp_servers_of(Some(&project_root), &scene.id, &plugins)
                         .await,
                     project_root: Some(project_root),
-                    scene: self.scene_spec(scene)?,
+                    scene,
                     session_id: None,
                 })
             }
@@ -150,6 +188,16 @@ impl SessionPool {
                 })
             }
         }
+    }
+
+    /// `scene` among the scenes a session can be made in now, as
+    /// `session.create` finds it.
+    fn active_scene(&self, scene: &str) -> Result<Arc<SceneSpec>, PoolError> {
+        self.scenes
+            .resolve(Some(scene))
+            .ok_or_else(|| PoolError::SceneNotActive {
+                scene: scene.to_string(),
+            })
     }
 
     fn scene_spec(&self, scene: &str) -> Result<Arc<SceneSpec>, PoolError> {
@@ -205,21 +253,41 @@ impl SessionPool {
 
     async fn run_mcp_call(
         self: Arc<Self>,
-        place: McpPlace,
-        one: McpManager,
-        adapter: Arc<McpToolAdapter>,
-        input: serde_json::Value,
-        origin: Arc<HostCallOrigin>,
+        run: McpCallRun,
         stop: CancellationToken,
     ) -> Result<McpToolCallResult, PoolError> {
+        let McpCallRun {
+            place,
+            mut one,
+            server,
+            tool,
+            input,
+            origin,
+            record,
+            named,
+        } = run;
+        tokio::select! {
+            biased;
+            _ = stop.cancelled() => {
+                return Ok(failure(CANCELLED, false, "the call was cancelled before it reached the server"));
+            }
+            _ = one.refresh_tools() => {}
+        }
+        let adapter = tool_named(&one, &server, &tool)?;
         let name = adapter.full_name().to_string();
-        let (recording, record) = adapter.recording();
-        let tool: Arc<dyn base::tool::Tool> = Arc::new(recording);
+        let _ = named.set(name.clone());
+        let tool: Arc<dyn base::tool::Tool> = Arc::new(adapter.recording_into(record.clone()));
+        let on = |runner: Arc<dyn HostToolRunner>, stop: CancellationToken| {
+            let (name, scene) = (name.clone(), place.scene.id.clone());
+            async move {
+                hidden(runner.tool(&name).is_none(), &name, &scene)?;
+                Ok::<_, PoolError>(runner.run(tool, input, Vec::new(), stop).await)
+            }
+        };
         let outcome = match (&place.session_id, &place.project_root) {
             (Some(id), _) => {
                 let (runner, _running) = self.session_runner(id).await?;
-                hidden(runner.tool(&name).is_none(), &name, &place.scene.id)?;
-                runner.run(tool, input, Vec::new(), stop.clone()).await
+                on(runner, stop.clone()).await?
             }
             (None, Some(dir)) => {
                 let engine = TransientEngine {
@@ -228,13 +296,9 @@ impl SessionPool {
                     scene: place.scene.clone(),
                     mcp_module: Some(Arc::new(mcp::McpModule::new(one))),
                 };
-                let scene = place.scene.id.clone();
                 let stopped = stop.clone();
-                self.on_transient_engine(engine, stop.clone(), |runner| async move {
-                    hidden(runner.tool(&name).is_none(), &name, &scene)?;
-                    Ok::<_, PoolError>(runner.run(tool, input, Vec::new(), stopped).await)
-                })
-                .await??
+                self.on_transient_engine(engine, stop.clone(), |runner| on(runner, stopped))
+                    .await??
             }
             (None, None) => {
                 return Err(PoolError::Internal(
@@ -242,15 +306,17 @@ impl SessionPool {
                 ))
             }
         };
-        Ok(result_of(outcome, record.take(), stop.is_cancelled()))
+        Ok(result_of(outcome, &record, stop.is_cancelled()))
     }
 }
 
 /// What `mcp_tool_called` says of a call.
 struct Audit {
+    /// The adapter's name once the tool is found; `mcp__<server>__<tool>` as
+    /// naming makes it, if the call ends before.
+    tool_name: Arc<OnceLock<String>>,
     server: String,
     tool: String,
-    tool_name: String,
     scene: String,
     project_root: Option<PathBuf>,
     session_id: Option<String>,
@@ -258,16 +324,21 @@ struct Audit {
 }
 
 impl Audit {
-    fn event(self, outcome: McpToolCallOutcome, took: Duration) -> api::DaemonEvent {
+    fn event(self, result: &McpToolCallResult, took: Duration) -> api::DaemonEvent {
+        let tool_name = match self.tool_name.get() {
+            Some(name) => name.clone(),
+            None => mcp::naming::tool_name(&self.server, &self.tool),
+        };
         api::DaemonEvent::McpToolCalled {
             server: self.server,
             tool: self.tool,
-            tool_name: self.tool_name,
+            tool_name,
             scene: self.scene,
             project_root: self.project_root,
             session_id: self.session_id,
             run_id: self.run_id,
-            outcome,
+            outcome: result.outcome().to_string(),
+            reached_server: result.reached_server(),
             duration_ms: took.as_millis() as u64,
         }
     }
@@ -353,105 +424,73 @@ fn tool_info(adapter: &McpToolAdapter) -> McpToolInfo {
 }
 
 /// The pipeline's answer and what the server's side of the call came to,
-/// as the host reads them. A call that never reached the server was refused
-/// on the way — by a rule, the mode, a hook, a `tool.around` that answered
-/// in its place — unless it was stopped first.
-fn result_of(
-    outcome: base::interface::tool_middleware::ToolOutcome,
-    recorded: Option<McpCallOutcome>,
-    stopped: bool,
-) -> McpToolCallResult {
-    use McpToolCallOutcome as Code;
-    match (recorded, outcome) {
-        (Some(McpCallOutcome::Answered(answer)), Ok(_)) => answered(answer),
-        (Some(McpCallOutcome::Answered(_)), Err(why)) => failure(Code::Refused, why),
-        (Some(McpCallOutcome::TimedOut(why)), _) => failure(Code::Timeout, why),
-        (Some(McpCallOutcome::Cancelled), _) => failure(Code::Cancelled, "the call was cancelled"),
-        (Some(McpCallOutcome::Failed(why)), _) => failure(Code::Failed, why),
-        (None, _) if stopped => failure(
-            Code::Cancelled,
+/// as the host reads them. Only the server's own answer, untouched on the
+/// way, is a result; an answer anything else gave or changed is
+/// `answered_by_middleware`, whatever the server said. A call that came to
+/// no answer is the server's timeout or failure when the server's side
+/// ended that way, `cancelled` when it was told to stop, and `refused`
+/// otherwise — a rule, the mode or a hook stopped it, before the server
+/// heard of it or after it answered.
+fn result_of(host: HostCallOutcome, record: &McpCallRecord, stopped: bool) -> McpToolCallResult {
+    let reached = record.reached_server();
+    match (record.take(), host.outcome) {
+        (Some(McpCallOutcome::Answered(answer)), Ok(_)) if !host.by_middleware => answered(answer),
+        (_, Ok(_)) => failure(
+            ANSWERED_BY_MIDDLEWARE,
+            reached,
+            "the server's answer did not come back as it gave it: a tool.around script answered \
+             in its place or changed it, or a tool.result transformer rewrote it",
+        ),
+        (Some(McpCallOutcome::TimedOut(why)), Err(_)) => failure(TIMEOUT, reached, why),
+        (Some(McpCallOutcome::Cancelled), Err(_)) => {
+            failure(CANCELLED, reached, "the call was cancelled")
+        }
+        (Some(McpCallOutcome::Failed(why)), Err(_)) => failure(FAILED, reached, why),
+        (None, Err(_)) if stopped || host.stopped => failure(
+            CANCELLED,
+            reached,
             "the call was cancelled before it reached the server",
         ),
-        (None, Err(why)) => failure(Code::Refused, why),
-        (None, Ok(_)) => failure(
-            Code::Refused,
-            "the server was not called: a tool.around script answered in its place",
-        ),
+        (_, Err(why)) => failure(REFUSED, reached, why),
     }
 }
 
 /// A call stopped at its time ran out of it, whatever stopped it.
-fn ran_out(time: Duration, ended: Option<McpToolCallResult>) -> McpToolCallResult {
+fn ran_out(time: Duration, ended: Option<McpToolCallResult>, reached: bool) -> McpToolCallResult {
     match ended {
-        Some(result) if result.ok => result,
+        Some(result @ McpToolCallResult::Answered(_)) => result,
         _ => failure(
-            McpToolCallOutcome::Timeout,
+            TIMEOUT,
+            reached,
             format!("the call ran past its {} ms", time.as_millis()),
         ),
     }
 }
 
-fn failure(outcome: McpToolCallOutcome, message: impl Into<String>) -> McpToolCallResult {
-    McpToolCallResult {
+fn failure(code: &str, reached_server: bool, message: impl Into<String>) -> McpToolCallResult {
+    McpToolCallResult::NotAnswered(api::McpToolCallFailure {
         ok: false,
-        is_error: None,
-        content: None,
-        text: None,
-        structured: None,
-        error: Some(api::McpToolCallError {
-            code: outcome.as_str().to_string(),
+        error: api::McpToolCallError {
+            code: code.to_string(),
             message: message.into(),
-        }),
-    }
+        },
+        reached_server,
+    })
 }
 
 fn answered(answer: McpCallResult) -> McpToolCallResult {
     let text = answer
-        .content
+        .raw_content
         .iter()
-        .filter_map(|block| match block {
-            McpContent::Text(text) => Some(text.as_str()),
-            _ => None,
-        })
+        .filter(|block| block["type"] == "text")
+        .filter_map(|block| block["text"].as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    McpToolCallResult {
+    McpToolCallResult::Answered(api::McpToolAnswer {
         ok: true,
-        is_error: Some(answer.is_error),
-        content: Some(answer.content.into_iter().map(block_of).collect()),
-        text: Some(text),
+        is_error: answer.is_error,
+        content: answer.raw_content,
+        text,
         structured: answer.structured,
-        error: None,
-    }
-}
-
-/// A block of a tool result as a message carries it.
-#[derive(serde::Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum Block {
-    Text { text: String },
-    Image { source: Base64 },
-}
-
-#[derive(serde::Serialize)]
-struct Base64 {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    media_type: String,
-    data: String,
-}
-
-fn block_of(content: McpContent) -> serde_json::Value {
-    let block = match content {
-        McpContent::Text(text) => Block::Text { text },
-        McpContent::Image { data, media_type } => Block::Image {
-            source: Base64 {
-                kind: "base64",
-                media_type,
-                data,
-            },
-        },
-        McpContent::Other(raw) => return raw,
-    };
-    serde_json::to_value(block).unwrap_or_default()
+    })
 }

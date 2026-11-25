@@ -60,6 +60,7 @@ fn turn_in(cwd: &std::path::Path, rules: Vec<PermissionRule>, with_bash: bool) -
         events: None,
         turn: Default::default(),
         checkpoints: None,
+        answer_trail: None,
     }
 }
 

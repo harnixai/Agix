@@ -454,6 +454,11 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
         "what the settings schema says a key is: none, an object of settings, or one setting",
     ),
     ("McpIdentity", HOST_INPUT),
+    (
+        "McpToolCallResult",
+        "`ok: true` or `ok: false` on the wire, and nothing else; a third kind of answer is a \
+         new wire shape every host must be told about",
+    ),
     ("McpRedirect", HOST_INPUT),
     ("MemberLifetime", DELEGATE_ASK),
     ("Message", PROTOCOL),

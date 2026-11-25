@@ -78,14 +78,36 @@ pub enum DaemonEvent {
         /// `mcp__<server>__<tool>`.
         tool_name: String,
         scene: String,
+        /// `null` for a session with no project.
+        #[schemars(with = "PathOrNull")]
         project_root: Option<PathBuf>,
         #[serde(skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         run_id: Option<String>,
-        outcome: super::McpToolCallOutcome,
+        /// `ok`, `tool_error`, or the result's `error.code`; more may come.
+        outcome: String,
+        /// As on the result; `true` for `ok` and `tool_error`.
+        reached_server: bool,
         duration_ms: u64,
     },
+}
+
+/// A field that is always there, a path or `null`.
+struct PathOrNull;
+
+impl schemars::JsonSchema for PathOrNull {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PathOrNull".into()
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": ["string", "null"] })
+    }
 }
 
 impl DaemonEvent {

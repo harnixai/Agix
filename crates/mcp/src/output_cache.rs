@@ -127,6 +127,7 @@ mod tests {
             is_error: false,
             meta: None,
             structured: None,
+            raw_content: Vec::new(),
         }
     }
 

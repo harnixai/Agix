@@ -5,9 +5,9 @@
 use super::*;
 use crate::rpc::methods::mcp::{
     McpAuthCancelParams, McpAuthCompleteParams, McpAuthLogoutParams, McpAuthStartParams,
-    McpCallToolParams, McpCancelParams, McpCancelled, McpPutServerParams, McpReconnectParams,
-    McpRedirectKind, McpRemoveServerParams, McpSetEnabledParams, McpSetIdentityParams,
-    McpToolsParams,
+    McpCallToolParams, McpCancelParams, McpCancelled, McpPairParams, McpPutServerParams,
+    McpReconnectParams, McpRedirectKind, McpRemoveServerParams, McpSetEnabledParams,
+    McpSetIdentityParams, McpToolsParams,
 };
 use crate::rpc::methods::ConfigTarget;
 use crate::session_pool::api::{
@@ -38,24 +38,21 @@ fn invalid(message: impl Into<String>) -> PoolError {
     PoolError::InvalidRequest(message.into())
 }
 
-/// The pair `target` names, or the session `session_id` names; not both.
+/// The pair `pair` names, or the session `session_id` names; not both.
 fn call_target_of(
     s: &DaemonServer,
     session_id: Option<String>,
-    target: ConfigTarget,
+    pair: McpPairParams,
 ) -> Result<McpToolCallTarget, PoolError> {
     match session_id {
-        Some(_) if target.scene.is_some() || target.project_root.is_some() => Err(invalid(
+        Some(_) if pair.scene.is_some() || pair.project_root.is_some() => Err(invalid(
             "give `session_id` or `scene` / `project_root`, not both",
         )),
         Some(id) => Ok(McpToolCallTarget::Session(id)),
-        None => {
-            let (project_root, scene) = s.target_of(target);
-            Ok(McpToolCallTarget::Pair {
-                project_root,
-                scene,
-            })
-        }
+        None => Ok(McpToolCallTarget::Pair {
+            scene: pair.scene.unwrap_or_else(|| s.pool.scene_id().to_string()),
+            project_root: pair.project_root,
+        }),
     }
 }
 
@@ -64,7 +61,7 @@ async fn tools(
     _: &Call,
     params: McpToolsParams,
 ) -> Result<McpToolList, PoolError> {
-    let target = call_target_of(s, params.session_id, params.target)?;
+    let target = call_target_of(s, params.session_id, params.pair)?;
     s.pool.mcp_tools(params.server.as_deref(), &target).await
 }
 
@@ -73,7 +70,7 @@ async fn call_tool(
     cx: &Call,
     params: McpCallToolParams,
 ) -> Result<McpToolCallResult, PoolError> {
-    let target = call_target_of(s, params.session_id, params.target)?;
+    let target = call_target_of(s, params.session_id, params.pair)?;
     if params.server.is_empty() || params.tool.is_empty() {
         return Err(invalid("`server` and `tool` are not empty"));
     }

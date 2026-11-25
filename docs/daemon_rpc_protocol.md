@@ -3770,8 +3770,9 @@ provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同
 `mcp.reconnect` / `mcp.auth.start` / `mcp.auth.logout` / `import.*` 接受 §6.4 的 `scene` /
 `project_root`:省略 = 这个 daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVALID_PARAMS`。
 `mcp.auth.complete` / `mcp.auth.cancel` 按 `flow_id` 找到登录,不需要定位;`mcp.auth.setIdentity`
-作用于这个 daemon 的全部项目。`mcp.tools` / `mcp.callTool` 也接受 `scene` / `project_root`,或者换成
-`session_id` 指一个会话(两者只给一种);`mcp.cancel` 只认 `run_id`。
+作用于这个 daemon 的全部项目。`mcp.tools` / `mcp.callTool` 也接受 `scene` / `project_root`(规矩同上,`null` 同样 →
+`INVALID_PARAMS`;它们不写设置,与哪一层无关),或者换成 `session_id` 指一个会话(两者只给一种);
+`mcp.cancel` 只认 `run_id`。
 
 写 MCP 设置的四个方法(`addServer` / `updateServer` / `removeServer` / `setEnabled`)都收 `tier`:
 `global` / `scene` / `project`,缺省 `project`,与 `config.setProvider` 一样——写定位参数那一对的那一层,
@@ -4031,11 +4032,13 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 - `description` 是 server 给的全文;`input_schema` 是给模型的那份;`output_schema` 只在 server 给了时有,
   超过 `max_schema_bytes` 的不给。
 - `annotations` 是 server 的提示(MCP `ToolAnnotations`):`read_only`、`destructive`、`idempotent`、
-  `open_world`,server 没说的不出现。只是提示,判权限时 Agix 只看 `read_only`(同会话)。
+  `open_world`,server 没说的不出现(不会是 `null`)。只是提示,判权限时 Agix 只看 `read_only`(同会话)。
 
-给 `server` 时只列它;这一对没有配置这个名字 → `INVALID_PARAMS`。带 `session_id` 时用那个会话的 MCP:
-它的 `settings.plugins` 排除了声明某个 server 的包时,那个 server 不列(点名它 → `INVALID_PARAMS`)。
-`scene` 未注册 → `SCENE_NOT_FOUND`,`project_root` 不是目录 → `PROJECT_NOT_FOUND`,会话不在 → `SESSION_NOT_FOUND`。
+给 `server` 时只列它;这一对没有配置这个名字 → `INVALID_PARAMS`。带 `session_id` 时列的正是那个会话能调的:
+它的 `settings.plugins` 排除了声明某个 server 的包时,那个 server 不列(点名它 → `INVALID_PARAMS`);它的工具表
+不给的工具(场景的工具表、子 Agent 会话收窄过的工具)也不列——与那个会话上 `mcp.callTool` 认的一样。
+`scene` 不是能建会话的场景(未注册,或注册了没有激活;同 `session.create`)→ `SCENE_NOT_FOUND`,这时什么都不连;
+`project_root` 不是目录 → `PROJECT_NOT_FOUND`,为 `null` → `INVALID_PARAMS`;会话不在 → `SESSION_NOT_FOUND`,不在内存里的先带回来,正在重建或回滚 → `SESSION_BUSY`。
 
 #### `mcp.callTool`
 
@@ -4046,7 +4049,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 { "server": "feishu",                 // 必填:settings 里的 server 键(同 mcp.status 的 name)
   "tool": "approval_create",          // 必填:server 自己的工具名(不是 mcp__…)
   "arguments": { "title": "发布 0.4.5" },  // 可选,对象,省略或 null 为 {};按 schema 校验由 server 做(同会话)
-  "scene": "code", "project_root": "/repo",   // 可选,同 mcp.status;或换成 "session_id": "…"(两者只给一种)
+  "scene": "code", "project_root": "/repo",   // 可选,同 mcp.tools;或换成 "session_id": "…"(两者只给一种)
   "timeout_ms": 60000,                // 可选,缺省 120000,至多 600000
   "run_id": "approve-7" }             // 可选:mcp.cancel / plugin.cancel 用它指这次调用,同一连接内唯一
 // ← result
@@ -4054,55 +4057,71 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
   "content": [ { "type": "text", "text": "{\"id\":\"A-17\"}" } ],
   "text": "{\"id\":\"A-17\"}",
   "structured": { "id": "A-17" } }
-{ "ok": false, "error": { "code": "refused", "message": "…" } }
+{ "ok": false, "reached_server": false, "error": { "code": "refused", "message": "…" } }
 ```
 
-- `content` 是工具结果的块:`text` 与 `image` 同 §4.1 的 `ContentBlock`(图片是 `source.type:"base64"`),
-  别的种类(`resource_link`、`resource`、`audio`……)照 server 发来的原样。`text` 是其中文本块用 `\n`
-  连起来的(没有为 `""`)。`structured` 是 server 的 `structuredContent` 原样,server 没给就不出现。
-  结果不截断、不存文件,也不加给模型看的外部内容围栏。
-- `is_error: true` 是工具自己报的错(MCP `isError`),仍是 `ok: true`。
+`ok: true` 是 server 答了一个工具结果(MCP `CallToolResult`),四个字段照 server 的原样:
+
+- `content` 是 `CallToolResult.content` 数组,**原样**——MCP 规范的形状(字段名是 camelCase,如图片块
+  `{"type":"image","data":"…","mimeType":"image/png"}`,块上的 `annotations`、`_meta` 照留),不转成 Agix 的
+  `ContentBlock`。块的种类与字段跟着 server 说的那一版 MCP 规范走,宿主要按规范读,不认识的种类跳过。
+- `text` 是其中 `type: "text"` 的块的 `text` 用 `\n` 连起来的,没有这种块为 `""`。
+- `structured` 是 `structuredContent` 原样,server 没给就不出现。
+- `is_error` 是 `isError`,server 没给为 `false`。`is_error: true` 是工具自己报的错,仍是 `ok: true`。
+
+结果不截断、不存文件,也不加给模型看的外部内容围栏。工具自己的输出缓存(会话里对只读且幂等的工具,同样的
+调用 30 秒内直接用上一次的答复)**不作答**:每次调用都问到 server,答复照样写进缓存。
+
+`ok: false` 是没有这样的结果,带 `error` 与 `reached_server`:
+
+- `reached_server`:请求交给了 server。为 `true` 时 server 可能已经照它做了(建了单子、发了消息),只是结果
+  没有到宿主手里;**不幂等的工具不要在 `reached_server: true` 之后盲目重调**,先用别的办法查清它做没做。
+  为 `false` 时 server 没收到这次调用。
+- `error.code` 与 `plugin.call` 同一套词,**是开放的集合**,以后会增加,不认识的按失败处理:
+
+| `code` | 含义 |
+|---|---|
+| `refused` | 管线拦下了它:deny 规则、plan 模式、`PreToolUse` 拦下(`reached_server: false`),或 server 答了之后 `PostToolUse` 拦下了结果(`reached_server: true`);部署的托管层规定只能本人答的提问,没有人可问,也是它;`tool.around` 拒绝、`tool.result` 把结果改成了错误也是它 |
+| `answered_by_middleware` | 交回来的不是 server 的原样答复:`tool.around` 替它作答(`reached_server: false`),或改了 server 的答复、`tool.result` 改写了它(`reached_server: true`)。这时不给结果,免得宿主把改过的或编出来的当成 server 的答复 |
+| `timeout` | 过了 `timeout_ms`,或 server 自己的 `tool_timeout_ms`;请求被取消(`notifications/cancelled`,任务发 `tasks/cancel`)。调用前刷新工具表的时间也算在 `timeout_ms` 里 |
+| `cancelled` | `mcp.cancel` / `plugin.cancel` 带它的 `run_id`、发起的连接断开,或(带会话时)调用进行中会话结束 |
+| `failed` | 请求发出去了却没有以工具结果回来:连接中途断了(不重发)、协议错误、server 回了 JSON-RPC 错误;`message` 说是哪一种 |
 
 调用作为一次内部工具调用 `mcp__<server>__<tool>` 走会话的整条工具管线——权限判定、`PreToolUse`、
-`tool.around`(`via` 是 `"host"`)、执行、`PostToolUse`、遥测(`tool_start` / `tool_execution`)——同
-`plugin.call`,不进模型的工具表、不进对话。
+`tool.around`(`via` 是 `"host"`)、执行、`PostToolUse`、`tool.result`、遥测(`tool_start` /
+`tool_execution`)——同 `plugin.call`,不进模型的工具表、不进对话。
 
-**权限**:调用本身算宿主批准——会话要问的视同允许(部署的托管层规定只能本人答的除外);deny 规则
-(`mcp__feishu__approval_create`、整个 server 的 `mcp__feishu`)、plan 模式(不是 `read_only` 的工具)照样拦,
+**权限**:调用本身算宿主批准——会话要问的视同允许(部署的托管层规定只能本人答的除外,那是 `refused`);deny
+规则(`mcp__feishu__approval_create`、整个 server 的 `mcp__feishu`)、plan 模式(不是 `read_only` 的工具)照样拦,
 这时 server 收不到请求。MCP 策略与项目信任同会话:server 被拒、项目未受信时连接根本不存在,见下面的
-`MCP_SERVER_UNAVAILABLE`。
+`MCP_SERVER_UNAVAILABLE`;未受信项目自己的 hook 不跑,它自己声明的 server 不启动。
 
 **server 问人**:调用中 server 发起提问(`elicitation/create` 或 `input_required`)时没有人可问,答
 `cancel`(用户关掉了提问),从不 `accept`;之后 server 怎么答,结果就是什么。server 把调用转成
 MCP 任务(tasks 扩展)时同会话里的调用:在 `timeout_ms` 之内原地等它结束,停下时发 `tasks/cancel`;
 带会话时它作为 `mcp_task` 列在那个会话的 `session.tasks` 里,不带会话时不列在任何地方。
 
-**不带 `session_id`**:用这一对的连接(还没连过的先连上,同 `mcp.tools`),在 `project_root`(省略是
-daemon 自己的项目)下给这一次调用建一个临时引擎:只拿到这一个 server,不写日志、不进 `session.list`、不向
-订阅者发会话事件,也不占 `RunCode` / `RunExt` 的脚本名额。连接登记的 hook 照样问,`hook_call` 帧发给
-登记者,外层 `session_id` 是临时会话 id,帧带 `mcp_call:{server, tool, run_id?}`(§7.6);登记者已不在、
-中途断开时当场按 `on_error` 了结。
+**不带 `session_id`**:用这一对的连接(还没连过的先连上,同 `mcp.tools`),调用前刷新一次这个 server 的工具表
+(算在 `timeout_ms` 里,`mcp.cancel` 与连接断开都停得了它),在 `project_root`(省略是 daemon 自己的项目)下给
+这一次调用建一个临时引擎:只拿到这一个 server,不写日志、不进 `session.list`、不向订阅者发会话事件,也不占
+`RunCode` / `RunExt` 的脚本名额。**每次调用都建一个临时引擎**,不是轻量的转发:宿主要自己限制同时发出的调用数
+(每条连接同时在处理的请求数上限照样适用)。连接登记的 hook 照样问,`hook_call` 帧发给登记者,外层
+`session_id` 是临时会话 id,帧带 `mcp_call:{server, tool, run_id?}`(§7.6);登记者已不在、中途断开时当场按
+`on_error` 了结。
 
 **带 `session_id`**:用那个会话的 MCP 连接、规则、信任与 hook,不在内存里的先带回来;不开新一轮、不进对话,
 可以和正在跑的一轮同时进行,hook 的帧是那个会话自己的(不带标记)。会话的 `settings.plugins` 排除了声明这个
-server 的包 → `INVALID_PARAMS`(`session … does not get MCP server …`);会话正在重建或回滚 → `SESSION_BUSY`。
+server 的包 → `INVALID_PARAMS`(`session … does not get MCP server …`);会话的工具表不给这个工具(`mcp.tools`
+不列的)→ `INVALID_PARAMS`;会话正在重建或回滚 → `SESSION_BUSY`。
 
-**结果的 `error.code`**(会增加,不认识的按失败处理):
-
-| `code` | 含义 |
-|---|---|
-| `refused` | 管线没让它到 server,或拦下了它的结果:deny 规则、plan 模式、hook、`tool.around` 替它作答、会话已结束 |
-| `timeout` | 过了 `timeout_ms`,或 server 自己的 `tool_timeout_ms`;请求被取消(`notifications/cancelled`,任务发 `tasks/cancel`) |
-| `cancelled` | `mcp.cancel` / `plugin.cancel` 带它的 `run_id`、发起的连接断开,或(带会话时)会话结束 |
-| `failed` | 请求发出去了却没有以工具结果回来:连接中途断了(不重发)、协议错误、server 回了 JSON-RPC 错误;`message` 说是哪一种 |
-
-**请求本身不成立时是 JSON-RPC 错误**:缺 `server` / `tool`、`arguments` 不是对象、这一对没有这个 server
-或 server 没有这个工具(包括场景的工具表不给的)、`session_id` 与 `scene` / `project_root` 都给、`timeout_ms`
-为 0 或超过上限、`run_id` 在这条连接上正被占着 → `INVALID_PARAMS`;`SCENE_NOT_FOUND`、`PROJECT_NOT_FOUND`、
-`SESSION_NOT_FOUND`;server 现在调不了 → `MCP_SERVER_UNAVAILABLE (-32029)`,`data` 为 `{server, state, error?}`,
-`state` 是 `mcp.status` 里除 `connected` / `disconnected` 之外的那些:`untrusted`、`disabled`、`denied`、
-`auth_required`(先 `mcp.auth.start`)、`failed`、`connecting`(首连等了 10 秒还没连完,稍后再试)。
-`disconnected` 的 server 照常调,调用前先重连。
+**请求本身不成立时是 JSON-RPC 错误**,这时什么都没调,也不发 `mcp_tool_called`:缺 `server` / `tool`、`arguments`
+不是对象、这一对没有这个 server 或 server 没有这个工具(包括场景的工具表不给的)、`session_id` 与 `scene` /
+`project_root` 都给、`project_root` 为 `null`、`timeout_ms` 为 0 或超过上限、`run_id` 在这条连接上正被占着 →
+`INVALID_PARAMS`;`SCENE_NOT_FOUND`(同 `mcp.tools`)、`PROJECT_NOT_FOUND`、`SESSION_NOT_FOUND`;server 现在调不了 →
+`MCP_SERVER_UNAVAILABLE (-32029)`,`data` 为 `{server, state, error?}`。`state` 取 `mcp.status` 的状态值,**是开放的
+集合**:除 `connected` / `disconnected` 之外的任何值都表示现在调不了,不认识的也一样。现在会出现的有 `untrusted`、
+`disabled`、`denied`、`auth_required`(先 `mcp.auth.start`)、`failed`、`connecting`(首连等了 10 秒还没连完,
+稍后再试)、`not_started`(这一对还没连起来)。`disconnected` 的 server 照常调,调用前先重连。
 
 每次有结果(`ok` 为真或假)的调用之后发一条 `daemon.event` `mcp_tool_called`(§8),不带参数与结果。
 
@@ -4115,7 +4134,8 @@ server 的包 → `INVALID_PARAMS`(`session … does not get MCP server …`);�
 { "cancelled": true }   // false:这条连接上没有以此为名、还在跑的调用
 ```
 
-与 `plugin.cancel` 是同一张按连接的登记表:两者都能取消 `plugin.call` 与 `mcp.callTool` 的调用。
+`run_id` 是按连接的同一个名字空间:`plugin.call` 与 `mcp.callTool` 的 `run_id` 登记在同一张表里,`mcp.cancel` 与
+`plugin.cancel` 都取消这条连接上以这个名字在跑的那一个宿主调用,不论是哪一种。别的连接取消不了它。
 
 #### `plugin.list`
 
@@ -4345,7 +4365,8 @@ server 的包 → `INVALID_PARAMS`(`session … does not get MCP server …`);�
 ```
 
 `run_id` 按连接登记:别的连接取消不了它,调用结束后名字就释放。发起调用的连接断开时,
-它还没完的调用一律取消。`mcp.callTool` 的 `run_id` 在同一张表里,`plugin.cancel` 也取消它。
+它还没完的调用一律取消。`mcp.callTool` 的 `run_id` 在同一张表里:`plugin.cancel` 与 `mcp.cancel` 都取消
+这条连接上以这个名字在跑的那一个宿主调用,不论是 `plugin.call` 还是 `mcp.callTool`。
 
 **关于 `scope`**:只有 `global`(全局根下的 `plugins/`,跨场景共享)和 `scene`
 (场景根下的,只对这个 daemon 的场景生效)两个值,默认 `global`,别的值返回
@@ -4948,7 +4969,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | `turn_completed` | `{session_id, turn_id, initiator}` | 这一轮结束,无论成功、出错还是被中断 |
 | `events_lagged` | `{missed}` | 这条连接读得太慢,有 `missed` 条通知没送到。需要的话用 `session.list` 等对账 |
 | `project_trust_changed` | `{project_root, trust}` | `project.trust` 写完之后;`trust` 是写完后的状态(§3.6) |
-| `mcp_tool_called` | `{server, tool, tool_name, scene, project_root, session_id?, run_id?, outcome, duration_ms}` | 宿主的 `mcp.callTool` 有了结果之后,供审计。`tool_name` 是 `mcp__<server>__<tool>`;`project_root` 是调用所在的项目(带会话且会话没有项目时为 `null`);`session_id` 只在带会话时有,`run_id` 只在给了时有;`outcome`:`ok`、`tool_error`(工具自己报错)、`refused`、`timeout`、`cancelled`、`failed`,同结果的 `error.code`;`duration_ms` 从收到请求算起。**从不带参数与结果。** 请求本身不成立(JSON-RPC 错误)的不发 |
+| `mcp_tool_called` | `{server, tool, tool_name, scene, project_root, session_id?, run_id?, outcome, reached_server, duration_ms}` | 宿主的 `mcp.callTool` 有了结果之后,供审计。`tool_name` 是 `mcp__<server>__<tool>`;`project_root` 总在,是调用所在的项目(带会话且会话没有项目时为 `null`);`session_id` 只在带会话时有,`run_id` 只在给了时有;`outcome` 是 `ok`、`tool_error`(工具自己报错),或者结果的 `error.code` 原样(`refused`、`answered_by_middleware`、`timeout`、`cancelled`、`failed`……),**是开放的集合**,以后会增加;`reached_server` 同结果的,`ok` / `tool_error` 时为 `true`;`duration_ms` 从收到请求算起。**从不带参数与结果。** 请求本身不成立(JSON-RPC 错误)的不发 |
 
 会话与轮的事件让宿主**不必订阅每个会话**就知道哪些会话在内存里、哪些在跑 ——
 包括不是它发起的轮(定时任务,或者别的客户端)。没有 `config_reloaded` /

@@ -368,6 +368,7 @@ impl Agent {
             events: Some(self.channels.event_tx.clone()),
             turn: Arc::clone(&self.turn.scope),
             checkpoints: self.tooling.checkpoints().cloned(),
+            answer_trail: None,
         }
     }
 

@@ -104,6 +104,9 @@ pub struct McpCallResult {
     /// `structuredContent`: what code calling the tool is handed in place of
     /// the text.
     pub structured: Option<Value>,
+    /// `content` as the server sent it, in the MCP spec's shape; `content`
+    /// above is what Agix makes of it.
+    pub raw_content: Vec<Value>,
 }
 
 /// MCP 协议的 content block。本 crate 只关心 Text / Image；其它（resource_link 等）
@@ -404,6 +407,7 @@ mod tests {
                 is_error: false,
                 meta: None,
                 structured: None,
+                raw_content: Vec::new(),
             },
         );
         let result = c
