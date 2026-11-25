@@ -1,5 +1,6 @@
 //! 一次改写历史的压缩在事件流上的首尾：动手前发 `CompactStarted`，没压成发 `CompactEnded`，
-//! 压成了由 `CompactAction` 收尾；压缩的 future 半路被丢掉时补一帧 `cancelled`，开始了就一定有结束。
+//! 压成了由 `CompactAction` 收尾；压缩的 future 在换掉历史之前被丢掉时补一帧 `cancelled`，
+//! 开始了就一定有结束。
 
 use super::{CompactTrigger, NotCompacted};
 use crate::agent::{Agent, EventSender};

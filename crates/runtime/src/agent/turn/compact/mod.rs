@@ -468,12 +468,21 @@ impl Agent {
         bracket.compacted();
         self.report_compaction(&summary, projection.as_ref(), started);
         self.reset_after_compaction(&summary, strategy, trigger);
+        // Only after the report: dropped while the marker is written, the
+        // compaction has still replaced the history, and has said so.
+        if let Err(e) = self.session.write_compact_marker().await {
+            tracing::warn!(
+                error = %e,
+                "the compaction marker is not on disk yet; the next persist writes it"
+            );
+        }
         self.fire_post_compact_hook(&summary, cancel).await;
         Ok(summary)
     }
 
-    /// Everything of a compaction up to the history being replaced; nothing
-    /// is reported yet.
+    /// Everything of a compaction up to the history being replaced in
+    /// memory, which is its last step; nothing is reported or written to disk
+    /// yet.
     async fn rewrite_history(
         &mut self,
         target: usize,
@@ -524,16 +533,11 @@ impl Agent {
             self.compaction.tool_results_ever_cleared = true;
         }
         let messages_after = compacted.len();
-        if let Err(e) = self
-            .session
-            .replace_messages_after_compact(compacted, tokens_before as u64, tokens_after as u64)
-            .await
-        {
-            tracing::warn!(
-                error = %e,
-                "the compaction marker is not on disk yet; the next persist writes it"
-            );
-        }
+        self.session.replace_messages_after_compact(
+            compacted,
+            tokens_before as u64,
+            tokens_after as u64,
+        );
         self.release_reads_lost(&pre_compact);
         Ok(Rewritten {
             summary: CompactSummary {

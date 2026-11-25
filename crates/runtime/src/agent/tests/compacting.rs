@@ -759,6 +759,129 @@ async fn a_compaction_dropped_while_summarizing_still_ends_cancelled() {
     );
 }
 
+/// A compaction dropped once the history is replaced, while its marker is
+/// being written, has compacted: it ends with its `compact` frame, not as
+/// cancelled, and what follows a compaction has been put right.
+#[tokio::test]
+async fn a_compaction_dropped_while_its_marker_is_written_ends_compacted() {
+    use base::event::CompactCause;
+    use base::interface::model::MessageRole;
+    let marker = Arc::new(tokio::sync::Notify::new());
+    let (mut agent, mut rx, _tx) = Builder::new()
+        .scene(Arc::new(scene::code::spec(
+            scene::code::Interaction::Interactive,
+        )))
+        .model(Arc::new(DummyModel))
+        .settings(Arc::new(test_settings()))
+        .compactor(Arc::new(KeepingCompactor {
+            keep: |m| !is_opening(m) && !is_filler(m),
+            strategy: compaction::compact::CompactStrategy::Snip,
+        }))
+        .history_store(Arc::new(StallsOnTheMarker {
+            inner: history::store::InMemoryHistoryStore::new(),
+            asked: marker.clone(),
+        }))
+        .skip_warmup(true)
+        .build()
+        .expect("build should succeed");
+    let opening = format!(
+        "{}# currentDate\nToday.\n</system-reminder>",
+        crate::turn::SESSION_CONTEXT_OPENING
+    );
+    agent
+        .session
+        .push_message(text_message(MessageRole::User, &opening));
+    agent.session.push_message(text_message(
+        MessageRole::User,
+        &format!("{FILLER} {}", "padding words ".repeat(200)),
+    ));
+    agent
+        .session
+        .push_message(text_message(MessageRole::User, "hello"));
+    agent
+        .session
+        .push_message(text_message(MessageRole::Assistant, "hi"));
+    agent.prompt.set_context_injected(true);
+
+    let cancel = CancellationToken::new();
+    {
+        let compacting = agent.run_compaction(1, 1, crate::turn::CompactTrigger::Auto, &cancel);
+        tokio::pin!(compacting);
+        tokio::select! {
+            _ = &mut compacting => panic!("the compaction finished with its marker unwritten"),
+            _ = marker.notified() => {}
+        }
+    }
+
+    let frames: Vec<AgentEvent> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter(|e| {
+            matches!(
+                e,
+                AgentEvent::CompactStarted { .. }
+                    | AgentEvent::CompactEnded { .. }
+                    | AgentEvent::CompactAction { .. }
+            )
+        })
+        .collect();
+    assert!(
+        matches!(
+            frames.as_slice(),
+            [
+                AgentEvent::CompactStarted {
+                    trigger: CompactCause::Threshold,
+                    ..
+                },
+                AgentEvent::CompactAction { trim: false, .. },
+            ]
+        ),
+        "{frames:?}"
+    );
+    assert!(!agent.session.messages().iter().any(is_filler));
+    assert!(
+        !agent.prompt.context_injected(),
+        "the opening context the compaction dropped is due again"
+    );
+}
+
+/// Keeps a session's log in memory, except that appending a compaction
+/// marker never finishes; says when one was asked for.
+struct StallsOnTheMarker {
+    inner: history::store::InMemoryHistoryStore,
+    asked: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl history::store::HistoryStore for StallsOnTheMarker {
+    async fn append(
+        &self,
+        session: base::session::SessionId,
+        entry: history::entry::LogEntry,
+    ) -> Result<(), history::error::HistoryError> {
+        if matches!(entry, history::entry::LogEntry::Compact { .. }) {
+            self.asked.notify_one();
+            return std::future::pending().await;
+        }
+        self.inner.append(session, entry).await
+    }
+    async fn load(
+        &self,
+        session: base::session::SessionId,
+    ) -> Result<Vec<history::entry::EnvelopedEntry>, history::error::HistoryError> {
+        self.inner.load(session).await
+    }
+    async fn list_sessions(
+        &self,
+    ) -> Result<Vec<base::session::SessionId>, history::error::HistoryError> {
+        self.inner.list_sessions().await
+    }
+    async fn delete(
+        &self,
+        session: base::session::SessionId,
+    ) -> Result<(), history::error::HistoryError> {
+        self.inner.delete(session).await
+    }
+}
+
 /// Rewrites the first tool result in the budget pass and the first text in
 /// the predictive one, then fails the compaction itself.
 struct RewritesThenFails;

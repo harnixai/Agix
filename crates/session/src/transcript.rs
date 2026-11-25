@@ -343,28 +343,25 @@ impl Transcript {
     }
 
     /// Replace `self.messages` wholesale with a post-compaction list, and
-    /// keep persistence consistent with that replacement.
+    /// queue what keeps persistence consistent with that replacement.
     ///
     /// The list on disk is not rewritten: a `LogEntry::Compact` marker
-    /// carrying the whole new list is appended right away, and replaying the
-    /// log replaces everything before it with that list. The cursor moves to
-    /// the end of the new list, so `persist()` carries on appending only what
-    /// comes after.
-    ///
-    /// A marker that fails to land is kept and written by the next
-    /// `persist()`, ahead of anything newer; one that was appended but not
-    /// synced is only synced again, never appended twice. Writing the
+    /// carrying the whole new list is queued, and replaying the log replaces
+    /// everything before it with that list. [`Self::write_compact_marker`]
+    /// writes it; until it is on disk, `persist()` writes it first, ahead of
+    /// anything newer. The cursor moves to the end of the new list, so
+    /// `persist()` carries on appending only what comes after. Writing the
     /// compacted messages out as ordinary entries instead would put them on
     /// disk a second time after the originals.
     ///
     /// Each message keeps its timestamp if it survived the compaction
     /// unchanged at the tail; the rest are new as of now.
-    pub async fn replace_messages_after_compact(
+    pub fn replace_messages_after_compact(
         &mut self,
         new_messages: Vec<ModelMessage>,
         before_tokens: u64,
         after_tokens: u64,
-    ) -> Result<(), SessionError> {
+    ) {
         let replacement_history: Vec<base::message::Message> = new_messages
             .iter()
             .filter_map(model_message_to_message)
@@ -376,9 +373,9 @@ impl Transcript {
         self.notes.clear();
         self.persisted_up_to = self.messages.len();
 
-        let Some(store) = self.history_store.clone() else {
-            return Ok(());
-        };
+        if self.history_store.is_none() {
+            return;
+        }
         self.pending_marker = Some(PendingMarker::Append(
             Box::new(history::entry::LogEntry::Compact {
                 before_tokens,
@@ -393,6 +390,14 @@ impl Transcript {
                 origin: None,
             },
         ));
+    }
+
+    /// Write the marker [`Self::replace_messages_after_compact`] queued. One
+    /// that fails stays queued; one appended but not synced is only synced.
+    pub async fn write_compact_marker(&mut self) -> Result<(), SessionError> {
+        let Some(store) = self.history_store.clone() else {
+            return Ok(());
+        };
         let sid =
             SessionId::parse(&self.session_id).map_err(|e| SessionError::Id(e.to_string()))?;
         self.write_pending_marker(&store, sid).await
@@ -403,22 +408,23 @@ impl Transcript {
         store: &Arc<dyn HistoryStore>,
         sid: SessionId,
     ) -> Result<(), SessionError> {
-        let Some(pending) = self.pending_marker.take() else {
-            return Ok(());
-        };
-        if let PendingMarker::Append(entry, tags) = &pending {
-            if let Err(e) = store
+        // Queued until the append returns: one dropped half-way is written
+        // again, not lost; a second copy replays to the same list.
+        if let Some(PendingMarker::Append(entry, tags)) = &self.pending_marker {
+            store
                 .append_tagged(sid, (**entry).clone(), tags.clone())
                 .await
-            {
-                self.pending_marker = Some(pending);
-                return Err(SessionError::Store(e.to_string()));
-            }
-        }
-        if let Err(e) = store.sync(sid).await {
+                .map_err(|e| SessionError::Store(e.to_string()))?;
             self.pending_marker = Some(PendingMarker::Sync);
-            return Err(SessionError::Store(e.to_string()));
         }
+        if self.pending_marker.is_none() {
+            return Ok(());
+        }
+        store
+            .sync(sid)
+            .await
+            .map_err(|e| SessionError::Store(e.to_string()))?;
+        self.pending_marker = None;
         Ok(())
     }
 
@@ -541,7 +547,8 @@ impl Transcript {
     pub async fn clear(&mut self) -> Result<(), SessionError> {
         self.message_timestamps.clear();
         self.turn_count = 0;
-        self.replace_messages_after_compact(Vec::new(), 0, 0).await
+        self.replace_messages_after_compact(Vec::new(), 0, 0);
+        self.write_compact_marker().await
     }
 
     /// Return the parent session ID, if set.
@@ -1146,9 +1153,8 @@ mod tests {
         assert_eq!(store.syncs.load(SeqCst), 1);
         mgr.persist().await.unwrap();
         assert_eq!(store.syncs.load(SeqCst), 1, "nothing new, nothing to sync");
-        mgr.replace_messages_after_compact(vec![make_text_msg("summary")], 10, 1)
-            .await
-            .unwrap();
+        mgr.replace_messages_after_compact(vec![make_text_msg("summary")], 10, 1);
+        mgr.write_compact_marker().await.unwrap();
         assert_eq!(store.syncs.load(SeqCst), 2, "the compact marker is synced");
     }
 
@@ -1171,9 +1177,8 @@ mod tests {
 
         // Compaction shrinks 5 messages down to 1.
         let compacted = vec![make_text_msg("summary of earlier conversation")];
-        mgr.replace_messages_after_compact(compacted, 1000, 100)
-            .await
-            .unwrap();
+        mgr.replace_messages_after_compact(compacted, 1000, 100);
+        mgr.write_compact_marker().await.unwrap();
 
         assert_eq!(mgr.messages.len(), 1, "in-memory messages replaced");
 
@@ -1233,10 +1238,8 @@ mod tests {
             writer.persist().await.unwrap();
 
             let compacted = vec![make_text_msg("compacted summary")];
-            writer
-                .replace_messages_after_compact(compacted, 2000, 50)
-                .await
-                .unwrap();
+            writer.replace_messages_after_compact(compacted, 2000, 50);
+            writer.write_compact_marker().await.unwrap();
 
             // A message produced *after* compaction, in the same session.
             writer.push_message(make_text_msg("post-compaction message"));
@@ -1274,7 +1277,8 @@ mod tests {
         mgr.persist().await.unwrap();
 
         let compacted = vec![make_text_msg("summary")];
-        let r = mgr.replace_messages_after_compact(compacted, 500, 50).await;
+        mgr.replace_messages_after_compact(compacted, 500, 50);
+        let r = mgr.write_compact_marker().await;
         assert!(r.is_ok(), "no store configured must not error");
         assert_eq!(mgr.messages.len(), 1);
     }
@@ -1328,9 +1332,8 @@ mod tests {
         flaky
             .fail_appends
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        let r = mgr
-            .replace_messages_after_compact(vec![make_text_msg("summary")], 1000, 100)
-            .await;
+        mgr.replace_messages_after_compact(vec![make_text_msg("summary")], 1000, 100);
+        let r = mgr.write_compact_marker().await;
         assert!(r.is_err(), "disk failure must surface as an error");
         assert_eq!(mgr.messages.len(), 1);
         mgr.push_message(make_text_msg("after the compaction"));
@@ -1414,10 +1417,8 @@ mod tests {
         flaky
             .fail_next_sync
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        assert!(mgr
-            .replace_messages_after_compact(vec![make_text_msg("summary")], 10, 1)
-            .await
-            .is_err());
+        mgr.replace_messages_after_compact(vec![make_text_msg("summary")], 10, 1);
+        assert!(mgr.write_compact_marker().await.is_err());
         mgr.push_message(make_text_msg("after"));
         mgr.persist().await.unwrap();
         assert_eq!(
@@ -1425,6 +1426,78 @@ mod tests {
             ["user", "compact", "user"]
         );
         assert_eq!(resumed_texts(&inner, sid).await, ["summary", "after"]);
+    }
+
+    /// A marker write let go while its append is outstanding leaves the
+    /// marker queued: the next `persist()` writes it ahead of what came after.
+    #[tokio::test]
+    async fn a_compact_marker_whose_write_was_dropped_is_written_by_the_next_persist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inner = real_store(tmp.path()).await;
+        let stalling = Arc::new(StallingAppendStore {
+            inner: inner.clone(),
+            stall: std::sync::atomic::AtomicBool::new(false),
+        });
+        let sid = SessionId::new();
+        let mut mgr = Transcript::new(
+            Some(stalling.clone() as Arc<dyn HistoryStore>),
+            Some(sid.to_string()),
+            None,
+        );
+        mgr.push_message(make_text_msg("original"));
+        mgr.persist().await.unwrap();
+
+        stalling
+            .stall
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        mgr.replace_messages_after_compact(vec![make_text_msg("summary")], 10, 1);
+        tokio::select! {
+            biased;
+            _ = mgr.write_compact_marker() => panic!("the stalled append finished"),
+            _ = std::future::ready(()) => {}
+        }
+        stalling
+            .stall
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        mgr.push_message(make_text_msg("after"));
+        mgr.persist().await.unwrap();
+        assert_eq!(
+            kinds(&inner.load(sid).await.unwrap()),
+            ["user", "compact", "user"]
+        );
+        assert_eq!(resumed_texts(&inner, sid).await, ["summary", "after"]);
+    }
+
+    /// `append` never finishes while `stall` is set.
+    struct StallingAppendStore {
+        inner: Arc<dyn HistoryStore>,
+        stall: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait::async_trait]
+    impl HistoryStore for StallingAppendStore {
+        async fn append(
+            &self,
+            session: SessionId,
+            entry: history::entry::LogEntry,
+        ) -> Result<(), history::error::HistoryError> {
+            if self.stall.load(std::sync::atomic::Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            self.inner.append(session, entry).await
+        }
+        async fn load(
+            &self,
+            session: SessionId,
+        ) -> Result<Vec<history::entry::EnvelopedEntry>, history::error::HistoryError> {
+            self.inner.load(session).await
+        }
+        async fn list_sessions(&self) -> Result<Vec<SessionId>, history::error::HistoryError> {
+            self.inner.list_sessions().await
+        }
+        async fn delete(&self, session: SessionId) -> Result<(), history::error::HistoryError> {
+            self.inner.delete(session).await
+        }
     }
 
     /// The tail a compaction kept is as old as it was; what the compaction
@@ -1444,9 +1517,8 @@ mod tests {
             make_text_msg("m4"),
             make_text_msg("m5"),
         ];
-        mgr.replace_messages_after_compact(compacted, 10, 5)
-            .await
-            .unwrap();
+        mgr.replace_messages_after_compact(compacted, 10, 5);
+        mgr.write_compact_marker().await.unwrap();
         let ages = mgr.message_ages();
         assert_eq!(ages.len(), 4);
         assert_eq!(ages[2].1, old[4]);
@@ -1505,9 +1577,8 @@ mod tests {
         }
         mgr.persist().await.unwrap();
 
-        mgr.replace_messages_after_compact(vec![make_text_msg("first summary")], 2000, 200)
-            .await
-            .unwrap();
+        mgr.replace_messages_after_compact(vec![make_text_msg("first summary")], 2000, 200);
+        mgr.write_compact_marker().await.unwrap();
         assert_eq!(store.load(sid).await.unwrap().len(), 6);
 
         // Grow again, then compact a second time before the first
@@ -1515,9 +1586,8 @@ mod tests {
         for i in 0..3 {
             mgr.push_message(make_text_msg(&format!("post-first-compact msg {i}")));
         }
-        mgr.replace_messages_after_compact(vec![make_text_msg("second summary")], 800, 50)
-            .await
-            .unwrap();
+        mgr.replace_messages_after_compact(vec![make_text_msg("second summary")], 800, 50);
+        mgr.write_compact_marker().await.unwrap();
 
         assert_eq!(mgr.messages.len(), 1);
         let entries = store.load(sid).await.unwrap();

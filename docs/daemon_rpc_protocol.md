@@ -4555,7 +4555,10 @@ hook。没有可丢的、或者丢掉的还不如压缩后补回去的提醒多�
 `outcome`:`declined` 是 `PreCompact` hook 拒了;`nothing_to_compact` 是没有可丢的,或丢掉的
 还不如补回去的多(上面说的不改、不发 `compact` 的那种);`failed` 是 compactor 或摘要失败
 (带 `at` 时摘要失败或没有摘要模型也是),`reason` 是说明文字;`cancelled` 是压缩途中被
-`session.interrupt` 中断。四种都不改历史。值的名单只会增加,不认识的按"没压成"处理。带 `at`
+`session.interrupt` 中断。四种都不改历史。历史一换掉压缩就算成了:之后才到的中断不会让它以
+`cancelled` 结束,结尾仍是 `compact`。`compact` 发出时内存里的历史已经是压缩后的,压缩记录随后
+才写进会话日志(`session.history` 读的是日志);这一轮此后的落盘点(`step_end`、`persisted` 为
+`true` 的 `turn_complete`)到来时,日志里已经有它。值的名单只会增加,不认识的按"没压成"处理。带 `at`
 却找不到那一点时还没开始压,这两帧都不发。
 
 子 Agent 侧链里的压缩同样有这两帧,和 `compact` 一样经 `subagent_progress` 转出。

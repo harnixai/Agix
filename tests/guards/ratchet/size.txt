@@ -11,7 +11,7 @@ file  crates/mcp/src/manager.rs                                  -              
 file  crates/mcp/src/oauth/mod.rs                                -                                      1150
 file  crates/platform/src/sandbox/linux.rs                       -                                      853
 file  crates/skills/src/manager.rs                                  -                                      825
-file  crates/session/src/transcript.rs                           -                                      924
+file  crates/session/src/transcript.rs                           -                                      931
 file  crates/telemetry/src/recorder/mod.rs                       -                                      828
 fn    crates/agents/src/agent_tool/build.rs                      Delegator::build_delegate              96
 fn    crates/agents/src/agent_tool/catalog.rs                    parse_agent_type_file                  96
