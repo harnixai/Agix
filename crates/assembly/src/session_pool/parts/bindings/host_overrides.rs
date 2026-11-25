@@ -36,9 +36,9 @@ impl HostOverrides {
             serde_json::to_value(&host.values),
         ) {
             (Ok(disk), Ok(host)) => (
-                changed(&disk, &host, Lists::AsTheHostHasThem),
-                changed(&disk, &host, Lists::WhatTheHostAdded),
-                changed(&host, &disk, Lists::WhatTheHostAdded).and_then(only_lists),
+                changed(&disk, &host, Lists::AsTheHostHasThem, None),
+                changed(&disk, &host, Lists::WhatTheHostAdded, None),
+                changed(&host, &disk, Lists::WhatTheHostAdded, None).and_then(only_lists),
             ),
             _ => (None, None, None),
         };
@@ -105,7 +105,7 @@ impl HostOverrides {
         let mut layer = self.added.clone()?;
         self.drop_project_providers(&mut layer, &[]);
         if let Ok(Value::Object(theirs)) = serde_json::to_value(&settings.values) {
-            extend_lists(&mut layer, &theirs);
+            extend_lists(&mut layer, &theirs, None);
         }
         Some(layer)
     }
@@ -113,7 +113,13 @@ impl HostOverrides {
     fn layer_for_own(&self, settings: &LoadedSettings) -> Option<Map<String, Value>> {
         let mut layer = self.own.clone()?;
         if let Ok(Value::Object(now)) = serde_json::to_value(&settings.values) {
-            follow_disk(&mut layer, &now, self.added.as_ref(), self.removed.as_ref());
+            follow_disk(
+                &mut layer,
+                &now,
+                self.added.as_ref(),
+                self.removed.as_ref(),
+                None,
+            );
             let on_disk = now.get("providers").and_then(Value::as_array);
             self.drop_project_providers(&mut layer, on_disk.map_or(&[], Vec::as_slice));
         }
@@ -157,11 +163,15 @@ fn into_object(value: Value) -> Option<Map<String, Value>> {
 /// Each list of `layer` but `providers` — which the overlay puts first itself
 /// — after the one at the same place in `theirs`, without what that already
 /// holds.
-fn extend_lists(layer: &mut Map<String, Value>, theirs: &Map<String, Value>) {
+fn extend_lists(layer: &mut Map<String, Value>, theirs: &Map<String, Value>, at: Option<&str>) {
     for (key, value) in layer.iter_mut() {
         match (value, theirs.get(key)) {
-            (Value::Object(inner), Some(Value::Object(below))) => extend_lists(inner, below),
-            (Value::Array(added), Some(Value::Array(below))) if key != "providers" => {
+            (Value::Object(inner), Some(Value::Object(below))) => {
+                extend_lists(inner, below, Some(key))
+            }
+            (Value::Array(added), Some(Value::Array(below)))
+                if key != "providers" && !is_whole(at, key) =>
+            {
                 let mut list = below.clone();
                 list.extend(added.drain(..).filter(|item| !below.contains(item)));
                 *added = list;
@@ -178,6 +188,7 @@ fn follow_disk(
     now: &Map<String, Value>,
     added: Option<&Map<String, Value>>,
     removed: Option<&Map<String, Value>>,
+    at: Option<&str>,
 ) {
     for (key, value) in layer.iter_mut() {
         let added_here = added.and_then(|a| a.get(key));
@@ -188,8 +199,9 @@ fn follow_disk(
                 below,
                 added_here.and_then(Value::as_object),
                 removed_here.and_then(Value::as_object),
+                Some(key),
             ),
-            (Value::Array(host), below) => {
+            (Value::Array(host), below) if !is_whole(at, key) => {
                 let below = below.and_then(Value::as_array).cloned().unwrap_or_default();
                 let added = added_here
                     .and_then(Value::as_array)
@@ -260,20 +272,27 @@ fn rule_key(
     (&rule.rule, rule.tier, rule.machine_local)
 }
 
+/// `prompt.append` is one value however it is written: a list of blocks is
+/// replaced whole, never merged entry by entry with the one below.
+fn is_whole(at: Option<&str>, key: &str) -> bool {
+    at == Some("prompt") && key == "append"
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Lists {
     AsTheHostHasThem,
     WhatTheHostAdded,
 }
 
-fn changed(from: &Value, to: &Value, lists: Lists) -> Option<Value> {
+fn changed(from: &Value, to: &Value, lists: Lists, at: Option<&str>) -> Option<Value> {
     match (from, to) {
         (Value::Object(from), Value::Object(to)) => {
             let layer: Map<String, Value> = to
                 .iter()
                 .filter_map(|(key, value)| {
                     let diff = match from.get(key) {
-                        Some(old) => changed(old, value, lists)?,
+                        Some(old) if is_whole(at, key) => (old != value).then(|| value.clone())?,
+                        Some(old) => changed(old, value, lists, Some(key))?,
                         None => value.clone(),
                     };
                     Some((key.clone(), diff))
@@ -342,6 +361,34 @@ mod tests {
 
         let same = HostOverrides::between(&loaded(disk.clone()), &loaded(disk));
         assert!(same.own.is_none() && same.added.is_none());
+    }
+
+    fn with_append(mut values: Settings, blocks: serde_json::Value) -> Settings {
+        values.prompt.append = Some(serde_json::from_value(blocks).unwrap());
+        values
+    }
+
+    fn append_of(settings: &LoadedSettings) -> serde_json::Value {
+        serde_json::to_value(&settings.values.prompt.append).unwrap()
+    }
+
+    #[test]
+    fn a_listed_append_the_host_set_replaces_the_one_below_whole() {
+        let block = |name: &str| serde_json::json!({"name": name, "text": name});
+        let disk = with_append(Settings::defaults_for("m"), serde_json::json!([block("a")]));
+        let host = with_append(disk.clone(), serde_json::json!([block("h")]));
+        let overrides = HostOverrides::between(&loaded(disk.clone()), &loaded(host));
+
+        let disk_now = with_append(disk, serde_json::json!([block("a"), block("later")]));
+        let own = overrides.apply_to_own(loaded(disk_now));
+        assert_eq!(append_of(&own), serde_json::json!([block("h")]));
+
+        let other = with_append(
+            Settings::defaults_for("other"),
+            serde_json::json!([block("theirs")]),
+        );
+        let applied = overrides.apply(loaded(other));
+        assert_eq!(append_of(&applied), serde_json::json!([block("h")]));
     }
 
     fn provider(id: &str) -> base::provider::ProviderConfig {
