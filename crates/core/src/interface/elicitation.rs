@@ -137,6 +137,8 @@ pub struct ElicitRequest {
     pub message: String,
     /// Offered answers. Empty means free-form.
     pub options: Vec<ElicitOption>,
+    /// The asking sub-agent's session, the deepest when delegations nest.
+    pub agent_session_id: Option<String>,
 }
 
 /// What came back.
@@ -294,6 +296,7 @@ mod tests {
 
     fn req(kind: ElicitKind) -> ElicitRequest {
         ElicitRequest {
+            agent_session_id: None,
             id: "q1".into(),
             kind,
             message: "well?".into(),

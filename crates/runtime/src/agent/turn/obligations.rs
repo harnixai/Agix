@@ -131,6 +131,7 @@ async fn kept_by_a_person(
     let timeout = ctx.config.permission_prompt_timeout_secs;
     let ask = ctx.elicitation.ask_within(
         ElicitRequest {
+            agent_session_id: None,
             id: base::id::Id::new().to_string(),
             kind: ElicitKind::Clarification {
                 header: Some("Nested repository".into()),

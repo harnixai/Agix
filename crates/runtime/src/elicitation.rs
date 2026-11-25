@@ -468,6 +468,7 @@ mod tests {
 
     fn authorization(id: &str) -> ElicitRequest {
         ElicitRequest {
+            agent_session_id: None,
             id: id.into(),
             kind: ElicitKind::Authorization {
                 tool_name: "Bash".into(),
@@ -482,6 +483,7 @@ mod tests {
 
     fn clarification(id: &str) -> ElicitRequest {
         ElicitRequest {
+            agent_session_id: None,
             id: id.into(),
             kind: ElicitKind::Clarification {
                 header: Some("Branch".into()),
@@ -650,6 +652,7 @@ mod tests {
         ] {
             let outcome = asker
                 .ask(ElicitRequest {
+                    agent_session_id: None,
                     id: "q".into(),
                     kind,
                     message: "?".into(),

@@ -107,7 +107,9 @@ impl base::interface::permission::PathDenials for DelegateRelay {
 ///
 /// A parent that is a delegate itself has no host watching its channel; its
 /// delegates' questions go on up the way its own do, each level adding its
-/// `[sub-agent <id>]`.
+/// `[sub-agent <id>]`. The question keeps naming the session that asked, the
+/// deepest; the task it carries is the outermost delegate's, the one task of
+/// the watched session it runs under.
 pub(crate) struct ParentElicitation {
     pub(crate) delegate_id: String,
     pub(crate) route: QuestionRoute,
@@ -150,9 +152,13 @@ impl Elicitation for ParentElicitation {
 impl ParentElicitation {
     async fn put(
         &self,
-        request: ElicitRequest,
+        mut request: ElicitRequest,
         within: Option<std::time::Duration>,
     ) -> Option<ElicitOutcome> {
+        let asking = request
+            .agent_session_id
+            .get_or_insert_with(|| self.delegate_id.clone())
+            .clone();
         let (tool_name, paths, origin, tool_use_id) = match &request.kind {
             ElicitKind::Authorization {
                 tool_name,
@@ -191,7 +197,7 @@ impl ParentElicitation {
             turn_id: String::new(),
             tool_use_id: tool_use_id.clone(),
             task_id: self.task.as_ref().map(|task| task.task_id.clone()),
-            agent_session_id: Some(self.delegate_id.clone()),
+            agent_session_id: Some(asking),
             origin: origin.clone(),
             permit_always: request.options.iter().any(|o| o.key == "permit_always"),
         };
@@ -216,6 +222,7 @@ impl ParentElicitation {
     ) -> Option<ElicitOutcome> {
         let _waiting = Waiting::begin(self.task.as_deref(), request.id.clone());
         request.message = format!("[sub-agent {}] {}", self.delegate_id, request.message);
+        let asking = request.agent_session_id.clone();
         match &self.route {
             QuestionRoute::Upstream(upstream) => upstream.ask_within(request, within).await,
             QuestionRoute::Channel {
@@ -227,7 +234,7 @@ impl ParentElicitation {
                     events,
                     pending,
                     task_id: self.task.as_ref().map(|task| task.task_id.clone()),
-                    agent_session_id: Some(self.delegate_id.clone()),
+                    agent_session_id: asking,
                 }
                 .ask(request, within)
                 .await

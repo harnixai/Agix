@@ -96,6 +96,7 @@ impl Tool for AskUserQuestionTool {
             Some(asker) => Some(
                 asker.ask_within(
                     ElicitRequest {
+                        agent_session_id: None,
                         id: ctx.tool_use_id.clone(),
                         kind: ElicitKind::Clarification {
                             header: input.header.clone(),

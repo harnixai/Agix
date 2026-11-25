@@ -227,6 +227,7 @@ impl crate::elicit::McpElicitor for ToolCallElicitor {
         };
         let secs = ctx.config.permission_prompt_timeout_secs;
         let request = ElicitRequest {
+            agent_session_id: None,
             id: uuid::Uuid::new_v4().to_string(),
             kind: ElicitKind::McpServer {
                 server: server.to_string(),

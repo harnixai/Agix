@@ -405,6 +405,7 @@ async fn ask(
     let prompt_timeout = ctx.config.permission_prompt_timeout_secs;
     let ask = ctx.elicitation.ask_within(
         base::interface::elicitation::ElicitRequest {
+            agent_session_id: None,
             id: prompt_id.clone(),
             kind: base::interface::elicitation::ElicitKind::Authorization {
                 tool_name: name.to_string(),

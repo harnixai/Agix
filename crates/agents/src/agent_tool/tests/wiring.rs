@@ -723,6 +723,7 @@ async fn a_question_for_a_closed_parent_is_declined_legibly() {
 
 fn authorization(id: &str, message: &str) -> base::interface::elicitation::ElicitRequest {
     base::interface::elicitation::ElicitRequest {
+        agent_session_id: None,
         id: id.into(),
         kind: base::interface::elicitation::ElicitKind::Authorization {
             tool_name: "Bash".into(),
@@ -1313,4 +1314,90 @@ async fn a_nested_sub_agents_question_names_the_session_its_call_is_in() {
             "the frame's tool_use_id is a call of session `inner`, but it names session {agent_session_id:?}"
         );
     }
+}
+
+/// Two delegations down, a question still names the session that asked and
+/// its call there, and carries the one task the host can see: the outermost
+/// delegate's, under the watched session. An MCP server's question too.
+#[tokio::test]
+async fn a_nested_question_carries_the_outer_task_and_the_inner_session() {
+    use crate::agent_tool::permission::{ParentElicitation, QuestionRoute};
+    use base::interface::elicitation::{ElicitKind, Elicitation, McpElicitMode};
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let watched: Arc<dyn base::context::Session> =
+        Arc::new(session_state::SessionState::for_tests("/tmp".into()));
+    let middle: Arc<dyn base::context::Session> =
+        Arc::new(session_state::SessionState::for_tests("/tmp".into()));
+    let task_of = |session: &Arc<dyn base::context::Session>, id: &str| {
+        Some(session.register_task(
+            id.into(),
+            base::context::TaskType::Agent,
+            tokio_util::sync::CancellationToken::new(),
+            serde_json::json!({}),
+        ))
+    };
+    let outer: Arc<dyn Elicitation> = Arc::new(ParentElicitation {
+        delegate_id: "outer".into(),
+        route: QuestionRoute::Channel {
+            events: runtime::event_bus::EventBus::new(tx),
+            pending: Arc::default(),
+            mcp: Some(Arc::default()),
+        },
+        task: task_of(&watched, "task-outer"),
+    });
+    let inner: Arc<dyn Elicitation> = Arc::new(ParentElicitation {
+        delegate_id: "inner".into(),
+        route: QuestionRoute::Upstream(outer),
+        task: task_of(&middle, "task-inner"),
+    });
+
+    let mut permission = authorization("p1", "run the nested probe?");
+    if let ElicitKind::Authorization { tool_use_id, .. } = &mut permission.kind {
+        *tool_use_id = Some("toolu_inner".into());
+    }
+    let mut mcp = authorization("p2", "your token?");
+    mcp.kind = ElicitKind::McpServer {
+        server: "probe".into(),
+        mode: McpElicitMode::Form {
+            requested_schema: serde_json::json!({"type": "object"}),
+        },
+        tool_use_id: Some("toolu_inner_mcp".into()),
+        limited: false,
+    };
+    let asked = tokio::spawn(async move {
+        tokio::join!(inner.ask(permission), inner.ask(mcp));
+    });
+
+    let mut seen = Vec::new();
+    while seen.len() < 2 {
+        match rx
+            .recv()
+            .await
+            .expect("both questions reach the watched session")
+        {
+            AgentEvent::PermissionPrompt {
+                tool_use_id,
+                task_id,
+                agent_session_id,
+                ..
+            }
+            | AgentEvent::McpElicitationPrompt {
+                tool_use_id,
+                task_id,
+                agent_session_id,
+                ..
+            } => seen.push((tool_use_id, task_id, agent_session_id)),
+            _ => continue,
+        }
+    }
+    asked.abort();
+    seen.sort();
+    let named = |call: &str| {
+        (
+            Some(call.to_string()),
+            Some("task-outer".to_string()),
+            Some("inner".to_string()),
+        )
+    };
+    assert_eq!(seen, vec![named("toolu_inner"), named("toolu_inner_mcp")]);
 }
