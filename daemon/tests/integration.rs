@@ -1,6 +1,6 @@
 //! The daemon's integration tests, compiled into one test binary; each module
 //! is one file of this directory. One file alone:
-//! `cargo test -p daemon --test integration session_resume::`.
+//! `cargo test -p agixd --test integration session_resume::`.
 
 mod accept_edits_reads;
 mod approval_gate;

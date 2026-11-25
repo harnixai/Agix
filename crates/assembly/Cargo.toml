@@ -1,11 +1,16 @@
 [package]
-name = "assembly"
+name = "agix-assembly"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agix-assembly"
 description  = "Agix — the assembly: modules into sessions, sessions into a pool, provider routing"
+
+[lib]
+name = "assembly"
 
 [dependencies]
 session-state  = { workspace = true }
@@ -77,8 +82,8 @@ tokio = { workspace = true, features = ["test-util"] }
 rpc-schema = []
 # ── The script carrier and the package layer ────────────────────────────
 #
-#     cargo build -p daemon                                          # QuickJS + packages
-#     cargo build -p daemon --no-default-features --features full    # neither
+#     cargo build -p agixd                                          # QuickJS + packages
+#     cargo build -p agixd --no-default-features --features full    # neither
 default = ["scripts", "plugin-packages", "mcp", "agents", "skills", "sandbox"]
 
 # The modules a session can be assembled with; see `modules.rs`.

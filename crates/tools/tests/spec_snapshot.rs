@@ -1,7 +1,7 @@
 //! 冻结每个内建工具对自己的声明：spec、两种路径风格下的输入 schema、详细指南，
 //! 以及一组样例输入下看输入的回答（只读、并发安全、破坏性、权限事实）。
 //! 权限判定和请求里的工具表都读这些答案，改动必须是有意的：
-//! `UPDATE_GOLDEN=1 cargo test -p tools --test integration spec_snapshot` 重新生成。
+//! `UPDATE_GOLDEN=1 cargo test -p agix-tools --test integration spec_snapshot` 重新生成。
 
 use base::tool::{PathStyle, PromptContext, Tool};
 use serde_json::{json, Value};

@@ -1,7 +1,7 @@
 //! 机器可读的 JSON-RPC 接口描述 `docs/schemas/rpc.schema.json`，从方法表
 //! （[`super::methods`]）、`ErrorCode::ALL` 和两种通知的事件类型生成。
 //!
-//! Regenerate: `cargo test -p assembly write_rpc_schema -- --ignored`.
+//! Regenerate: `cargo test -p agix-assembly write_rpc_schema -- --ignored`.
 
 use schemars::SchemaGenerator;
 use serde_json::{json, Map, Value};
@@ -131,7 +131,7 @@ mod tests {
         let existing = std::fs::read_to_string(committed_path()).unwrap_or_default();
         assert!(
             existing == rendered(),
-            "docs/schemas/rpc.schema.json is out of date; run `cargo test -p assembly write_rpc_schema -- --ignored` and commit it"
+            "docs/schemas/rpc.schema.json is out of date; run `cargo test -p agix-assembly write_rpc_schema -- --ignored` and commit it"
         );
     }
 

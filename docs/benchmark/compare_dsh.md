@@ -15,7 +15,7 @@ DSH 不在本仓库里，也不是任何 crate 的依赖：跑之前要自己用
 | Node.js ≥ 24.9 | DSH 的 `engines` 要求 |
 | DSH | `npm i --prefix <目录> @deepseek-ai/dsh@<版本>`，启动器在 `<目录>/node_modules/.bin/dsh`。要和已有结果对照，就装同一个版本；README 的数字用的是 `0.2.2-rc.1` |
 | 模型凭据 | 和 live 测试共用工作区的 `.env`（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL` 等，见 `tests/README.md`「LIVE 层」）。只能是 Flash：配置里出现 Pro 模型名会直接报错 |
-| release 版 `agixd` | `cargo build --release -p daemon --bin agixd`。不指定时测的是测试旁边的 debug 版，CPU 和内存读数没有意义 |
+| release 版 `agixd` | `cargo build --release -p agixd --bin agixd`。不指定时测的是测试旁边的 debug 版，CPU 和内存读数没有意义 |
 | Python 3 | 验证产物要用 |
 
 DSH 装在仓库外面，比如一个临时目录。它的会话和配置写在每次运行自己的临时 `DSH_HOME` 里，
@@ -25,7 +25,7 @@ DSH 装在仓库外面，比如一个临时目录。它的会话和配置写在�
 
 ```sh
 npm i --prefix /some/dir @deepseek-ai/dsh@0.2.2-rc.1
-cargo build --release -p daemon --bin agixd
+cargo build --release -p agixd --bin agixd
 
 AGIX_DSH_BIN=/some/dir/node_modules/.bin/dsh \
 AGIX_TEST_DAEMON_BIN=$PWD/target/release/agixd \

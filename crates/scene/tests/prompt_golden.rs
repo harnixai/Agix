@@ -1,6 +1,6 @@
 //! 冻结每个内建场景和一个声明式场景在固定上下文下的系统提示与会话上下文字节。
 //! 提示差一个字节，跨会话的提示缓存就失效，所以这里逐字节比对；确实要改提示时
-//! 用 `UPDATE_GOLDEN=1 cargo test -p scene --test prompt_golden` 重新生成。
+//! 用 `UPDATE_GOLDEN=1 cargo test -p agix-scene --test prompt_golden` 重新生成。
 
 use base::interface::scene::{ScenePromptContext, SceneSpec};
 use scene::code::Interaction;

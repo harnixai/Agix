@@ -4,8 +4,13 @@ version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
-description  = "Agix — the crate an embedder depends on: the engine's embedding surface, re-exported by theme"
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agix"
+description  = "Agix — embed an agent engine in a Rust process: session pool, turns, events, host tools, or the JSON-RPC protocol on any stream"
+readme       = "README.md"
+keywords     = ["agent", "llm", "ai", "mcp", "anthropic"]
+categories   = ["development-tools", "asynchronous"]
 
 [dependencies]
 assembly  = { workspace = true }

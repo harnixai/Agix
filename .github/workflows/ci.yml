@@ -50,12 +50,12 @@ jobs:
       # other does with a `scripts` section — see `tests/testing_scripts.md`,
       # which lists exactly that as outside the script carrier's own net.
       - name: build a daemon with no carrier
-        run: CARGO_TARGET_DIR=${{ github.workspace }}/target/no-carrier cargo build -p daemon --no-default-features --features full
+        run: CARGO_TARGET_DIR=${{ github.workspace }}/target/no-carrier cargo build -p agixd --no-default-features --features full
 
       # The kernel alone: no MCP, sub-agents, skills, web tools, WebSocket,
       # carrier or package layer. `minimal_tier` runs a session against it.
       - name: build a minimal daemon
-        run: CARGO_TARGET_DIR=${{ github.workspace }}/target/minimal cargo build -p daemon --no-default-features
+        run: CARGO_TARGET_DIR=${{ github.workspace }}/target/minimal cargo build -p agixd --no-default-features
 
       # The ignored set is where the slow cases live — a real daemon, a real
       # MCP server over stdio, the schema the documents are generated from.
@@ -97,10 +97,10 @@ jobs:
           bwrap --ro-bind / / true
 
       - name: platform sandbox
-        run: cargo test -p platform --features sandbox
+        run: cargo test -p agix-platform --features sandbox
 
       - name: daemon sandbox cases
-        run: cargo test -p daemon --test integration 'daemon_socket_from_a_command::'
+        run: cargo test -p agixd --test integration 'daemon_socket_from_a_command::'
 
   carriers:
     # Builds with and without the script carrier and the package layer. Each
@@ -116,21 +116,21 @@ jobs:
       # Tested, not just checked: the plugins-disabled RPC answers compile
       # into no other configuration.
       - name: no carrier
-        run: cargo test -p daemon --no-default-features --features full
+        run: cargo test -p agixd --no-default-features --features full
 
       # The middle tier, with the carrier and without.
       - name: coding tier
         run: |
-          cargo check -p daemon --no-default-features --features coding
-          cargo check -p daemon --no-default-features --features coding,scripts
+          cargo check -p agixd --no-default-features --features coding
+          cargo check -p agixd --no-default-features --features coding,scripts
 
       # MCP without `private_key_jwt`: it compiles, and the second crypto
       # backend (aws-lc) that rmcp's JWT signing brings is not in the graph.
       - name: mcp without jwt
         run: |
-          cargo check -p daemon --no-default-features --features mcp,agents,skills,web,structured-output,ptc,ws
-          cargo test -p mcp --lib
-          if cargo tree -p daemon --no-default-features --features mcp,agents,skills,web,structured-output,ptc,ws -e normal | grep -q 'aws-lc-rs v'; then
+          cargo check -p agixd --no-default-features --features mcp,agents,skills,web,structured-output,ptc,ws
+          cargo test -p agix-mcp --lib
+          if cargo tree -p agixd --no-default-features --features mcp,agents,skills,web,structured-output,ptc,ws -e normal | grep -q 'aws-lc-rs v'; then
             echo "daemon without mcp-oauth-jwt still links aws-lc-rs"
             exit 1
           fi
@@ -139,7 +139,7 @@ jobs:
       # tested because every test gated on the package layer also compiles
       # into the default build, which the `test` job runs.
       - name: packages without a carrier
-        run: cargo check -p daemon --no-default-features --features full,plugin-packages
+        run: cargo check -p agixd --no-default-features --features full,plugin-packages
 
       # The OTLP recorder is compiled out of every default build — the SDK is
       # a large dependency tree and the file recorder is what makes a run
@@ -147,25 +147,25 @@ jobs:
       # It reads the same event payloads the file recorder does, which is
       # exactly why it rots silently when one of them grows a field.
       - name: otel recorder
-        run: cargo check -p daemon --features otel
+        run: cargo check -p agixd --features otel
 
       # The OS sandbox is on in the default build; this is the build without
       # it, whose `PlatformSandbox` confines nothing.
       - name: no sandbox backend
-        run: cargo check -p platform
+        run: cargo check -p agix-platform
 
       # The contract crate has no HTTP stack at all — it is what a crate that
       # only implements the traits depends on — and this machine's providers
       # can go without one. The graph checks are the claim.
       - name: no http stack
         run: |
-          cargo test -p base
-          if cargo tree -p base -e normal | grep -Eq '\b(reqwest|rustls|hyper) v'; then
+          cargo test -p agix-base
+          if cargo tree -p agix-base -e normal | grep -Eq '\b(reqwest|rustls|hyper) v'; then
             echo "base links an HTTP stack"
             exit 1
           fi
-          cargo test -p platform --no-default-features
-          if cargo tree -p platform --no-default-features -e normal | grep -Eq '\b(reqwest|rustls|hyper) v'; then
+          cargo test -p agix-platform --no-default-features
+          if cargo tree -p agix-platform --no-default-features -e normal | grep -Eq '\b(reqwest|rustls|hyper) v'; then
             echo "platform without http still links an HTTP stack"
             exit 1
           fi

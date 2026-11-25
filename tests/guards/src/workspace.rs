@@ -55,6 +55,8 @@ pub enum DepKind {
 
 #[derive(Clone, Debug)]
 pub struct Dep {
+    /// A workspace member's guard name (see [`Package::name`]); any other
+    /// crate's package name.
     pub name: String,
     /// The name the code uses: the rename if there is one, else the package
     /// name with `-` turned into `_`.
@@ -69,6 +71,10 @@ pub struct Dep {
 
 #[derive(Clone, Debug)]
 pub struct Package {
+    /// The key the workspace's manifests depend on this package under —
+    /// `base` for the package `agix-base`, `daemon` for `agixd` — which is
+    /// the name the code and the docs use. A package nothing depends on is
+    /// named by its package name.
     pub name: String,
     /// The package directory, relative to the workspace root.
     pub dir: String,
@@ -199,9 +205,15 @@ fn packages(metadata: &Value, root: &Path) -> Result<Vec<Package>, String> {
         .as_array()
         .ok_or("cargo metadata has no packages")?;
     let names: HashSet<&str> = raw.iter().filter_map(|p| p["name"].as_str()).collect();
+    let keys = dependency_keys(raw, &names)?;
+    let guard_name = |package: &str| {
+        keys.get(package)
+            .cloned()
+            .unwrap_or_else(|| package.to_string())
+    };
     let mut out = Vec::new();
     for p in raw {
-        let name = p["name"].as_str().unwrap_or_default().to_string();
+        let name = guard_name(p["name"].as_str().unwrap_or_default());
         let manifest = PathBuf::from(p["manifest_path"].as_str().unwrap_or_default());
         let dir = source::rel_of(root, manifest.parent().unwrap_or(root));
         let mut targets: Vec<Target> = p["targets"]
@@ -226,10 +238,19 @@ fn packages(metadata: &Value, root: &Path) -> Result<Vec<Package>, String> {
             .into_iter()
             .flatten()
             .map(|d| {
-                let dep_name = d["name"].as_str().unwrap_or_default().to_string();
-                let ident = d["rename"].as_str().unwrap_or(&dep_name).replace('-', "_");
+                let dep_package = d["name"].as_str().unwrap_or_default();
+                let ident = d["rename"]
+                    .as_str()
+                    .unwrap_or(dep_package)
+                    .replace('-', "_");
+                let first_party = names.contains(dep_package);
+                let dep_name = if first_party {
+                    guard_name(dep_package)
+                } else {
+                    dep_package.to_string()
+                };
                 Dep {
-                    first_party: names.contains(dep_name.as_str()),
+                    first_party,
                     kind: match d["kind"].as_str() {
                         Some("dev") => DepKind::Dev,
                         Some("build") => DepKind::Build,
@@ -261,6 +282,40 @@ fn packages(metadata: &Value, root: &Path) -> Result<Vec<Package>, String> {
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
+}
+
+/// Each workspace member another member depends on under a different key,
+/// with that key. Members are depended on through `[workspace.dependencies]`,
+/// so one package has one key; two would leave the guards no name to use.
+fn dependency_keys(
+    raw: &[Value],
+    members: &HashSet<&str>,
+) -> Result<HashMap<String, String>, String> {
+    let mut keys: HashMap<String, String> = HashMap::new();
+    for d in raw
+        .iter()
+        .filter_map(|p| p["dependencies"].as_array())
+        .flatten()
+    {
+        let (Some(package), Some(key)) = (d["name"].as_str(), d["rename"].as_str()) else {
+            continue;
+        };
+        if !members.contains(package) {
+            continue;
+        }
+        match keys.get(package) {
+            Some(known) if known != key => {
+                return Err(format!(
+                    "`{package}` is depended on as both `{known}` and `{key}`; depend on it \
+                     through [workspace.dependencies] under one key"
+                ))
+            }
+            _ => {
+                keys.insert(package.to_string(), key.to_string());
+            }
+        }
+    }
+    Ok(keys)
 }
 
 fn strings(v: &Value) -> Vec<String> {

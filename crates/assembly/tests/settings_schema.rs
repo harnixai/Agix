@@ -259,7 +259,7 @@ fn settings_schema_matches_committed_file() {
     let existing = std::fs::read_to_string(committed_schema_path()).unwrap_or_default();
     assert!(
         existing == rendered_schema(),
-        "docs/schemas/settings.schema.json is out of date; run `cargo test -p assembly --test settings_schema write_settings_schema -- --ignored` and commit it"
+        "docs/schemas/settings.schema.json is out of date; run `cargo test -p agix-assembly --test settings_schema write_settings_schema -- --ignored` and commit it"
     );
 }
 

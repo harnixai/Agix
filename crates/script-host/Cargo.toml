@@ -1,14 +1,19 @@
 [package]
-name = "script-host"
+name = "agix-script-host"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/agix-script-host"
+description = "Agix — the script carrier: operator JavaScript bound to hook points, run in QuickJS with a per-turn quota and budget"
 
-# Note: `rquickjs` requires Rust 1.87, above the workspace's declared 1.80.
-# That raises the floor only for builds that turn this carrier on — it is an
-# optional dependency of `daemon` behind the `scripts` feature, and a build
-# without it is unaffected. A host that brings its own `ScriptEngine` can turn
-# the `quickjs` feature off and link no interpreter at all.
+# A host that brings its own `ScriptEngine` can turn the `quickjs` feature off
+# and link no interpreter at all.
+
+[lib]
+name = "script_host"
 
 [features]
 default = ["quickjs"]

@@ -183,7 +183,7 @@
 ## 构建
 
 - **RPC schema 生成不进发布二进制。** `docs/schemas/rpc.schema.json` 由测试或 `assembly` 的 `rpc-schema` feature 生成
-  (`cargo test -p assembly write_rpc_schema -- --ignored`),agixd 与嵌入方不用管。
+  (`cargo test -p agix-assembly write_rpc_schema -- --ignored`),agixd 与嵌入方不用管。
 
 ## 嵌入(`agix` crate)
 

@@ -55,8 +55,8 @@ cat <<'TXT'
 
   2. Building a different feature combination. Each keeps its own set:
        cargo build --workspace                      default, with scripts and packages
-       cargo build -p daemon --no-default-features --features full  no extension machinery at all
-       cargo build -p daemon --features plugin-packages            packages without the script carrier
+       cargo build -p agixd --no-default-features --features full  no extension machinery at all
+       cargo build -p agixd --features plugin-packages            packages without the script carrier
      (build the narrow ones into a throwaway CARGO_TARGET_DIR so they leave
      nothing behind here.)
 

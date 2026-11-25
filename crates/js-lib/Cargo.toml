@@ -1,10 +1,16 @@
 [package]
-name = "js-lib"
+name = "agix-js-lib"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
-publish = false
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/agix-js-lib"
 description = "Agix — the base library every embedded JavaScript runtime gets under the engine's name: YAML, glob, path, JSON Schema, SHA-256, UUID, argument parsing"
+
+[lib]
+name = "js_lib"
 
 [dependencies]
 base         = { workspace = true }

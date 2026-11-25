@@ -1,12 +1,17 @@
 [package]
-name = "model"
+name = "agix-model"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
-description  = "Agix — LLM backend adapter (Anthropic API)"
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agix-model"
+description  = "Agix — model protocol adapters (Anthropic Messages, OpenAI Chat Completions and Responses), retry and backoff, provider routing"
 autotests    = false
+
+[lib]
+name = "model"
 
 [dependencies]
 base          = { workspace = true }

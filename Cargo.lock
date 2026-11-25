@@ -9,59 +9,631 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "agents"
+name = "agix"
 version = "0.4.4-2026112501"
 dependencies = [
+ "agix-assembly",
+ "agix-base",
+ "agix-history",
+ "agix-hooks",
+ "agix-model",
+ "agix-platform",
+ "agix-runtime",
+ "agix-scene",
+ "agix-settings",
+ "agix-telemetry",
  "anyhow",
  "async-trait",
- "base",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "agix-agents"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-history",
+ "agix-hooks",
+ "agix-model",
+ "agix-permissions",
+ "agix-platform",
+ "agix-runtime",
+ "agix-scene",
+ "agix-session-state",
+ "agix-settings",
+ "agix-skills",
+ "agix-team",
+ "agix-telemetry",
+ "agix-tools",
+ "anyhow",
+ "async-trait",
  "futures",
- "history",
- "hooks",
- "model",
  "notify",
- "permissions",
- "platform",
- "runtime",
- "scene",
  "schemars",
  "serde",
  "serde_json",
- "session-state",
- "settings",
- "skills",
- "team",
- "telemetry",
  "tempfile",
  "time",
  "tokio",
  "tokio-util",
- "tools",
  "tracing",
  "uuid",
 ]
 
 [[package]]
-name = "agix"
+name = "agix-assembly"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-agents",
+ "agix-base",
+ "agix-history",
+ "agix-hooks",
+ "agix-mcp",
+ "agix-memory",
+ "agix-model",
+ "agix-packages",
+ "agix-permissions",
+ "agix-platform",
+ "agix-runtime",
+ "agix-scene",
+ "agix-script-host",
+ "agix-session",
+ "agix-session-state",
+ "agix-settings",
+ "agix-skills",
+ "agix-telemetry",
+ "agix-tools",
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "futures",
+ "hex",
+ "jsonschema",
+ "libc",
+ "notify",
+ "opentelemetry",
+ "opentelemetry-http",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "zip",
+]
+
+[[package]]
+name = "agix-base"
 version = "0.4.4-2026112501"
 dependencies = [
  "anyhow",
- "assembly",
  "async-trait",
- "base",
- "history",
- "hooks",
- "model",
- "platform",
- "runtime",
- "scene",
+ "bs58",
+ "futures",
+ "globset",
+ "libc",
+ "schemars",
+ "serde",
  "serde_json",
- "settings",
- "telemetry",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "agix-compaction"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "async-trait",
+ "futures",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "agix-history"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "async-trait",
+ "hex",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "agix-hooks"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-permissions",
+ "agix-platform",
+ "async-trait",
+ "futures",
+ "globset",
+ "libc",
+ "notify",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "agix-js-lib"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "globset",
+ "hex",
+ "jsonschema",
+ "rquickjs",
+ "saphyr-parser",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "agix-mcp"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-platform",
+ "agix-runtime",
+ "agix-scene",
+ "agix-session-state",
+ "agix-settings",
+ "anyhow",
+ "async-trait",
+ "futures",
+ "globset",
+ "hex",
+ "http",
+ "libc",
+ "mcp-oauth-mock",
+ "oauth2",
+ "process-wrap",
+ "reqwest",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "agix-memory"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "async-trait",
+ "futures",
+ "libc",
+ "regex",
+ "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "agix-model"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-platform",
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "bytes",
+ "eventsource-stream",
+ "futures",
+ "httpdate",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "agix-packages"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-platform",
+ "agix-prompt-files",
+ "agix-scene",
+ "hex",
+ "jsonschema",
+ "libc",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+ "zip",
+]
+
+[[package]]
+name = "agix-permissions"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-session-state",
+ "agix-settings",
+ "async-trait",
+ "globset",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "unicode-normalization",
+ "uuid",
+]
+
+[[package]]
+name = "agix-platform"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-platform",
+ "async-trait",
+ "futures",
+ "hex",
+ "libc",
+ "regex",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "agix-prompt-files"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "agix-ptc"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-js-lib",
+ "agix-platform",
+ "agix-session-state",
+ "async-trait",
+ "hex",
+ "jsonschema",
+ "libc",
+ "rquickjs",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "agix-runtime"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-compaction",
+ "agix-history",
+ "agix-hooks",
+ "agix-memory",
+ "agix-model",
+ "agix-permissions",
+ "agix-platform",
+ "agix-prompt-files",
+ "agix-ptc",
+ "agix-scene",
+ "agix-session",
+ "agix-session-state",
+ "agix-settings",
+ "agix-telemetry",
+ "agix-tools",
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "futures",
+ "jsonschema",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "agix-scene"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "agix-script-host"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-js-lib",
+ "agix-runtime",
+ "async-trait",
+ "rquickjs",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "agix-session"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-history",
+ "async-trait",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+]
+
+[[package]]
+name = "agix-session-state"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "agix-settings"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "globset",
+ "libc",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "agix-skills"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-permissions",
+ "agix-platform",
+ "agix-prompt-files",
+ "agix-runtime",
+ "agix-scene",
+ "agix-session-state",
+ "agix-settings",
+ "agix-tools",
+ "async-trait",
+ "globset",
+ "notify",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "agix-team"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-memory",
+ "agix-platform",
+ "agix-session-state",
+ "agix-telemetry",
+ "anyhow",
+ "async-trait",
+ "futures",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "agix-telemetry"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "async-trait",
+ "futures",
+ "hex",
+ "libc",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "agix-tools"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-base",
+ "agix-permissions",
+ "agix-platform",
+ "agix-session-state",
+ "agix-settings",
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "futures",
+ "globset",
+ "html2text",
+ "ignore",
+ "jsonschema",
+ "libc",
+ "regex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "similar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "agixd"
+version = "0.4.4-2026112501"
+dependencies = [
+ "agix-agents",
+ "agix-assembly",
+ "agix-base",
+ "agix-history",
+ "agix-hooks",
+ "agix-mcp",
+ "agix-model",
+ "agix-permissions",
+ "agix-platform",
+ "agix-runtime",
+ "agix-scene",
+ "agix-script-host",
+ "agix-session-state",
+ "agix-settings",
+ "agix-skills",
+ "agix-telemetry",
+ "agix-tools",
+ "anyhow",
+ "async-trait",
+ "futures",
+ "guards",
+ "hex",
+ "lexopt",
+ "libc",
+ "mcp-oauth-mock",
+ "rpc-client",
+ "schemars",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "time",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
  "tracing-subscriber",
+ "url",
+ "uuid",
+ "zip",
 ]
 
 [[package]]
@@ -122,59 +694,6 @@ name = "arraydeque"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
-
-[[package]]
-name = "assembly"
-version = "0.4.4-2026112501"
-dependencies = [
- "agents",
- "anyhow",
- "async-trait",
- "base",
- "base64 0.22.1",
- "futures",
- "hex",
- "history",
- "hooks",
- "jsonschema",
- "libc",
- "mcp",
- "memory",
- "model",
- "notify",
- "opentelemetry",
- "opentelemetry-http",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "packages",
- "permissions",
- "platform",
- "reqwest",
- "runtime",
- "scene",
- "schemars",
- "script-host",
- "serde",
- "serde_json",
- "session",
- "session-state",
- "settings",
- "sha2 0.10.9",
- "skills",
- "telemetry",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "tonic",
- "tools",
- "tracing",
- "tracing-subscriber",
- "url",
- "zip",
-]
 
 [[package]]
 name = "async-lock"
@@ -304,29 +823,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "base"
-version = "0.4.4-2026112501"
-dependencies = [
- "anyhow",
- "async-trait",
- "bs58",
- "futures",
- "globset",
- "libc",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tokio-util",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -369,21 +865,21 @@ checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
 name = "blackbox"
 version = "0.4.4-2026112501"
 dependencies = [
+ "agix-base",
+ "agix-history",
+ "agix-model",
+ "agix-platform",
+ "agix-runtime",
+ "agix-scene",
+ "agixd",
  "anyhow",
  "async-trait",
- "base",
- "daemon",
  "demo-rust-plugin",
- "history",
  "hostile-plugins",
  "libc",
  "mcp-oauth-mock",
- "model",
- "platform",
  "reqwest",
  "rpc-client",
- "runtime",
- "scene",
  "serde_json",
  "tempfile",
  "test-runner",
@@ -523,19 +1019,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "compaction"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "futures",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
 name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -638,51 +1121,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "daemon"
-version = "0.4.4-2026112501"
-dependencies = [
- "agents",
- "anyhow",
- "assembly",
- "async-trait",
- "base",
- "futures",
- "guards",
- "hex",
- "history",
- "hooks",
- "lexopt",
- "libc",
- "mcp",
- "mcp-oauth-mock",
- "model",
- "permissions",
- "platform",
- "rpc-client",
- "runtime",
- "scene",
- "schemars",
- "script-host",
- "serde_json",
- "session-state",
- "settings",
- "sha2 0.10.9",
- "skills",
- "telemetry",
- "tempfile",
- "time",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "tools",
- "tracing",
- "tracing-subscriber",
- "url",
- "uuid",
- "zip",
-]
-
-[[package]]
 name = "darling"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -726,9 +1164,9 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 name = "demo-rust-plugin"
 version = "0.4.4-2026112501"
 dependencies = [
+ "agix-base",
+ "agix-runtime",
  "async-trait",
- "base",
- "runtime",
  "serde_json",
  "tokio",
 ]
@@ -1137,12 +1575,12 @@ dependencies = [
 name = "guards"
 version = "0.4.4-2026112501"
 dependencies = [
- "hooks",
+ "agix-hooks",
+ "agix-telemetry",
  "proc-macro2",
  "quote",
  "serde_json",
  "syn 2.0.117",
- "telemetry",
 ]
 
 [[package]]
@@ -1203,50 +1641,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
-name = "history"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "hex",
- "libc",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hooks"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "futures",
- "globset",
- "libc",
- "notify",
- "permissions",
- "platform",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "hostile-plugins"
 version = "0.4.4-2026112501"
 dependencies = [
+ "agix-base",
+ "agix-runtime",
  "async-trait",
- "base",
- "runtime",
  "serde_json",
 ]
 
@@ -1683,23 +2083,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "js-lib"
-version = "0.4.4-2026112501"
-dependencies = [
- "base",
- "globset",
- "hex",
- "jsonschema",
- "rquickjs",
- "saphyr-parser",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "js-sys"
 version = "0.3.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1887,43 +2270,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
-name = "mcp"
-version = "0.4.4-2026112501"
-dependencies = [
- "anyhow",
- "async-trait",
- "base",
- "futures",
- "globset",
- "hex",
- "http",
- "libc",
- "mcp-oauth-mock",
- "oauth2",
- "platform",
- "process-wrap",
- "reqwest",
- "rmcp",
- "runtime",
- "scene",
- "schemars",
- "serde",
- "serde_json",
- "session-state",
- "settings",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "mcp-oauth-mock"
 version = "0.4.4-2026112501"
 dependencies = [
@@ -1956,22 +2302,6 @@ name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
-
-[[package]]
-name = "memory"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "futures",
- "libc",
- "regex",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
-]
 
 [[package]]
 name = "micromap"
@@ -2022,28 +2352,6 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "model"
-version = "0.4.4-2026112501"
-dependencies = [
- "anyhow",
- "async-stream",
- "async-trait",
- "base",
- "bytes",
- "eventsource-stream",
- "futures",
- "httpdate",
- "platform",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -2300,30 +2608,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
-name = "packages"
-version = "0.4.4-2026112501"
-dependencies = [
- "base",
- "hex",
- "jsonschema",
- "libc",
- "platform",
- "prompt-files",
- "scene",
- "semver",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "toml",
- "tracing",
- "uuid",
- "zip",
-]
-
-[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2367,25 +2651,6 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
-
-[[package]]
-name = "permissions"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "globset",
- "libc",
- "serde_json",
- "session-state",
- "settings",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "unicode-normalization",
- "uuid",
-]
 
 [[package]]
 name = "phf"
@@ -2477,29 +2742,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
-name = "platform"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "futures",
- "hex",
- "libc",
- "platform",
- "regex",
- "reqwest",
- "rustls",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "potential_utf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2563,16 +2805,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prompt-files"
-version = "0.4.4-2026112501"
-dependencies = [
- "base",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "prost"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2593,29 +2825,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "ptc"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "hex",
- "js-lib",
- "jsonschema",
- "libc",
- "platform",
- "rquickjs",
- "schemars",
- "serde",
- "serde_json",
- "session-state",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
 ]
 
 [[package]]
@@ -2909,15 +3118,15 @@ dependencies = [
 name = "rpc-client"
 version = "0.4.4-2026112501"
 dependencies = [
+ "agix-base",
+ "agix-history",
+ "agix-model",
+ "agix-scene",
+ "agixd",
  "anyhow",
  "async-stream",
  "async-trait",
- "base",
- "daemon",
  "futures",
- "history",
- "model",
- "scene",
  "serde",
  "serde_json",
  "tempfile",
@@ -2955,44 +3164,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a13ac243b86a74120814ef7e9e30ad5a2c1199b7b9963b1cf7c84e4cdc1cad99"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "runtime"
-version = "0.4.4-2026112501"
-dependencies = [
- "anyhow",
- "async-trait",
- "base",
- "base64 0.22.1",
- "compaction",
- "futures",
- "history",
- "hooks",
- "jsonschema",
- "memory",
- "model",
- "permissions",
- "platform",
- "prompt-files",
- "ptc",
- "scene",
- "schemars",
- "serde",
- "serde_json",
- "session",
- "session-state",
- "settings",
- "telemetry",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tokio-util",
- "tools",
- "tracing",
- "url",
- "uuid",
 ]
 
 [[package]]
@@ -3122,17 +3293,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scene"
-version = "0.4.4-2026112501"
-dependencies = [
- "base",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "schannel"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3172,22 +3332,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "script-host"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "js-lib",
- "rquickjs",
- "runtime",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
-]
 
 [[package]]
 name = "security-framework"
@@ -3302,49 +3446,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "session"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "history",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
-]
-
-[[package]]
-name = "session-state"
-version = "0.4.4-2026112501"
-dependencies = [
- "base",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "settings"
-version = "0.4.4-2026112501"
-dependencies = [
- "base",
- "globset",
- "libc",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -3465,30 +3566,6 @@ name = "siphasher"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
-
-[[package]]
-name = "skills"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "globset",
- "notify",
- "permissions",
- "platform",
- "prompt-files",
- "regex",
- "runtime",
- "scene",
- "serde_json",
- "session-state",
- "settings",
- "tempfile",
- "tokio",
- "tokio-util",
- "tools",
- "tracing",
-]
 
 [[package]]
 name = "slab"
@@ -3653,50 +3730,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "team"
-version = "0.4.4-2026112501"
-dependencies = [
- "anyhow",
- "async-trait",
- "base",
- "futures",
- "memory",
- "platform",
- "schemars",
- "serde",
- "serde_json",
- "session-state",
- "telemetry",
- "tempfile",
- "time",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "telemetry"
-version = "0.4.4-2026112501"
-dependencies = [
- "async-trait",
- "base",
- "futures",
- "hex",
- "libc",
- "schemars",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3724,34 +3757,34 @@ dependencies = [
 name = "test-runner"
 version = "0.4.4-2026112501"
 dependencies = [
- "agents",
+ "agix-agents",
+ "agix-base",
+ "agix-history",
+ "agix-hooks",
+ "agix-mcp",
+ "agix-memory",
+ "agix-permissions",
+ "agix-platform",
+ "agix-runtime",
+ "agix-scene",
+ "agix-script-host",
+ "agix-session-state",
+ "agix-settings",
+ "agix-skills",
+ "agix-telemetry",
+ "agix-tools",
  "anyhow",
  "async-trait",
- "base",
  "futures",
  "hex",
- "history",
- "hooks",
- "mcp",
- "memory",
- "permissions",
- "platform",
- "runtime",
- "scene",
  "schemars",
- "script-host",
  "serde",
  "serde_json",
- "session-state",
- "settings",
  "sha2 0.10.9",
- "skills",
- "telemetry",
  "tempfile",
  "time",
  "tokio",
  "tokio-util",
- "tools",
  "tracing",
  "zip",
 ]
@@ -4009,39 +4042,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "tools"
-version = "0.4.4-2026112501"
-dependencies = [
- "anyhow",
- "async-trait",
- "base",
- "base64 0.22.1",
- "futures",
- "globset",
- "html2text",
- "ignore",
- "jsonschema",
- "libc",
- "permissions",
- "platform",
- "regex",
- "schemars",
- "serde",
- "serde_json",
- "session-state",
- "settings",
- "sha2 0.10.9",
- "similar",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
 ]
 
 [[package]]

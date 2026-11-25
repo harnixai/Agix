@@ -36,7 +36,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
            │
  本机    platform ───────── 执行层的本机实现(进程、文件、网络、OS 沙箱)、崩溃钩子、进程身份
            │
- 契约    core(包名 base)── 内核面向外的 trait、共享数据类型与纯判定
+ 契约    core(crate 名 base)── 内核面向外的 trait、共享数据类型与纯判定
          js-lib ─────────── 内嵌 QuickJS 的全局 agix,不依赖任何第一方 crate,只随 JS 引擎编入
 ```
 
@@ -108,7 +108,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 
 | crate | 层 | 职责 |
 |---|---|---|
-| `core`(包名 `base`) | 契约 | trait、共享数据、纯判定,以及 fs/clock/path/text 小工具;消息与提示词类型、扩展点清单、`SkillCatalog` / `McpServers` 等内核面向模块的接口 |
+| `core`(crate 名 `base`) | 契约 | trait、共享数据、纯判定,以及 fs/clock/path/text 小工具;消息与提示词类型、扩展点清单、`SkillCatalog` / `McpServers` 等内核面向模块的接口 |
 | `platform` | 本机 | 执行层四个契约的本机实现(`LocalProcess`、`LocalFileSystem`、`LocalNetwork`、`PlatformSandbox`)与 `local_providers*`;进程组台账与孤儿收尾、崩溃钩子、进程身份 |
 | `runtime` | 内核 | 轮次循环、流式解析、工具调度、`Module` / `SessionContext` |
 | `model` | 内核 | 模型协议适配(Anthropic Messages / OpenAI Chat Completions),重试与退避;provider 路由(`routing`:沿 `model.order` 回退、冷却、配额记账、每次调用计一次量),runtime 经 `base::provider::TaskRouting` 用它 |
@@ -130,6 +130,10 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `assembly` | 装配 | 会话池、配置加载、按设置建 provider 集、自检、模块清单,以及其上的 JSON-RPC 服务、实例发现与嵌入入口 `embed` |
 | `agix` | 外壳 | 嵌入门面:按主题再导出嵌入方用到的类型与函数,自身不含逻辑(`tests/guards/tests/facade.rs`);用法见 `agix-sdk.md` |
 | `daemon` | 外壳 | `agixd` 二进制:参数、信号、日志,建在 `embed` 上;库部分按旧路径重新导出 assembly |
+
+本文与守卫用的都是 crate 名:代码里 `use` 的名字,也是 `[workspace.dependencies]` 的键。cargo
+的包名(`cargo test -p`、crates.io)是 `agix-<crate 名>`,只有两个例外:`agix` 就叫 `agix`,
+`daemon` 的包名是 `agixd`。嵌入方只依赖 `agix`,其余 `agix-*` 是实现细节(`agix-sdk.md` §9)。
 
 ### 1.1 模块怎么进入会话
 
@@ -2662,8 +2666,8 @@ QuickJS 后(包裹时在外),与交给 `Builder` 的先后无关(`extension_poin
 `base::interface::catalog` 生成的,有测试保证它和代码一致。
 
 ```
-cargo build -p daemon                                          # QuickJS + 插件包(默认)
-cargo build -p daemon --no-default-features --features full    # 两者皆无
+cargo build -p agixd                                          # QuickJS + 插件包(默认)
+cargo build -p agixd --no-default-features --features full    # 两者皆无
 ```
 
 怎么写脚本见 `extending_quickjs.md`;插件包的格式见 `plugin_packages.md`;两种插件的开发

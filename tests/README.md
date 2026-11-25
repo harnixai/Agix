@@ -6,7 +6,7 @@
 |---|---|---|
 | `crates/*/src/**` 的 `mod tests` | 单元测试：一个函数/一个类型的行为 | `cargo test -p <crate>` |
 | `crates/*/tests/*.rs` | crate 验收：从公开的缝进去，这个 crate 的承诺还成立吗 | `cargo test` |
-| `daemon/tests/*.rs` | daemon 的 e2e：真的起一个 server，走真的 socket 收发 JSON-RPC；共用装备在 `daemon/tests/support/mod.rs`（脚本化模型回合、起 daemon、一次性 RPC 调用、全局层信任预置、`allow_tools`），文档对账也在这里 | `cargo test -p daemon` |
+| `daemon/tests/*.rs` | daemon 的 e2e：真的起一个 server，走真的 socket 收发 JSON-RPC；共用装备在 `daemon/tests/support/mod.rs`（脚本化模型回合、起 daemon、一次性 RPC 调用、全局层信任预置、`allow_tools`），文档对账也在这里 | `cargo test -p agixd` |
 | `tests/runner/tests/*.rs` | 引擎行为网：真的驱动 Agent，模型那端是写死的脚本 | `cargo test -p test-runner` |
 | `tests/blackbox/tests/*.rs` | 黑盒层（桩模型）：从 JSON-RPC 进去，模型那端是一个 HTTP 桩；同一批用例跑「本进程」和「另起一个 agixd」两遍 | `cargo test -p blackbox`（跨进程那半在 `-- --ignored` 里） |
 | `tests/blackbox/tests/live_*.rs` | LIVE 层（真实模型，`live_*` 前缀 + `real-model` feature）：同一套框架，模型那端换成真实模型，以二次开发者的身份黑盒地把特性用一遍 | `cargo test -p blackbox --features real-model`，见下文「LIVE 层」 |
@@ -19,7 +19,7 @@
 每个文件声明成一个模块（`autotests = false`），共用的辅助模块（如 `tests/runner/tests/support`）
 也只在那里声明一次。这样整张依赖图每个 crate 只链接一次，而不是每个文件一次；代价是新加的
 测试文件要在 `integration.rs` 里补一行 `mod`，同一程序里的测试共用一个进程。只跑其中一个
-文件，用模块名过滤：`cargo test -p daemon --test integration session_resume::`。例外有四处：LIVE 层的
+文件，用模块名过滤：`cargo test -p agixd --test integration session_resume::`。例外有四处：LIVE 层的
 `live_*` 合成另一个程序 `real_model`（要 `real-model` feature），`compare_dsh` 单独一个，
 `crates/platform/tests` 里除 `integration` 外的两个文件各自一个——它们动的是进程级的状态（只构建一次的 HTTP 客户端
 读到的代理环境变量、本进程领的全部进程组），和别的测试同进程就不成立；`daemon/tests/mcp_oauth_logs.rs` 也单独一个，
@@ -91,7 +91,7 @@ JSON-RPC 与盘上的文件跟产品打交道，和下游二次开发的用法�
 「每个子 agent 一个模型」的用例分得出谁是谁。
 
 ```sh
-cargo build -p daemon                       # 另起进程的那条用例要 target/debug/agixd
+cargo build -p agixd                       # 另起进程的那条用例要 target/debug/agixd
 cargo test -p blackbox --features real-model --test real_model -- --nocapture
 AGIX_LIVE_PRIMARY=anthropic cargo test -p blackbox --features real-model --test real_model
 ```
@@ -317,7 +317,7 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 | `crates/telemetry/tests/producers.rs` | `telemetry.md` 的事件清单与 `EventPayload::KINDS` 一致，每种都有生产方 |
 | `crates/ptc/src/tests.rs` 的 `the_limits_table_in_the_doc_is_the_default_limits` | `ptc.md` 的限额表与 `ptc::Limits::default()` 一致 |
 | `tests/guards/tests/architecture_doc.rs`（G9） | `ARCHITECTURE.md` §1 的 crate 表、"用 platform 的 crate"、分层图里的模块一行，与 `deps.rs` 的 `CRATES`、`MAY_USE_PLATFORM` 和实现了 `Module` 的 crate 一致 |
-| `crates/assembly/tests/settings_schema.rs` 的 `settings_schema_matches_committed_file` | `docs/schemas/settings.schema.json` 由 `settings` crate 的核心 `Settings` 加 `assembly::settings_sections::all()` 登记的各模块段生成（重新生成：`cargo test -p assembly --test settings_schema write_settings_schema -- --ignored`；CI 的 ignored 那一步跑） |
+| `crates/assembly/tests/settings_schema.rs` 的 `settings_schema_matches_committed_file` | `docs/schemas/settings.schema.json` 由 `settings` crate 的核心 `Settings` 加 `assembly::settings_sections::all()` 登记的各模块段生成（重新生成：`cargo test -p agix-assembly --test settings_schema write_settings_schema -- --ignored`；CI 的 ignored 那一步跑） |
 | `crates/js-lib/tests/doc.rs` | `agix_js.md` §3 的成员清单与装进运行时的 `agix` 一致 |
 | `daemon/tests/readme_matches_the_code.rs` | `README.md` 与 `docs/README.zh-CN.md` 里可数的那些声称——workspace 成员数、RPC 方法数、扩展点数、hook 事件数、遥测事件类型数、内建工具数，以及工具表里每个名字都还实装着 |
 

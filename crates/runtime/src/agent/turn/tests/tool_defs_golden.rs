@@ -1,6 +1,6 @@
 //! 冻结 code 场景一次请求里 `tools` 数组的字节。跨会话的提示缓存按前缀命中，工具表
 //! 差一个字节就整段失效；确实要改时用
-//! `UPDATE_GOLDEN=1 cargo test -p runtime tool_defs_golden` 重新生成。
+//! `UPDATE_GOLDEN=1 cargo test -p agix-runtime tool_defs_golden` 重新生成。
 
 use super::support::{recall_test_settings, FixedUsageModel};
 use crate::module::fakes::{mcp_module, mcp_tool};

@@ -1,12 +1,17 @@
 [package]
-name = "platform"
+name = "agix-platform"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agix-platform"
 description  = "Agix — this machine's execution providers, crash hook, and process identity"
 autotests    = false
+
+[lib]
+name = "platform"
 
 [dependencies]
 base          = { workspace = true }
@@ -54,7 +59,7 @@ testing = []
 [dev-dependencies]
 tempfile = { workspace = true }
 regex    = { workspace = true }
-platform = { path = ".", features = ["testing"] }
+platform = { package = "agix-platform", path = ".", features = ["testing"] }
 
 [[test]]
 name = "integration"

@@ -1,11 +1,16 @@
 [package]
-name = "scene"
+name = "agix-scene"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agix-scene"
 description  = "Agix — built-in agent scene implementations and declarative scenes"
+
+[lib]
+name = "scene"
 
 [dependencies]
 base          = { workspace = true }

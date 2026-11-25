@@ -17,5 +17,5 @@ pub mod scenes;
 pub mod session;
 pub mod settings;
 
-#[doc = include_str!("../../../docs/agix-sdk.md")]
+#[doc = include_str!("../agix-sdk.md")]
 pub mod guide {}

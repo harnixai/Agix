@@ -5,7 +5,7 @@
 //! 在场性问 `Policy::from_settings`（生产路径），事实是工具自己声明的
 //! （`ToolFacts::gather`）。"raw" 是在场性起作用之前的结论：因没人可问而拒的原本是一问，
 //! hook 的 approve 也答不了的是只有人能答的一问。这份快照必须逐字不变：
-//! `UPDATE_GOLDEN=1 cargo test -p tools --test integration decision_matrix::` 重新生成。
+//! `UPDATE_GOLDEN=1 cargo test -p agix-tools --test integration decision_matrix::` 重新生成。
 //!
 //! 家目录用固定的 `/home/matrix`，不读环境；沙箱用一个恒报 Full 的桩，让无人值守的
 //! Bash 放行通道不随运行机器变化。快照末尾另有一节：`sandbox.require` 打开、

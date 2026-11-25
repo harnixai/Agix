@@ -6,7 +6,7 @@
 //! names no other crate of this workspace is `deps.rs`'s rule.
 //!
 //! base's tokio features stay within `BASE_TOKIO_FEATURES`: no `process`,
-//! `signal` or `net`, so `cargo check -p base` proves base starts no process
+//! `signal` or `net`, so `cargo check -p agix-base` proves base starts no process
 //! and opens no socket through tokio — the workspace's tokio leaves those
 //! three to the crates that ask for them.
 //!

@@ -1,11 +1,16 @@
 [package]
-name = "skills"
+name = "agix-skills"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
-description  = "Agix — skill manager + bundled skills"
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agix-skills"
+description  = "Agix — the skill catalog and the Skill tool"
+
+[lib]
+name = "skills"
 
 [dependencies]
 base          = { workspace = true }

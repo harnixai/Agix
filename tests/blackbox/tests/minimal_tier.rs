@@ -1,7 +1,7 @@
 //! A daemon built from the kernel alone still runs a session end to end, and
 //! says plainly what it was built without.
 //!
-//! `cargo build -p daemon --no-default-features` carries no MCP, sub-agents,
+//! `cargo build -p agixd --no-default-features` carries no MCP, sub-agents,
 //! skills, web tools, WebSocket listener, script carrier or package layer.
 //! What is left has to create a session, run a turn, resume it and report its
 //! context; a method that belongs to a module the build lacks answers
@@ -17,7 +17,7 @@ use serde_json::json;
 async fn the_kernel_alone_runs_a_session_and_names_what_it_lacks() -> anyhow::Result<()> {
     let minimal = blackbox::alternate_daemon_binary(
         "AGIX_TEST_DAEMON_BIN_MINIMAL",
-        "CARGO_TARGET_DIR=$PWD/target/minimal cargo build -p daemon --no-default-features\n  \
+        "CARGO_TARGET_DIR=$PWD/target/minimal cargo build -p agixd --no-default-features\n  \
          AGIX_TEST_DAEMON_BIN_MINIMAL=$PWD/target/minimal/debug/agixd cargo test \
          -p blackbox --test integration minimal_tier:: -- --ignored",
     )?;

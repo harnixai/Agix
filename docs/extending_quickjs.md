@@ -24,8 +24,8 @@
 脚本载体是 `daemon` crate 的 `scripts` feature,**默认开启**:
 
 ```sh
-cargo build -p daemon                                          # QuickJS
-cargo build -p daemon --no-default-features --features full    # 不带
+cargo build -p agixd                                          # QuickJS
+cargo build -p agixd --no-default-features --features full    # 不带
 ```
 
 不开这个 feature,就没有任何 JavaScript 引擎被链接进来。`settings.json` 里出现

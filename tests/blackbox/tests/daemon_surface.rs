@@ -864,7 +864,7 @@ async fn a_package_may_add_to_the_prompt_but_not_rewrite_it_in_a_spawned_daemon(
 async fn a_build_with_no_script_carrier_honors_no_scripts_section() -> anyhow::Result<()> {
     let carrierless = blackbox::alternate_daemon_binary(
         "AGIX_TEST_DAEMON_BIN_NO_CARRIER",
-        "CARGO_TARGET_DIR=$PWD/target/no-carrier cargo build -p daemon --no-default-features --features full\n  \
+        "CARGO_TARGET_DIR=$PWD/target/no-carrier cargo build -p agixd --no-default-features --features full\n  \
          AGIX_TEST_DAEMON_BIN_NO_CARRIER=$PWD/target/no-carrier/debug/agixd cargo test \
          -p blackbox -- --ignored",
     )?;

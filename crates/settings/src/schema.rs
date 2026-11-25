@@ -15,7 +15,7 @@ use crate::Settings;
 /// built-in defaults, so a field the defaults already supply is optional
 /// however the type declares it ([`optional_where_defaulted`]); program-only
 /// modes are left out. Regenerate with
-/// `cargo test -p assembly --test settings_schema write_settings_schema -- --ignored`
+/// `cargo test -p agix-assembly --test settings_schema write_settings_schema -- --ignored`
 /// after changing any `Settings`-reachable type or a registered section.
 ///
 /// The core types give the schema; each registered section's schema is added

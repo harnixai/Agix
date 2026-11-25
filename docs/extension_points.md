@@ -1663,7 +1663,7 @@ thinking 签名。每一条排除都在它被做出的地方给出理由,因为�
 1. **没有 WebAssembly 运行时。** 工作区里没有任何 crate 依赖 wasmtime 一类的运行时;
    需要它的宿主在 Rust 接口上自己做。
 2. **脚本载体是一个编译期 feature。** `scripts` 带来 QuickJS,是默认;
-   `cargo build -p daemon --no-default-features --features full` 不链任何 JavaScript 引擎。
+   `cargo build -p agixd --no-default-features --features full` 不链任何 JavaScript 引擎。
 3. **披露不点引擎的名。** 它管的是一个包*声明*了什么,和脚本怎么跑无关。
 
 脚本和 `RunCode` 跑在同一套内嵌 QuickJS 里。内存、时间、每轮调用次数的限额限的是开销,

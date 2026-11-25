@@ -1,12 +1,20 @@
 [package]
-name = "daemon"
+name = "agixd"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
-description  = "Agix daemon — JSON-RPC 2.0 over Unix socket / TCP, sample application"
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agixd"
+description  = "agixd — the Agix agent engine as a daemon: sessions served over JSON-RPC 2.0 on a Unix socket, TCP or WebSocket"
+readme       = "README.md"
+keywords     = ["agent", "llm", "ai", "mcp", "json-rpc"]
+categories   = ["command-line-utilities", "development-tools"]
 autotests    = false
+
+[lib]
+name = "daemon"
 
 [[bin]]
 name = "agixd"
@@ -64,9 +72,9 @@ assembly = { workspace = true, features = ["rpc-schema"] }
 # The tiers. The script carrier (`scripts`) and the package layer
 # (`plugin-packages`) are chosen separately:
 #
-#     cargo build -p daemon                                            # full + scripts + packages
-#     cargo build -p daemon --no-default-features --features coding,scripts
-#     cargo build -p daemon --no-default-features                      # minimal: the kernel
+#     cargo build -p agixd                                            # full + scripts + packages
+#     cargo build -p agixd --no-default-features --features coding,scripts
+#     cargo build -p agixd --no-default-features                      # minimal: the kernel
 default = ["full", "scripts", "plugin-packages", "sandbox"]
 coding = ["mcp", "mcp-oauth-jwt", "agents", "skills", "web", "structured-output", "ptc"]
 full = ["coding", "ws"]

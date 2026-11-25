@@ -1,6 +1,6 @@
 //! The crate's integration tests, compiled into one test binary; each module
 //! is one file of this directory. One file alone:
-//! `cargo test -p tools --test integration path_style::`.
+//! `cargo test -p agix-tools --test integration path_style::`.
 
 mod decision_matrix;
 mod edits_after_writes;

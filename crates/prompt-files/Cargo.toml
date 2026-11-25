@@ -1,11 +1,16 @@
 [package]
-name = "prompt-files"
+name = "agix-prompt-files"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agix-prompt-files"
 description  = "Agix — the markdown files the engine reads into the prompt: SKILL.md, AGENTS.md, output styles, the instruction file, rule directories"
+
+[lib]
+name = "prompt_files"
 
 [dependencies]
 base  = { workspace = true }

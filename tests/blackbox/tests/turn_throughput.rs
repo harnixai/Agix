@@ -7,7 +7,7 @@
 //! whichever `agixd` `AGIX_TEST_DAEMON_BIN` names:
 //!
 //! ```sh
-//! cargo build --release -p daemon --bin agixd
+//! cargo build --release -p agixd --bin agixd
 //! AGIX_TEST_DAEMON_BIN=target/release/agixd \
 //!   cargo test --release -p blackbox --test integration turn_throughput:: -- --ignored --nocapture
 //! ```

@@ -43,9 +43,9 @@ version = "0.4.4-2026112501"
 edition = "2021"
 rust-version = "1.88"
 license = "Apache-2.0"
-publish = false
 authors = ["Agix contributors"]
-repository = "https://github.com/harnixai/agix"
+repository = "https://github.com/harnixai/Agix"
+homepage = "https://github.com/harnixai/Agix"
 
 [workspace.dependencies]
 # Async runtime
@@ -111,34 +111,34 @@ tempfile = "3"
 notify = "6"
 
 # Internal crate dependencies
-base     = { path = "crates/core" }
-settings = { path = "crates/settings" }
-platform = { path = "crates/platform" }
+base     = { package = "agix-base", path = "crates/core" }
+settings = { package = "agix-settings", path = "crates/settings" }
+platform = { package = "agix-platform", path = "crates/platform" }
 demo-rust-plugin = { path = "examples/plugins/rust" }
 hostile-plugins = { path = "tests/fixtures/hostile_plugins" }
-model    = { path = "crates/model" }
-memory   = { path = "crates/memory" }
-prompt-files = { path = "crates/prompt-files" }
-hooks    = { path = "crates/hooks" }
-packages = { path = "crates/packages" }
-js-lib = { path = "crates/js-lib" }
-script-host = { path = "crates/script-host" }
-ptc = { path = "crates/ptc" }
-telemetry = { path = "crates/telemetry" }
-history  = { path = "crates/history" }
-permissions = { path = "crates/permissions" }
-mcp      = { path = "crates/mcp" }
-tools    = { path = "crates/tools", default-features = false }
-skills   = { path = "crates/skills" }
-runtime    = { path = "crates/runtime", default-features = false }
-compaction = { path = "crates/compaction" }
-session    = { path = "crates/session" }
-session-state = { path = "crates/session-state" }
-scene      = { path = "crates/scene" }
-team       = { path = "crates/team" }
-agents     = { path = "crates/agents" }
-assembly   = { path = "crates/assembly", default-features = false }
-daemon     = { path = "daemon" }
+model    = { package = "agix-model", path = "crates/model" }
+memory   = { package = "agix-memory", path = "crates/memory" }
+prompt-files = { package = "agix-prompt-files", path = "crates/prompt-files" }
+hooks    = { package = "agix-hooks", path = "crates/hooks" }
+packages = { package = "agix-packages", path = "crates/packages" }
+js-lib = { package = "agix-js-lib", path = "crates/js-lib" }
+script-host = { package = "agix-script-host", path = "crates/script-host" }
+ptc = { package = "agix-ptc", path = "crates/ptc" }
+telemetry = { package = "agix-telemetry", path = "crates/telemetry" }
+history  = { package = "agix-history", path = "crates/history" }
+permissions = { package = "agix-permissions", path = "crates/permissions" }
+mcp      = { package = "agix-mcp", path = "crates/mcp" }
+tools    = { package = "agix-tools", path = "crates/tools", default-features = false }
+skills   = { package = "agix-skills", path = "crates/skills" }
+runtime    = { package = "agix-runtime", path = "crates/runtime", default-features = false }
+compaction = { package = "agix-compaction", path = "crates/compaction" }
+session    = { package = "agix-session", path = "crates/session" }
+session-state = { package = "agix-session-state", path = "crates/session-state" }
+scene      = { package = "agix-scene", path = "crates/scene" }
+team       = { package = "agix-team", path = "crates/team" }
+agents     = { package = "agix-agents", path = "crates/agents" }
+assembly   = { package = "agix-assembly", path = "crates/assembly", default-features = false }
+daemon     = { package = "agixd", path = "daemon" }
 rpc-client = { path = "tests/rpc_client" }
 mcp-oauth-mock = { path = "tests/fixtures/mcp_oauth_mock" }
 guards = { path = "tests/guards" }
@@ -176,7 +176,7 @@ panic = "abort"
 # Only when asked for: twice the size, a little faster, and a panic inside a
 # task ends that task rather than the process.
 #
-#     cargo build --profile release-fast -p daemon --bin agixd
+#     cargo build --profile release-fast -p agixd --bin agixd
 [profile.release-fast]
 inherits = "release"
 opt-level = 3

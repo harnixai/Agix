@@ -554,7 +554,7 @@ pub fn daemon_binary() -> anyhow::Result<PathBuf> {
     let candidate = dir.join("agixd");
     anyhow::ensure!(
         candidate.exists(),
-        "no daemon binary at {} — build one with `cargo build -p daemon`, \
+        "no daemon binary at {} — build one with `cargo build -p agixd`, \
          or point AGIX_TEST_DAEMON_BIN at the one to test",
         candidate.display()
     );

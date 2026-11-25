@@ -10,7 +10,7 @@
 //! Anthropic-compatible endpoint, and `ANTHROPIC_MODEL`.
 //!
 //! ```sh
-//! ANTHROPIC_API_KEY=... cargo run --release -p runtime --example minimal -- "list the files here"
+//! ANTHROPIC_API_KEY=... cargo run --release -p agix-runtime --example minimal -- "list the files here"
 //! ```
 
 use std::sync::Arc;

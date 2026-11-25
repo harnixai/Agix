@@ -1,7 +1,7 @@
 //! 冻结 `Builder::build` 装出来的会话：registry 的工具名（按注册顺序）、`EngineConfig`
 //! 的路径风格与延迟工具、`SessionState` 的 env，以及一个探针模块在 `on_session` 时
 //! 看到的东西；再加几条拒绝构建的错误消息。拆 `build` 之前的特征化测试，要改时用
-//! `UPDATE_GOLDEN=1 cargo test -p runtime --lib agent::tests::build_snapshot` 重新生成。
+//! `UPDATE_GOLDEN=1 cargo test -p agix-runtime --lib agent::tests::build_snapshot` 重新生成。
 //!
 //! 工具表依赖 `web`、`structured-output`、`ptc` 三个默认 feature，精简构建下不跑。
 

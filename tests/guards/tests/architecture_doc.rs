@@ -61,7 +61,7 @@ fn the_crate_table_lists_exactly_the_library_crates() {
     for row in rows.by_ref() {
         count += 1;
         let cell = row.split('|').nth(1).unwrap_or_default();
-        match cell.split_once("包名") {
+        match cell.split_once("crate 名") {
             Some((_, after)) => names.extend(ticked(after)),
             None => names.extend(ticked(cell)),
         }

@@ -1,11 +1,16 @@
 [package]
-name = "mcp"
+name = "agix-mcp"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agix-mcp"
 description  = "Agix — MCP client (server connection, tool adaptation, OAuth authorization)"
+
+[lib]
+name = "mcp"
 
 [dependencies]
 base          = { workspace = true }

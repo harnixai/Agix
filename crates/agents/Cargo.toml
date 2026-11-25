@@ -1,11 +1,16 @@
 [package]
-name = "agents"
+name = "agix-agents"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
-publish      = false
+repository   = { workspace = true }
+homepage     = { workspace = true }
+documentation = "https://docs.rs/agix-agents"
 description  = "Agix — sub-agents: the Agent tool, agent types, and team orchestration, as a module"
+
+[lib]
+name = "agents"
 
 [dependencies]
 base          = { workspace = true }
