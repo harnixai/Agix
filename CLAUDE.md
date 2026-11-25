@@ -74,6 +74,7 @@
 2. `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace` 全部通过。
 3. 版本号改动单独一个提交。
 4. 推送 `main`，然后打附注标签（标签名就是完整的版本标识，标签消息写本次发布的要点），再推送标签。
+5. 这个版本的 `x.y.z` 在 crates.io 上还没有时，推送标签之后运行 `scripts/publish-crates.sh <标签>`，把各 crate 以不带日期的 `x.y.z` 发到 crates.io（可先加 `--dry-run`）。
 
 改名为 Agix 之前的标签（`v0.2.5` 及更早、`AttaCore-v0.2.6-2026102001`）保留原样，不改名。
 

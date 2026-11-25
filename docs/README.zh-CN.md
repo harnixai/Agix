@@ -195,7 +195,7 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
              → model · scene · history · telemetry · permissions · ptc ·
                settings · memory · prompt-files · session-state(K1)
  本机      platform ───────── 本机的进程、文件、网络与 OS 沙箱
- 契约      core(包名 `base`)── trait、共享数据类型与纯判定
+ 契约      core(crate 名 `base`)── trait、共享数据类型与纯判定
 ```
 
 内核 crate 从不依赖模块 crate,只有 `assembly` 与 `daemon` 知道有哪些模块。一轮是固定的步骤
@@ -257,6 +257,10 @@ deny 永远优先。设计全文——一轮、会话与场景、历史日志、
 | 外壳 | `agix` | 嵌入门面:按主题再导出,自身不含逻辑 |
 | 外壳 | `daemon` | `agixd` 二进制 |
 
+表里是 crate 名,即代码里 `use` 的名字。作为包——`cargo -p` 与 crates.io 上——它们叫
+`agix-<crate 名>`(`agix-base`、`agix-runtime`……),只有门面 `agix` 与 daemon 的 `agixd`
+例外。要依赖或安装的就是这两个;`agix-*` 是它们的实现。
+
 `crates/` 下 26 个 crate,加上 `daemon/`、七个测试成员与 `examples/plugins/rust` 的示例插件,
 工作区共 35 个成员。
 
@@ -267,9 +271,18 @@ deny 永远优先。设计全文——一轮、会话与场景、历史日志、
 ### 运行 daemon
 
 ```sh
+cargo install agixd
+export ANTHROPIC_AUTH_TOKEN=sk-...        # 或 ANTHROPIC_API_KEY;兼容端点另设 ANTHROPIC_BASE_URL
+agixd                                     # 监听 ~/.agix/scenes/code/daemon.sock
+```
+
+`cargo install` 用的是 Cargo 缺省的 release profile,不是本工作区按体积调过的那份
+(见「运行 `agixd`」),二进制会大一些。或者从源码:
+
+```sh
 git clone https://github.com/harnixai/agix && cd agix
 export ANTHROPIC_AUTH_TOKEN=sk-...        # 或 ANTHROPIC_API_KEY;兼容端点另设 ANTHROPIC_BASE_URL
-cargo run --release -p daemon --bin agixd # 监听 ~/.agix/scenes/code/daemon.sock
+cargo run --release -p agixd --bin agixd # 监听 ~/.agix/scenes/code/daemon.sock
 ```
 
 和它说话——每行一个 JSON 对象:
@@ -306,6 +319,16 @@ echo '{"jsonrpc":"2.0","id":2,"method":"session.run_turn",
 
 ### 嵌入引擎
 
+```toml
+[dependencies]
+agix = "0.4"
+# 或直接用 git 上的发布标签:
+# agix = { git = "https://github.com/harnixai/Agix", tag = "Agix-v0.4.4-2026112501" }
+```
+
+crates.io 上每个发布的版本是不带日期的 `x.y.z`;git 标签 `Agix-v<x.y.z>-<YYYYMMDDNN>`
+指的是同一份代码([`agix-sdk.md`](agix-sdk.md) §9)。
+
 当库用——一个 agent,直接驱动:
 
 ```rust
@@ -327,7 +350,7 @@ agent.run_turn("列出这里的文件".into(), "turn-1".into(), CancellationToke
 在 [`crates/runtime/examples/minimal.rs`](../crates/runtime/examples/minimal.rs):
 
 ```sh
-ANTHROPIC_API_KEY=... cargo run --release -p runtime --example minimal -- "列出这里的文件"
+ANTHROPIC_API_KEY=... cargo run --release -p agix-runtime --example minimal -- "列出这里的文件"
 ```
 
 当会话池用——把 daemon 的引擎放进自己的进程,设置分层、路由、历史布局、模块都相同,
@@ -462,8 +485,8 @@ provider。`config.getProvider` 返回各周期的已用量与上限。
 
 | profile | 命令 | panic 时 |
 |---|---|---|
-| `release`(默认) | `cargo build --release -p daemon --bin agixd` | 中止进程;约 11 MB |
-| `release-fast` | `cargo build --profile release-fast -p daemon --bin agixd` | 展开;任务里的 panic 只结束那个任务;体积翻倍,略快 |
+| `release`(默认) | `cargo build --release -p agixd --bin agixd` | 中止进程;约 11 MB |
+| `release-fast` | `cargo build --profile release-fast -p agixd --bin agixd` | 展开;任务里的 panic 只结束那个任务;体积翻倍,略快 |
 
 agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 daemon 收两次尾:panic hook
 在中止前停掉它们;被 `SIGKILL`、OOM 带走的,同名实例下次启动时停掉遗留的。崩溃记录在

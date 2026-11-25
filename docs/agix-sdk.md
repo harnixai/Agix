@@ -11,12 +11,14 @@
 ```toml
 # 缺省：coding + scripts + plugin-packages + sandbox，与 agixd 的缺省相同，只少 WebSocket 监听
 [dependencies]
-agix  = { path = "agix/crates/agix" }
+agix  = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 
 # 只要内核，再自选模块
-# agix = { path = "agix/crates/agix", default-features = false, features = ["mcp", "scripts"] }
+# agix = { version = "0.4", default-features = false, features = ["mcp", "scripts"] }
 ```
+
+不经 crates.io 也行：按发布标签从 git 取，`agix = { git = "https://github.com/harnixai/Agix", tag = "Agix-v<x.y.z>-<YYYYMMDDNN>" }`；仓库作子模块时 `agix = { path = "agix/crates/agix" }`。
 
 | feature | 含义 |
 |---|---|
@@ -658,9 +660,11 @@ assert!(matches!(outcome, TurnOutcome::Completed { .. }));
 
 版本号是 `x.y.z-YYYYMMDDNN`（`Cargo.toml` 的 `[workspace.package] version`）；每次推送到远程就是一次发布，带附注标签 `Agix-v<x.y.z>-<YYYYMMDDNN>`。`agix::process::identity()` 报出版本与编入的模块。
 
+crates.io 上的版本是不带日期的 `x.y.z`，对应第一个 `Agix-v<x.y.z>-…` 标签，每个 `x.y.z` 只上一次；从 crates.io 构建的引擎报出的版本也就是 `x.y.z`。那里的 `agix-*` crate（`agix-base`、`agix-runtime`……）是 `agix` 与 `agixd` 的实现细节，版本与 `agix` 锁死（`=x.y.z`），不承诺任何兼容：只依赖 `agix`。
+
 **不做兼容。** 没有 `#[deprecated]` 的过渡期（`api_surface` 守卫 A8），改名与删除在同一个版本里改掉仓库内的调用方。门面让这件事对下游可见：门面导出的东西被删或改名，升级时就是编译错误；行为变化写在标签消息里。唯一的例外是 §10 的 `agix::embed`：0.x 内只加不改，改动写进 §10 的迁移说明。
 
-升级：把子模块挪到新标签，编译，读两个标签之间每条标签消息（门面有变化的发布在消息里单列「嵌入面」）。从 0.3.x 升到 0.4.0 的应用先读 `upgrading-0.4.md`（设置键、协议、选项的对照），Rust 类型与函数的变化在 §10 的迁移说明。
+升级：把版本号（或子模块、git 标签）挪到新版本，编译，读两个标签之间每条标签消息（门面有变化的发布在消息里单列「嵌入面」）。从 0.3.x 升到 0.4.0 的应用先读 `upgrading-0.4.md`（设置键、协议、选项的对照），Rust 类型与函数的变化在 §10 的迁移说明。
 
 门面里没有的东西：到 `harnixai/Agix` 提 issue（标签是项目名加 `enhancement`，标题 `[<项目> <编号>] …`），说明哪段代码要它。门面按需增长，不预先收：进门面的每一条都对应一个下游用法或本指南的一个片段，导出总数钉在 `tests/guards/tests/facade.rs`，加一条删一条都要在提交里写依据。
 

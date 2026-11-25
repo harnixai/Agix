@@ -341,6 +341,12 @@ does not carry answers `METHOD_NOT_FOUND` naming the module.
 | shell | `agix` | the embedding facade: re-exports by theme, no logic of its own |
 | shell | `daemon` | the `agixd` binary |
 
+The names above are crate names, the ones code `use`s. As packages — for
+`cargo -p` and on crates.io — they are `agix-<crate>` (`agix-base`,
+`agix-runtime`, …), except the facade, `agix`, and the daemon, `agixd`. Those
+two are what you depend on or install; the `agix-*` crates are their
+implementation.
+
 26 crates under `crates/`, plus `daemon/`, the seven test members and the
 example plugin in `examples/plugins/rust` — 35 workspace members in total.
 
@@ -351,9 +357,19 @@ example plugin in `examples/plugins/rust` — 35 workspace members in total.
 ### Run the daemon
 
 ```sh
+cargo install agixd
+export ANTHROPIC_AUTH_TOKEN=sk-...        # or ANTHROPIC_API_KEY; ANTHROPIC_BASE_URL for a compatible endpoint
+agixd                                     # listens on ~/.agix/scenes/code/daemon.sock
+```
+
+`cargo install` builds with Cargo's default release profile, not this
+workspace's size-tuned one ([Running `agixd`](#running-agixd)), so the binary
+is larger. Or from a checkout:
+
+```sh
 git clone https://github.com/harnixai/agix && cd agix
 export ANTHROPIC_AUTH_TOKEN=sk-...        # or ANTHROPIC_API_KEY; ANTHROPIC_BASE_URL for a compatible endpoint
-cargo run --release -p daemon --bin agixd # listens on ~/.agix/scenes/code/daemon.sock
+cargo run --release -p agixd --bin agixd # listens on ~/.agix/scenes/code/daemon.sock
 ```
 
 Talk to it — one JSON object per line:
@@ -398,6 +414,17 @@ by path.
 
 ### Embed the engine
 
+```toml
+[dependencies]
+agix = "0.4"
+# or a release tag from git:
+# agix = { git = "https://github.com/harnixai/Agix", tag = "Agix-v0.4.4-2026112501" }
+```
+
+crates.io carries each release as its plain `x.y.z`; the git tag
+`Agix-v<x.y.z>-<YYYYMMDDNN>` names the same code
+([`docs/agix-sdk.md`](docs/agix-sdk.md) §9).
+
 As a library — one agent, driven directly:
 
 ```rust
@@ -420,7 +447,7 @@ default, and every default is a trait you can replace. The complete program is
 [`crates/runtime/examples/minimal.rs`](crates/runtime/examples/minimal.rs):
 
 ```sh
-ANTHROPIC_API_KEY=... cargo run --release -p runtime --example minimal -- "list the files here"
+ANTHROPIC_API_KEY=... cargo run --release -p agix-runtime --example minimal -- "list the files here"
 ```
 
 As a session pool — the daemon's engine in your own process, with the same
@@ -586,8 +613,8 @@ the call's `prompt` instead.
 
 | profile | command | on panic |
 |---|---|---|
-| `release` (the default) | `cargo build --release -p daemon --bin agixd` | aborts the process; about 11 MB |
-| `release-fast` | `cargo build --profile release-fast -p daemon --bin agixd` | unwinds; a panic inside a task ends that task; twice the size, a little faster |
+| `release` (the default) | `cargo build --release -p agixd --bin agixd` | aborts the process; about 11 MB |
+| `release-fast` | `cargo build --profile release-fast -p agixd --bin agixd` | unwinds; a panic inside a task ends that task; twice the size, a little faster |
 
 Commands the agent runs live in their own process groups and outlive a crashed
 daemon, so the daemon cleans up twice: its panic hook stops them before
