@@ -636,4 +636,4 @@ JSON-RPC 驱动整个产品——一次对脚本化的模型服务器,一次(`li
 
 ## 许可
 
-Apache-2.0
+Copyright 2026 harnix.app。以 Apache License 2.0 授权,见 [LICENSE](../LICENSE) 与 [NOTICE](../NOTICE)。

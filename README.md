@@ -789,4 +789,4 @@ recording proxy. How each layer works and how to run it:
 
 ## License
 
-Apache-2.0
+Copyright 2026 harnix.app. Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

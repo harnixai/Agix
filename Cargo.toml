@@ -43,7 +43,7 @@ version = "0.4.4-2026112502"
 edition = "2021"
 rust-version = "1.88"
 license = "Apache-2.0"
-authors = ["Agix contributors"]
+authors = ["harnix.app"]
 repository = "https://github.com/harnixai/Agix"
 homepage = "https://github.com/harnixai/Agix"
 
