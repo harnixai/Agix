@@ -842,6 +842,13 @@ engine.shutdown().await;
 
 守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
 
+- **0.4.4**（相对 0.4.3；协议版本 5；详见 `upgrading-0.4.md`「0.4.4」）
+  - **事件。** `AgentEvent` 多 `CompactStarted { turn_id, trigger: CompactCause, tokens_before, strategy }` 与 `CompactEnded { turn_id, outcome: CompactOutcome, reason }`（压缩的首尾两帧）；`PermissionPrompt`、`QuestionPrompt`、`McpElicitationPrompt` 多 `agent_session_id: Option<String>`。对它们穷举或按字段构造的要补。
+  - **子 Agent 的预算。** `Scope::Task` 与 `SpendNode::task(limit, session)`；`SessionPool::start_agent` 多第三个参数 `token_budget: Option<u64>`。
+  - **插件函数的时限。** `ptc::PluginCallTool::time_limit()` 是宿主调用的上限（600 秒），新增 `default_time()`（120 秒）。
+  - **提示词分块。** `settings::PromptAppend` / `AppendBlock`（`agix::contracts::prompt` 导出）；`PromptChange.append` 是 `Option<Option<PromptAppend>>`，`PromptChoice.append` 是 `Option<PromptAppend>`；`AssemblyRequest.prompt_append` 与 `managed_append` 改为拼好的 `&[PromptBlock]`；`BlockOrigin::Host`；`SystemPromptSettings` 删掉 `append` 与 `override_text`。
+- **0.4.3**（相对 0.4.2；协议版本 5）
+  - **agent 类型的检查。** `base::interface::delegate::Delegator` 多一个有缺省实现的 `check_agent_type(name) -> Result<(), DelegateError>`，包装别的 `Delegator` 的要转发它。
 - **0.4.2**（相对 0.4.1；协议版本 5；详见 `upgrading-0.4.md`「0.4.2」）
   - **子 Agent 的路由。** `base::provider::TaskRouting` 多四个必须实现的方法：`starting_at(provider) -> Result<Arc<dyn TaskRouting>, String>`（同一个 provider 集合、那家在前、其余照这条路由的顺序的一条自己的路由）、`in_order(provider) -> bool`（那家在不在这条路由的顺序里；模型与 agent 类型点名的 provider 必须在）、`home_of(model) -> Option<String>`、`destination(task, model) -> Destination`；自己实现路由的宿主要补上，`model::routing::SessionRouter` 是唯一的内置实现。新类型 `base::provider::Destination { provider, model }`。`AgentTypeDefinition.provider`、`DelegateRequest.provider` 是 `Option<String>`。
   - **实际去了哪。** `ModelEvent::Served` 多 `model`（`#[serde(default)]`），`AgentEvent::StepEnd` 与 `StreamResult` 多 `served: Option<Destination>`；对它们穷举或按字段构造的要补。

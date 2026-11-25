@@ -336,3 +336,63 @@
 压缩、按时间或缓存过期清工具结果、工具结果预算、提前修剪拿走或截短了某次 `Read` 的结果之后,再 `Read` 同一文件返回内容,
 不再答 "[file unchanged]"。压缩后原样放回的最近文件(5000 字符以内)仍按"未变"作答。`Read` 自己没给全(默认行数先到、
 有行被截长)时,重复同样的读仍答"未变",但写明上次没显示全,要用 `offset` / `limit` 读剩下的。
+
+## 0.4.4
+
+协议版本不变(仍是 5)。新增能力位 `compact_events`、`prompt_task`、`agent_token_budget`、`plugin_call_long`、
+`prompt_append_blocks`、`session_rerun`;用到的应用先查 `daemon.ping` 的 `capabilities`。
+
+### 压缩的首尾两帧(#103,`compact_events`)
+
+每次改写历史的压缩(会触发 `PreCompact` / `PostCompact` 的那种)动手前先发 `compact_started {trigger, tokens_before,
+strategy?}`,`trigger` 是 `threshold`、`manual`(`/compact`、`session.compact`)或 `overflow`(请求因体积被拒后压缩重发)。
+压成了照旧以 `compact` 收尾;没压成以 `compact_ended {outcome, reason?}` 收尾,`outcome` 是 `declined`(`PreCompact` hook
+拒绝)、`nothing_to_compact`、`failed`(`reason` 写原因)或 `cancelled`。开始了就一定有且只有一个结束帧。`strategy` 只在
+指定了 `at` 的手动压缩里有(总是 `FullCompact`),其余要压完才知道。修剪(`trim: true`)不发新帧。子 Agent 侧链里的
+压缩经 `subagent_progress` 转出。
+
+### 子 Agent 的询问带任务(#104,`prompt_task`)
+
+`prompt` 帧的三种 `prompt_type` 都带可选的 `task_id` 与 `agent_session_id`:询问来自子 Agent 时是它的任务与侧链会话
+(宿主 `session.startAgent` 起的,等于返回的那两个值);子 Agent 里的权限询问也带 `tool_use_id`(子会话里那次调用的)。不再需要解析 `message` 的
+`[sub-agent <id>]` 前缀。
+
+### 宿主起的子 Agent 的预算(#105,`agent_token_budget`)
+
+- `session.startAgent` 收可选的 `token_budget`(口径同 `turn.token_budget`;`0` 以 `INVALID_PARAMS` 拒绝,不登记任务)。
+  花费照常计入会话,下一次调用受链上剩得最少的那个限制,所以只能比会话的余额紧。
+- 用完时子 Agent 在下一次调用前停下,`task_finished.task`(与 `session.tasks`)是 `status: "failed"`、
+  `error: "budget_exceeded: the task's token budget of N is used up"`;停之前说过的话留在任务输出里。父会话与别的子 Agent
+  不受影响。
+- **行为变化**:宿主起的子 Agent 被任何预算截停(包括会话的预算)都以 `failed` 结束,`error` 写明是谁的预算;0.4.3 里被
+  会话预算截停的是 `done`。模型用 `Agent` 工具起的子 Agent 不变。
+
+### `plugin.call` 可以跑十分钟(#106,`plugin_call_long`)
+
+宿主调 `plugin.call` 的 `timeout_ms` 缺省仍是 120000,上限由 120000 放到 600000(同 `Bash`),这次运行的时限就是给的值。
+模型调的插件命令仍是两分钟。能力位只在带插件函数的构建里报。
+
+### `prompt.append` 可以分块(#107,`prompt_append_blocks`)
+
+`prompt.append`(`options.settings`、`session.setPrompt`、设置文件)除字符串外也收 `[{"name": "...", "text": "..."}]`:
+每项一个系统块 `host.<name>`,次序照数组,整组在 `config.prompt_append` 的位置,缓存断点不变。`session.inspectContext`
+里 `origin` 为 `{"host": "<name>"}`、`tokens` 各算各的;`session.call` 的 `request.system[]` 里 `source` 为
+`host.<name>`、`origin` 为 `host:<name>`。
+
+- `name` 非空、只含 `[A-Za-z0-9_.:-]`、组内不重复;`text` 非空;`[]` 什么都不加。不合的在 `session.create` 以
+  `INVALID_PARAMS` 失败(`invalid_options` 字段 `settings.prompt.append`),在 `setPrompt` 同样;设置文件里的告警并忽略。
+- 给字符串的照旧是一块 `config.prompt_append`。分层照旧是上层整体替换下层,不按项合并;managed 层也可以写数组。
+- 脚本贡献的提示块不能再用 `host.` 开头的名字。
+
+### 嵌入(`agix` crate)
+
+- `AgentEvent` 多 `CompactStarted { turn_id, trigger: CompactCause, tokens_before, strategy }` 与
+  `CompactEnded { turn_id, outcome: CompactOutcome, reason }`;`PermissionPrompt`、`QuestionPrompt`、
+  `McpElicitationPrompt` 多 `agent_session_id: Option<String>`。对它们穷举 `match` 或按字段构造的要补。
+- `base::interface::budget_policy::Scope::Task` 与 `SpendNode::task(limit, session)`;`SessionPool::start_agent` 多第三个
+  参数 `token_budget: Option<u64>`。
+- `ptc::PluginCallTool::time_limit()` 是宿主调用的上限(600 秒),新增 `default_time()`(120 秒)。
+- 提示词:`settings::PromptAppend` / `AppendBlock`(`agix::contracts::prompt` 导出);`PromptChange.append` 是
+  `Option<Option<PromptAppend>>`,`PromptChoice.append` 是 `Option<PromptAppend>`;自己实现装配器的,
+  `AssemblyRequest.prompt_append` 与 `managed_append` 由 `Option<&str>` 改为拼好的 `&[PromptBlock]`;`BlockOrigin` 多
+  `Host`(算本地来源)。`SystemPromptSettings` 删掉没人读的 `append` 与 `override_text`。
