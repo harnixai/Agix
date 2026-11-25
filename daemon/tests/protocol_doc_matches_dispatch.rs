@@ -502,6 +502,8 @@ fn every_optional_module_s_methods_are_listed_with_their_module() {
 /// result never belongs here.
 const OPAQUE_ALLOWED: &[&str] = &[
     "/$defs/AppendEntryParams/properties/payload",
+    "/$defs/ArgDiffView/properties/live",
+    "/$defs/ArgDiffView/properties/recorded",
     "/$defs/CallBlob/properties/value",
     "/$defs/CallPart_for_AnyValue/anyOf/2",
     "/$defs/CallRequest/properties/input_map",

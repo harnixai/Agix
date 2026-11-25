@@ -485,6 +485,11 @@ const NOT_SENT: &[(&str, &str)] = &[
         "needs a plugin archive whose checksum matches; the example's path is a stand-in",
     ),
     (
+        "session.rerunCall#0",
+        "needs a session whose recording holds that call; \
+         tests/blackbox/tests/session_rerun.rs sends it over the socket",
+    ),
+    (
         "plugin.call#0",
         "needs an installed package with the function the example names; \
          tests/blackbox/tests/plugin_calls.rs sends it over the socket",
@@ -1378,6 +1383,11 @@ const SESSION_EVENTS_NOT_PROVOKED: &[(&str, &str)] = &[
     (
         "hook_call_resolved",
         "follows hook_call, to the same connection only",
+    ),
+    (
+        "compact_ended",
+        "needs a compaction that does not go through (a hook declining, nothing to drop, a \
+         failed or interrupted summary); tests/blackbox/tests/compaction_frames.rs drives each",
     ),
     (
         "team_progress",

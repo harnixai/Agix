@@ -659,6 +659,11 @@ const NOT_COMPARED: &[(&str, &str)] = &[
     ("session.call", "the same as session.calls"),
     ("session.callBlob", "the same as session.calls"),
     (
+        "session.rerunCall",
+        "needs a recording and sends its call to a provider again; \
+         tests/blackbox/tests/session_rerun.rs drives it over the socket and checks the fields",
+    ),
+    (
         "session.search",
         "the hits depend on the transcripts searched; tests/blackbox/tests/session_calls.rs \
          checks the fields over the socket",
