@@ -350,12 +350,16 @@ strategy?}`,`trigger` 是 `threshold`、`manual`(`/compact`、`session.compact`)
 拒绝)、`nothing_to_compact`、`failed`(`reason` 写原因)或 `cancelled`。开始了就一定有且只有一个结束帧。`strategy` 只在
 指定了 `at` 的手动压缩里有(总是 `FullCompact`),其余要压完才知道。修剪(`trim: true`)不发新帧。子 Agent 侧链里的
 压缩经 `subagent_progress` 转出。
+压缩换掉历史之后才到的中断(或 future 被丢掉)以 `compact` 结尾,不是 `compact_ended{cancelled}`;`compact` 帧可能先于
+压缩记录写进会话日志,此后的 `step_end` / `turn_complete(persisted)` 时日志里一定有它。
 
 ### 子 Agent 的询问带任务(#104,`prompt_task`)
 
 `prompt` 帧的三种 `prompt_type` 都带可选的 `task_id` 与 `agent_session_id`:询问来自子 Agent 时是它的任务与侧链会话
 (宿主 `session.startAgent` 起的,等于返回的那两个值);子 Agent 里的权限询问也带 `tool_use_id`(子会话里那次调用的)。不再需要解析 `message` 的
-`[sub-agent <id>]` 前缀。
+`[sub-agent <id>]` 前缀(它不是契约)。子 Agent 再起的子 Agent 发问时,`agent_session_id` 与 `tool_use_id` 指最里层发问的
+那个会话和它的调用(`session.get` / `session.history` 查得到),`task_id` 仍是宿主会话里最外层子 Agent 的任务;常驻团队
+成员发问不带 `task_id`。
 
 ### 宿主起的子 Agent 的预算(#105,`agent_token_budget`)
 
@@ -383,8 +387,12 @@ strategy?}`,`trigger` 是 `threshold`、`manual`(`/compact`、`session.compact`)
 
 - `name` 非空、只含 `[A-Za-z0-9_.:-]`、组内不重复;`text` 非空;`[]` 什么都不加。不合的在 `session.create` 以
   `INVALID_PARAMS` 失败(`invalid_options` 字段 `settings.prompt.append`),在 `setPrompt` 同样;设置文件里的告警并忽略。
+- 块名按给出这个数组的层:会话层(`options.settings`、`session.setPrompt`)与宿主/命令行层(`agixd --set`、
+  `EmbedConfig.settings`、嵌入方在内存里改的设置)是 `host.<name>` / `{"host": "<name>"}` / `host:<name>`;设置文件
+  (全局、场景、项目,未受信的项目也一样)与 managed 层是 `config.<name>` / `{"config": "<name>"}` / `config:<name>`。
+  条目名不能是 `prompt_append`、`prompt_override`。
 - 给字符串的照旧是一块 `config.prompt_append`。分层照旧是上层整体替换下层,不按项合并;managed 层也可以写数组。
-- 脚本贡献的提示块不能再用 `host.` 开头的名字。
+- 脚本贡献的提示块不能再用 `host.` 或 `config.` 开头的名字。
 
 ### 经 daemon 重跑录像里的一次调用(#108,`session_rerun`)
 
@@ -398,7 +406,7 @@ strategy?}`,`trigger` 是 `threshold`、`manual`(`/compact`、`session.compact`)
 - 一个录像目录只有一代;`generation` 是用来确认录像在这之后没有被重写的,对不上时以 `INVALID_PARAMS` 失败并在
   `data.generation` 给出现在的值(同 `session.call`)。
 - 没有录像、编辑指不到(越界、重名或不存在的 `source`、`index` 与 `source` 同给或都不给、同一块编辑两次、删光所有消息)、
-  录像里的 provider 已不在设置里且没给 `provider`:`INVALID_PARAMS`,什么都不发。provider 报错时照常返回,
+  录像里的 provider 已不在设置里且没给 `provider`:`INVALID_PARAMS`,什么都不发。`edits.system[].text` 必须给(`null` 即删除)。provider 报错时照常返回,
   `response.status` 为 `"error"`。
 
 ### 不带会话的 `plugin.call` 与连接登记的 hook(#109,`plugin_call_hooks`)
@@ -426,9 +434,13 @@ hook,询问却发不到任何人、也答不回去。现在宿主登记的 hook 
 - 提示词:`settings::PromptAppend` / `AppendBlock`(`agix::contracts::prompt` 导出);`PromptChange.append` 是
   `Option<Option<PromptAppend>>`,`PromptChoice.append` 是 `Option<PromptAppend>`;自己实现装配器的,
   `AssemblyRequest.prompt_append` 与 `managed_append` 由 `Option<&str>` 改为拼好的 `&[PromptBlock]`;`BlockOrigin` 多
-  `Host`(算本地来源)。`SystemPromptSettings` 删掉没人读的 `append` 与 `override_text`。
+  `Host`(算本地来源)与 `ConfigEntry { config }`(设置文件与 managed 层给的数组项),`names::CONFIG_PREFIX`;
+  `PromptAppend::blocks(by: Tier)` 取给出它的层,`PromptSettings::append_blocks` 换成 `LoadedSettings::prompt_append_blocks`
+  与 `prompt_append_tier`。`SystemPromptSettings` 删掉没人读的 `append` 与 `override_text`。
 - `SessionPool::rerun_call`;`telemetry::recorder::rerun::rerun_one` 总是返回一份结果(收到的事件、实际的 provider、
   错误、首个事件的时间、时长与差异),中途出错时不再丢掉已收到的事件;新增 `request_in`。
+- 直接依赖 `base` 构造 `ElicitRequest` 的补 `agent_session_id: None`;`session::transcript::Transcript::replace_messages_after_compact`
+  改为同步,写盘另由 `write_compact_marker().await` 做。
 - `PluginCall.run_id: Option<String>`(`PluginCall::new` 给 `None`,按字段构造的要补);`SessionEvent::FromPluginCall(Arc<PluginCallOrigin>,
   AgentEvent)` 与 `agix::session::PluginCallOrigin { function, run_id }`;`runtime::agent::Agent::serve_host_answers()`;
   `SessionPool::respond_hook` / `respond_tool_call` / `report_tool_progress` 在调用进行时也认临时会话 id。
