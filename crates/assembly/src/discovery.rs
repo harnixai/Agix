@@ -287,6 +287,9 @@ pub fn capabilities() -> Vec<&'static str> {
         out.push("task_model");
         out.push("agent_token_budget");
     }
+    if crate::session_pool::MCP_COMPILED {
+        out.push("mcp_call");
+    }
     if cfg!(feature = "mcp-oauth-jwt") {
         out.push("mcp_oauth_jwt");
     }

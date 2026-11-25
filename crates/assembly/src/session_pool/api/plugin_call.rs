@@ -1,5 +1,5 @@
 //! 宿主调用插件函数（`[[function]]`）的请求与结局：调哪个函数、在哪个会话或目录下、
-//! 让不让写，以及返回值或失败原因、函数记的日志。
+//! 让不让写，以及返回值或失败原因、函数记的日志；宿主不经会话的调用的来源标记。
 
 use serde::Serialize;
 use std::path::PathBuf;
@@ -60,6 +60,16 @@ pub struct PluginCallOrigin {
     pub function: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+}
+
+/// The host's call in no session a hook call comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HostCallOrigin {
+    /// `plugin.call`; the frame carries it as `plugin_call`.
+    Plugin(PluginCallOrigin),
+    /// `mcp.callTool`; the frame carries it as `mcp_call`.
+    Mcp(super::McpCallOrigin),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]

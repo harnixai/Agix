@@ -19,8 +19,33 @@ pub struct McpToolMeta {
     pub description: Option<String>,
     /// JSON Schema —— 直接对接到 ToolDef::input_schema
     pub input_schema: Value,
+    /// The schema of the tool's `structuredContent`, when the server gives one.
+    #[serde(default)]
+    pub output_schema: Option<Value>,
     #[serde(default)]
     pub hints: McpToolHints,
+}
+
+impl From<rmcp::model::Tool> for McpToolMeta {
+    fn from(t: rmcp::model::Tool) -> Self {
+        Self {
+            name: t.name.to_string(),
+            description: t.description.map(|d| d.to_string()),
+            input_schema: Value::Object((*t.input_schema).clone()),
+            output_schema: t
+                .output_schema
+                .map(|schema| Value::Object((*schema).clone())),
+            hints: t
+                .annotations
+                .map(|a| McpToolHints {
+                    read_only: a.read_only_hint,
+                    idempotent: a.idempotent_hint,
+                    destructive: a.destructive_hint,
+                    open_world: a.open_world_hint,
+                })
+                .unwrap_or_default(),
+        }
+    }
 }
 
 /// The behavior hints a server attaches to a tool (MCP `ToolAnnotations`).
@@ -33,6 +58,8 @@ pub struct McpToolHints {
     pub idempotent: Option<bool>,
     #[serde(default)]
     pub destructive: Option<bool>,
+    #[serde(default)]
+    pub open_world: Option<bool>,
 }
 
 /// MCP 资源（server 暴露的非工具型可读对象 —— 如文件、URL、数据库 schema）。
@@ -355,6 +382,7 @@ mod tests {
             name: name.into(),
             description: Some(format!("desc for {name}")),
             input_schema: json!({"type": "object"}),
+            output_schema: None,
             hints: Default::default(),
         }
     }

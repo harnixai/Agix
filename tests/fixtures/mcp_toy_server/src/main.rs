@@ -6,7 +6,7 @@
 //! ```text
 //! mcp-toy-server [--transport stdio|http|sse] [--port N] [--port-file PATH]
 //!                [--calls PATH] [--name NAME] [--resources DIR] [--mute] [--liar]
-//!                [--max-protocol VERSION] [--task] [--store DIR]
+//!                [--max-protocol VERSION] [--task] [--store DIR] [--report]
 //! ```
 //!
 //! - `http` / `sse` 在 127.0.0.1 上起 streamable HTTP，绑定后先在 stdout 第一行打出
@@ -31,6 +31,9 @@
 //!   记 `work:cancelled`，其余 `work:done` / `work:failed` / `work:sync`。
 //! - `--store DIR`：另外提供 `items_query` / `items_get` / `items_put`，一个按 `kind`（`req`、
 //!   `spec`）存在 `DIR/<kind>.json` 里的结构化存储，是 `docs/forge.md`「后端」里团队需求库的替身。
+//! - `--report`：另外提供 `report`，声明了 `outputSchema` 和注解（只读、非幂等、不连外界），
+//!   把 `value` 原样放进 `structuredContent`、文本块写 `report: <value>`；`fail` 让它以工具
+//!   自己的错误（`isError`）答。
 //!
 //! 工具：`ping`、`echo`、`slow`（可取消）、`crash`（进程直接退出）、`big`（指定字节数）、
 //! `ask`（向用户问一个问题：`mode` 为 `form` 问颜色、`url` 让人打开一个页面；协商到
@@ -83,6 +86,7 @@ struct Options {
     max_protocol: Option<ProtocolVersion>,
     task: bool,
     store: Option<PathBuf>,
+    report: bool,
 }
 
 fn parse_args() -> anyhow::Result<Options> {
@@ -98,6 +102,7 @@ fn parse_args() -> anyhow::Result<Options> {
         max_protocol: None,
         task: false,
         store: None,
+        report: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -119,6 +124,7 @@ fn parse_args() -> anyhow::Result<Options> {
             }
             "--task" => opts.task = true,
             "--store" => opts.store = Some(value()?.into()),
+            "--report" => opts.report = true,
             other => anyhow::bail!("unknown argument {other}"),
         }
     }
@@ -138,6 +144,7 @@ struct State {
     max_protocol: Option<ProtocolVersion>,
     task: bool,
     store: Option<PathBuf>,
+    report: bool,
     store_lock: std::sync::Mutex<()>,
     tasks: TaskManager,
     asking: tokio::sync::watch::Sender<usize>,
@@ -301,6 +308,14 @@ struct GetRequest {
     #[schemars(description = "req or spec")]
     kind: String,
     id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ReportRequest {
+    #[schemars(description = "what to report")]
+    value: serde_json::Value,
+    #[schemars(description = "answer as the tool's own error")]
+    fail: Option<bool>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -573,12 +588,52 @@ impl ToyServer {
     }
 }
 
+#[tool_router(router = report_router)]
+impl ToyServer {
+    #[tool(
+        description = "Report `value` as structured content beside the text `report: <value>`; \
+                       `fail` answers it as the tool's own error.",
+        annotations(read_only_hint = true, idempotent_hint = false, open_world_hint = false),
+        output_schema = report_schema()
+    )]
+    fn report(
+        &self,
+        Parameters(ReportRequest { value, fail }): Parameters<ReportRequest>,
+    ) -> CallToolResult {
+        self.state.record("report");
+        let body = json!({ "value": value });
+        let text = ContentBlock::text(format!("report: {value}"));
+        let mut result = match fail.unwrap_or(false) {
+            true => CallToolResult::error(vec![text]),
+            false => CallToolResult::success(vec![text]),
+        };
+        result.structured_content = Some(body);
+        result
+    }
+}
+
+fn report_schema() -> Arc<rmcp::model::JsonObject> {
+    let schema = json!({
+        "type": "object",
+        "properties": { "value": {} },
+        "required": ["value"]
+    });
+    match schema {
+        serde_json::Value::Object(map) => Arc::new(map),
+        _ => Arc::default(),
+    }
+}
+
 impl ToyServer {
     fn router(&self) -> rmcp::handler::server::router::tool::ToolRouter<Self> {
-        match self.state.store {
-            Some(_) => Self::tool_router() + Self::store_router(),
-            None => Self::tool_router(),
+        let mut router = Self::tool_router();
+        if self.state.store.is_some() {
+            router += Self::store_router();
         }
+        if self.state.report {
+            router += Self::report_router();
+        }
+        router
     }
 }
 
@@ -1103,6 +1158,7 @@ async fn main() -> anyhow::Result<()> {
         max_protocol: opts.max_protocol.clone(),
         task: opts.task,
         store: opts.store.clone(),
+        report: opts.report,
         store_lock: std::sync::Mutex::new(()),
         tasks: TaskManager::new(),
         asking: tokio::sync::watch::Sender::new(0),

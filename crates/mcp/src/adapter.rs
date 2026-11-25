@@ -29,6 +29,7 @@ use std::time::Duration;
 /// `ToolSearch` serves as the tool's guide whenever the two differ.
 pub(crate) const MAX_ADVERTISED_DESCRIPTION_CHARS: usize = 2048;
 
+#[derive(Clone)]
 pub struct McpToolAdapter {
     full_name: String,
     tool_name: String,
@@ -36,10 +37,41 @@ pub struct McpToolAdapter {
     full_description: String,
     description: String,
     input_schema: Value,
+    output_schema: Option<Value>,
     hints: McpToolHints,
     client: McpClientHandle,
     /// Shared output cache across all MCP adapters.
     cache: Arc<Mutex<McpOutputCache>>,
+    record: Option<McpCallRecord>,
+}
+
+/// What came of the one call an adapter from [`McpToolAdapter::recording`]
+/// was handed, as the server answered it: empty until the call reached the
+/// server, so a call the pipeline refused leaves nothing here.
+#[derive(Clone, Default)]
+pub struct McpCallRecord(Arc<Mutex<Option<McpCallOutcome>>>);
+
+impl McpCallRecord {
+    pub fn take(&self) -> Option<McpCallOutcome> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+
+    fn put(&self, outcome: McpCallOutcome) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(outcome);
+    }
+}
+
+/// One call's end as the server's side of it went.
+#[derive(Debug, Clone)]
+pub enum McpCallOutcome {
+    /// The server answered with a tool result, `isError` or not.
+    Answered(McpCallResult),
+    /// The server did not answer within its tool timeout.
+    TimedOut(String),
+    /// The call was stopped before the server answered.
+    Cancelled,
+    /// The request went out and did not come back as a tool result.
+    Failed(String),
 }
 
 impl McpToolAdapter {
@@ -70,10 +102,47 @@ impl McpToolAdapter {
             full_description,
             description,
             input_schema: object_schema(meta.input_schema),
+            output_schema: meta.output_schema,
             hints: meta.hints,
             client,
             cache,
+            record: None,
         }
+    }
+
+    /// What a server's tools are offered as: one adapter per tool, named among
+    /// the server's others by [`crate::naming::tool_names`]. A name the server
+    /// lists twice is offered once, as its first listing.
+    pub fn for_server(
+        client: &McpClientHandle,
+        tools: Vec<McpToolMeta>,
+        cache: &Arc<Mutex<McpOutputCache>>,
+    ) -> Vec<Arc<Self>> {
+        let mut seen = std::collections::HashSet::new();
+        let tools: Vec<_> = tools
+            .into_iter()
+            .filter(|t| seen.insert(t.name.clone()))
+            .collect();
+        let names =
+            crate::naming::tool_names(client.server_name(), tools.iter().map(|t| t.name.as_str()));
+        tools
+            .into_iter()
+            .zip(names)
+            .map(|(meta, name)| {
+                Arc::new(Self::with_cache(client.clone(), meta, cache.clone()).named(name))
+            })
+            .collect()
+    }
+
+    /// This tool, keeping what its one call comes to in the record handed
+    /// back beside it.
+    pub fn recording(&self) -> (Self, McpCallRecord) {
+        let record = McpCallRecord::default();
+        let tool = Self {
+            record: Some(record.clone()),
+            ..self.clone()
+        };
+        (tool, record)
     }
 
     /// Go by `full_name` instead — what [`crate::naming::tool_names`] gave
@@ -94,6 +163,23 @@ impl McpToolAdapter {
     /// Tool name (without server prefix).
     pub fn tool_name(&self) -> &str {
         &self.tool_name
+    }
+
+    /// The server's description of the tool, whole.
+    pub fn full_description(&self) -> &str {
+        &self.full_description
+    }
+
+    pub fn input_schema_value(&self) -> &Value {
+        &self.input_schema
+    }
+
+    pub fn output_schema(&self) -> Option<&Value> {
+        self.output_schema.as_ref()
+    }
+
+    pub fn hints(&self) -> McpToolHints {
+        self.hints
     }
 
     /// A repeated identical call may be answered from the cache only when the
@@ -158,6 +244,7 @@ impl Tool for McpToolAdapter {
         if cacheable {
             let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(cached) = cache.get(&self.server_name, &self.tool_name, &args) {
+                self.keep(&Ok(cached.clone()));
                 return Ok(into_tool_result(cached));
             }
         }
@@ -179,9 +266,15 @@ impl Tool for McpToolAdapter {
         };
         let result = tokio::select! {
             biased;
-            _ = ctx.cancel.cancelled() => return Err(ToolError::Cancelled),
+            _ = ctx.cancel.cancelled() => {
+                if let Some(record) = &self.record {
+                    record.put(McpCallOutcome::Cancelled);
+                }
+                return Err(ToolError::Cancelled);
+            }
             r = self.client.call_tool(&self.tool_name, args.clone(), &scope) => r,
         };
+        self.keep(&result);
 
         let result = result.map_err(|e: McpError| match e {
             McpError::TaskStopped { .. } => ToolError::Cancelled,
@@ -194,6 +287,20 @@ impl Tool for McpToolAdapter {
         }
 
         Ok(into_tool_result(result))
+    }
+}
+
+impl McpToolAdapter {
+    fn keep(&self, result: &Result<McpCallResult, McpError>) {
+        let Some(record) = &self.record else {
+            return;
+        };
+        record.put(match result {
+            Ok(answer) => McpCallOutcome::Answered(answer.clone()),
+            Err(e @ McpError::Timeout { .. }) => McpCallOutcome::TimedOut(e.to_string()),
+            Err(McpError::TaskStopped { .. }) => McpCallOutcome::Cancelled,
+            Err(e) => McpCallOutcome::Failed(e.to_string()),
+        });
     }
 }
 
@@ -356,6 +463,7 @@ mod tests {
             name: name.into(),
             description: Some(format!("desc for {name}")),
             input_schema: json!({"type": "object"}),
+            output_schema: None,
             hints: Default::default(),
         }
     }
@@ -553,7 +661,7 @@ mod tests {
         let hints = McpToolHints {
             read_only: Some(true),
             idempotent: Some(true),
-            destructive: None,
+            ..Default::default()
         };
         let (results, calls) = call_twice(hints, text("first", false)).await;
         assert_eq!(calls, 1);
@@ -565,7 +673,7 @@ mod tests {
         let hints = McpToolHints {
             read_only: Some(true),
             idempotent: Some(true),
-            destructive: None,
+            ..Default::default()
         };
         let (results, calls) = call_twice(hints, text("failed", true)).await;
         assert_eq!(calls, 2);
@@ -706,6 +814,52 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ToolError::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn a_recording_copy_keeps_what_the_server_answered_as_it_answered() {
+        let client = Arc::new(MockMcpClient::new("test", vec![meta("put")]));
+        let answer = McpCallResult {
+            content: vec![],
+            is_error: true,
+            meta: None,
+            structured: Some(json!({"id": 1})),
+        };
+        client.push_response("put", answer.clone());
+        let adapter = McpToolAdapter::new(client, meta("put"));
+        let (tool, record) = adapter.recording();
+        assert!(record.take().is_none(), "nothing before the call");
+        let r = tool
+            .call(json!({}), ctx(), ProgressSender::noop("t"))
+            .await
+            .unwrap();
+        assert!(matches!(r.content, ToolResultContent::Text(ref s) if s == "(empty response)"));
+        match record.take() {
+            Some(McpCallOutcome::Answered(kept)) => {
+                assert!(kept.content.is_empty() && kept.is_error);
+                assert_eq!(kept.structured, answer.structured);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_recording_copy_keeps_a_failure_and_a_cancel() {
+        let client = Arc::new(MockMcpClient::new("test", vec![meta("gone")]));
+        let (tool, record) = McpToolAdapter::new(client.clone(), meta("gone")).recording();
+        assert!(tool
+            .call(json!({}), ctx(), ProgressSender::noop("t"))
+            .await
+            .is_err());
+        assert!(matches!(record.take(), Some(McpCallOutcome::Failed(_))));
+        let (tool, record) = McpToolAdapter::new(client, meta("gone")).recording();
+        let stopped = ctx();
+        stopped.cancel.cancel();
+        assert!(tool
+            .call(json!({}), stopped, ProgressSender::noop("t"))
+            .await
+            .is_err());
+        assert!(matches!(record.take(), Some(McpCallOutcome::Cancelled)));
     }
 
     #[tokio::test]

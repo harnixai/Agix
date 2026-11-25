@@ -250,9 +250,7 @@ impl SessionPool {
             } else {
                 self.settings_for_project(Some(root), scene_id).await
             };
-            let mut servers = mcp_status_entries(&manager);
-            servers.extend(untrusted_mcp_entries(&settings));
-            servers.extend(self.disabled_mcp_entries(&settings, &servers));
+            let servers = self.connected_mcp_entries(&manager, &settings);
             return Ok(api::McpStatusList {
                 loaded: true,
                 servers,
@@ -271,7 +269,24 @@ impl SessionPool {
         })
     }
 
-    fn check_pair(&self, project_root: Option<&Path>, scene_id: &str) -> Result<(), PoolError> {
+    /// `mcp.status`'s entries for a pair connected as `manager`, under
+    /// `settings`: its servers as they are, then those it holds back.
+    pub(super) fn connected_mcp_entries(
+        &self,
+        manager: &McpManager,
+        settings: &LoadedSettings,
+    ) -> Vec<api::McpServerStatus> {
+        let mut servers = mcp_status_entries(manager);
+        servers.extend(untrusted_mcp_entries(settings));
+        servers.extend(self.disabled_mcp_entries(settings, &servers));
+        servers
+    }
+
+    pub(super) fn check_pair(
+        &self,
+        project_root: Option<&Path>,
+        scene_id: &str,
+    ) -> Result<(), PoolError> {
         if self.scenes.registry().resolve(scene_id).is_none() {
             return Err(PoolError::SceneNotFound {
                 scene: scene_id.to_string(),

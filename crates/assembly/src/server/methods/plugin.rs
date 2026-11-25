@@ -66,24 +66,10 @@ async fn call(
     request.permission_rules = params.permission_rules;
     request.timeout = params.timeout_ms.map(std::time::Duration::from_millis);
     request.run_id = params.run_id.clone();
-    let cancel = CancellationToken::new();
-    let _named = match &params.run_id {
-        Some(run_id) => Some(cx.client.name_run(run_id, cancel.clone()).ok_or_else(|| {
-            PoolError::InvalidRequest(format!(
-                "a call of this connection is already running as `{run_id}`"
-            ))
-        })?),
-        None => None,
-    };
-    let running = s.pool.call_plugin(request, cancel.clone());
-    tokio::pin!(running);
-    tokio::select! {
-        result = &mut running => result,
-        _ = cx.client.closed() => {
-            cancel.cancel();
-            running.await
-        }
-    }
+    as_named_run(cx, params.run_id.as_deref(), |cancel| {
+        s.pool.call_plugin(request, cancel)
+    })
+    .await
 }
 
 async fn cancel(

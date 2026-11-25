@@ -70,6 +70,14 @@ pub enum PoolError {
     McpServerDenied(String),
     #[error("{0}")]
     McpAuthFailed(String),
+    /// A server a host asked to call that is in no state to be called;
+    /// `state` is what `mcp.status` says of it.
+    #[error("MCP server `{server}` cannot be called: it is {}{}", super::McpServerState::name(*.state), .error.as_deref().map(|e| format!(" ({e})")).unwrap_or_default())]
+    McpServerUnavailable {
+        server: String,
+        state: super::McpServerState,
+        error: Option<String>,
+    },
     #[error("plugin subsystem unavailable ({status})")]
     PluginsDisabled { status: &'static str },
     #[error("`{method}` belongs to the `{module}` module, which this build does not include")]

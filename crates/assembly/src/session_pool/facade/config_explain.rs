@@ -68,7 +68,7 @@ impl SessionPool {
 
     /// The project and scene of a session in memory, or of one this pool can
     /// resume.
-    async fn pair_of_session(
+    pub(in crate::session_pool) async fn pair_of_session(
         &self,
         session_id: &str,
     ) -> Result<(Option<PathBuf>, String), PoolError> {

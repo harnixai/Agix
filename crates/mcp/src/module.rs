@@ -22,7 +22,7 @@ pub const MODULE_ID: &str = "mcp";
 #[async_trait]
 impl McpServers for McpManager {
     fn tools(&self) -> Vec<Arc<dyn Tool>> {
-        self.tool_adapters().to_vec()
+        self.tool_adapters()
     }
     async fn refresh_tools(&mut self) {
         McpManager::refresh_tools(self).await;
@@ -106,7 +106,7 @@ impl Module for McpModule {
             // Dispatch looks tools up in the session's registry only, so the
             // adapters live there too; the turn loop keeps them current.
             for adapter in manager.tool_adapters() {
-                cx.tools.register(adapter.clone());
+                cx.tools.register(adapter);
             }
         }
         cx.provide_mcp(Box::new(manager));

@@ -15,7 +15,7 @@ pub fn within(
 ) -> (Vec<McpToolMeta>, Option<String>) {
     let total = tools.len();
     tools.truncate(*max_tools);
-    let (mut descriptions, mut schemas) = (0, 0);
+    let (mut descriptions, mut schemas, mut outputs) = (0, 0, 0);
     for tool in &mut tools {
         if let Some(text) = &tool.description {
             if text.chars().count() > *max_description {
@@ -26,6 +26,14 @@ pub fn within(
         if tool.input_schema.to_string().len() > *max_schema {
             tool.input_schema = serde_json::json!({ "type": "object" });
             schemas += 1;
+        }
+        if tool
+            .output_schema
+            .as_ref()
+            .is_some_and(|schema| schema.to_string().len() > *max_schema)
+        {
+            tool.output_schema = None;
+            outputs += 1;
         }
     }
     let mut cut = Vec::new();
@@ -42,6 +50,11 @@ pub fn within(
             "{schemas} input schema(s) over {max_schema} bytes replaced by an open object"
         ));
     }
+    if outputs > 0 {
+        cut.push(format!(
+            "{outputs} output schema(s) over {max_schema} bytes left out"
+        ));
+    }
     let note = (!cut.is_empty()).then(|| cut.join("; "));
     (tools, note)
 }
@@ -56,6 +69,7 @@ mod tests {
             name: name.into(),
             description: Some(description.into()),
             input_schema: schema,
+            output_schema: None,
             hints: McpToolHints::default(),
         }
     }

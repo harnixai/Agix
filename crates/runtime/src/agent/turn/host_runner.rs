@@ -67,6 +67,10 @@ impl HostToolRunner for SessionToolRunner {
             }
         }
     }
+
+    fn tool(&self, name: &str) -> Option<Arc<dyn base::tool::Tool>> {
+        self.outside_a_turn.tools.get(name)
+    }
 }
 
 /// `permission`, holding every call it judges to `rules` as well, the way a

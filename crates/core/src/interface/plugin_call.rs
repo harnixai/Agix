@@ -1,8 +1,7 @@
 //! A host's call of a tool object outside any turn, through the session's
 //! whole tool pipeline — permission, `PreToolUse`, `tool.around`, the call,
 //! `PostToolUse`, telemetry — the way the model's calls go, beside a turn
-//! that may be running. The tool is handed over, not looked up, so it need
-//! not be one the model can call.
+//! that may be running. The tool is handed over, so it need not be one the model can call.
 //!
 //! The call itself is the host's approval: what the session would ask about
 //! runs, what its rules deny or its mode refuses does not. Nobody is asked
@@ -21,8 +20,7 @@ use crate::permission::PermissionRule;
 
 #[async_trait::async_trait]
 pub trait HostToolRunner: Send + Sync {
-    /// `Err` is the call not producing an answer: refused, invalid, failed,
-    /// or the session gone; the text says which.
+    /// `Err`: no answer — refused, invalid, failed, the session gone; it says which.
     async fn run(
         &self,
         tool: Arc<dyn Tool>,
@@ -30,4 +28,6 @@ pub trait HostToolRunner: Send + Sync {
         permission_rules: Vec<PermissionRule>,
         cancel: CancellationToken,
     ) -> ToolOutcome;
+    /// The session's tool `name`, if its tool policy lets it have one.
+    fn tool(&self, name: &str) -> Option<Arc<dyn Tool>>;
 }

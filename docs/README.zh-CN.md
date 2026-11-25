@@ -288,7 +288,7 @@ echo '{"jsonrpc":"2.0","id":2,"method":"session.run_turn",
 一轮在跑时,`session.event` 帧不断推回来(文字增量、工具调用、工具结果、询问、任务
 进度);这一轮结束时响应到达。常见的客户端用一条连接订阅会话(`session.subscribe`),
 用另一条驱动它。协议参考 [`daemon_rpc_protocol.md`](daemon_rpc_protocol.md) 里记了
-九十四个方法——会话、历史与上下文、任务与子 Agent、场景、配置、项目信任、MCP、插件、定时任务
+九十七个方法——会话、历史与上下文、任务与子 Agent、场景、配置、项目信任、MCP、插件、定时任务
 ——每个文档里写的响应形状都有测试拿真实 daemon 的回答对照。
 
 常用参数:`--scene` / `--scenes`(服务哪些场景)、`--listen` / `--listen-ws` 加

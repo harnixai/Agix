@@ -332,6 +332,16 @@ tool-use id,不能向人询问,要批准的调用直接被拒;宿主看不到它
 `OneCallEngines` 里:它问宿主连接 hook 的调用经自己的 `SessionHub` 交给登记者(帧带 `plugin_call`),
 `session.respondHook` 经这张表找回它;调用结束登记即撤。
 
+宿主直接调 MCP 工具(`mcp.callTool`)是同一条路的另一种用法,没有第二条 MCP 调用路径:池从这一对
+(或会话)的连接里找到 server 的工具适配器,复制一份会记下 server 原始答复的(`McpToolAdapter::recording`),
+作为 `mcp__<server>__<tool>` 交给 `HostToolRunner`。带会话时用会话的引擎,并先查会话的工具表里有这个名字
+(场景的工具表同样管着它);不带会话时临时引擎只拿到这一个 server 的连接(`mcp_module`),不占脚本名额,
+它的 hook 调用帧带 `mcp_call`。规则、plan 模式、hook、`tool.around` 在管线里照常生效;MCP 策略与项目信任
+在连接这一层就把 server 挡在外面,调用前按 `mcp.status` 的状态拒绝(`MCP_SERVER_UNAVAILABLE`)。管线没让它
+到 server 时记录是空的,池据此分清"被拒"与 server 的超时、失败;交给宿主的是记录里 server 的原样答复,
+而不是给模型看的那份(围栏、截断、存文件都不适用)。两种调用的时限、取消、临时引擎与 hook 转发在
+`session_pool/facade/host_call.rs` 里共用。
+
 **取消有宽限。** 一轮被取消时,还在跑的工具先得到 `tool_cancel_grace`(缺省 2 秒)自己停下,
 过了就丢弃、把这次调用答成已取消,不拖着整轮不收尾。MCP server 把调用转成任务时,调用在原地挂着
 等任务(§6.4),取消同样先走这段宽限;调用被丢弃时才向 server 发 `tasks/cancel`。

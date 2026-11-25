@@ -74,24 +74,44 @@ impl SessionPool {
         }
         let mut per_session = central.share();
         if plugins.is_narrowed() {
-            let owners = self.plugins.mcp_server_owners();
-            let settings = self.settings_for_project(project_root, scene_id).await;
-            let declared: std::collections::HashSet<&str> = settings
-                .values
-                .mcp
-                .declared()
-                .map(|(name, _)| name.as_str())
-                .collect();
-            per_session = per_session.share_where(|server| match owners.get(server) {
-                Some(owner) => plugins.permits(owner),
-                None => declared.contains(server),
-            });
+            let kept = self.mcp_servers_of(project_root, scene_id, plugins).await;
+            per_session = per_session.share_where(|server| kept.gets(server));
         }
         per_session.refresh_tools().await;
         (
             per_session.server_count(),
             Some(Arc::new(mcp::McpModule::new(per_session))),
         )
+    }
+
+    /// Which of the pair's servers a session drawing on `plugins` gets: a
+    /// server a package declares only when the session draws on that
+    /// package, any other only when the pair's settings declare it.
+    pub(in crate::session_pool) async fn mcp_servers_of(
+        &self,
+        project_root: Option<&Path>,
+        scene_id: &str,
+        plugins: &crate::plugins::SessionPlugins,
+    ) -> McpServersOf {
+        if !plugins.is_narrowed() {
+            return McpServersOf(None);
+        }
+        let owners = self.plugins.mcp_server_owners();
+        let settings = self.settings_for_project(project_root, scene_id).await;
+        let mut kept: std::collections::HashSet<String> = owners
+            .iter()
+            .filter(|(_, owner)| plugins.permits(owner))
+            .map(|(server, _)| server.clone())
+            .collect();
+        kept.extend(
+            settings
+                .values
+                .mcp
+                .declared()
+                .filter(|(name, _)| !owners.contains_key(name.as_str()))
+                .map(|(name, _)| name.clone()),
+        );
+        McpServersOf(Some(kept))
     }
 
     /// The MCP servers a `(project, scene)` with these settings connects:
@@ -471,6 +491,15 @@ impl SessionPool {
             touched.push(key);
         }
         self.invalidate_mcp_keys(&touched).await;
+    }
+}
+
+/// The servers a session gets of its pair's; `None` is every one.
+pub(in crate::session_pool) struct McpServersOf(Option<std::collections::HashSet<String>>);
+
+impl McpServersOf {
+    pub(in crate::session_pool) fn gets(&self, server: &str) -> bool {
+        self.0.as_ref().is_none_or(|kept| kept.contains(server))
     }
 }
 

@@ -125,6 +125,10 @@ error_codes! {
     /// revision was read, so nothing was written. `data.revision` is the
     /// tier's revision now.
     SettingsConflict = -32028, SETTINGS_CONFLICT;
+    /// `mcp.callTool`: the server is not one that can be called now — not
+    /// trusted, turned off, denied, waiting for a sign-in, failed or still
+    /// connecting. Nothing was called; `data` is `{server, state, error?}`.
+    McpServerUnavailable = -32029, MCP_SERVER_UNAVAILABLE;
 }
 
 #[cfg(test)]

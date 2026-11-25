@@ -702,7 +702,7 @@ async fn documented_request_examples_are_accepted_by_a_real_daemon() {
     }
 }
 
-fn documented_error_data(doc: &str) -> BTreeMap<String, Vec<Value>> {
+pub(crate) fn documented_error_data(doc: &str) -> BTreeMap<String, Vec<Value>> {
     let start = doc.find("### 9.1").expect("the doc has a §9.1");
     let body = &doc[start..];
     let block = body
@@ -748,7 +748,7 @@ fn keys_of(value: &Value) -> BTreeSet<String> {
         .unwrap_or_default()
 }
 
-fn assert_data_shape(code: &str, documented: &[Value], response: &Value) {
+pub(crate) fn assert_data_shape(code: &str, documented: &[Value], response: &Value) {
     let data = &response["error"]["data"];
     assert!(
         documented.iter().any(|d| keys_of(d) == keys_of(data)),
@@ -1430,6 +1430,11 @@ const DAEMON_EVENTS_NOT_PROVOKED: &[(&str, &str)] = &[
     (
         "events_lagged",
         "needs a subscriber that stops reading while the daemon floods its channel; timing",
+    ),
+    (
+        "mcp_tool_called",
+        "needs a connected MCP server to call; tests/blackbox/tests/mcp_calls.rs calls the toy \
+         server and checks the fields",
     ),
 ];
 

@@ -2,7 +2,9 @@
 
 pub use ::assembly::rpc::methods::turn::CompactAtParam;
 pub use ::assembly::rpc::methods::turn::CompactParams;
+pub use ::assembly::session_pool::api::HostCallOrigin;
 pub use ::assembly::session_pool::api::Initiator;
+pub use ::assembly::session_pool::api::McpCallOrigin;
 pub use ::assembly::session_pool::api::PluginCall;
 pub use ::assembly::session_pool::api::PluginCallError;
 pub use ::assembly::session_pool::api::PluginCallOrigin;

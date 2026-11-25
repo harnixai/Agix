@@ -65,7 +65,7 @@ pub enum McpNotification {
 
 pub struct McpManager {
     clients: Vec<McpClientHandle>,
-    adapters: Vec<Arc<dyn Tool>>,
+    adapters: Vec<Arc<McpToolAdapter>>,
     prompts: Vec<McpPromptEntry>,
     /// What the servers have announced; every connection this manager and
     /// those shared from it make reports here.
@@ -357,7 +357,7 @@ impl McpManager {
         .await?;
         let tools = client.list_tools().await?;
         let handle: McpClientHandle = client;
-        let adapters = server_adapters(&handle, tools, &link.cache);
+        let adapters = McpToolAdapter::for_server(&handle, tools, &link.cache);
         let prompts = prompts_of(&handle).await;
         Ok(Connected {
             client: handle,
@@ -417,7 +417,7 @@ impl McpManager {
         &mut self,
         name: &str,
         client: McpClientHandle,
-        server_adapters: Vec<Arc<dyn Tool>>,
+        server_adapters: Vec<Arc<McpToolAdapter>>,
     ) {
         self.forget(name);
         self.clients.push(client);
@@ -635,7 +635,16 @@ impl McpManager {
     }
 
     /// 给 ToolRegistry 用的 adapter 列表。
-    pub fn tool_adapters(&self) -> &[Arc<dyn Tool>] {
+    pub fn tool_adapters(&self) -> Vec<Arc<dyn Tool>> {
+        self.adapters
+            .iter()
+            .map(|a| a.clone() as Arc<dyn Tool>)
+            .collect()
+    }
+
+    /// The tool adapters, as what they are: the tools each server lists, by
+    /// the names they are called by.
+    pub fn adapters(&self) -> &[Arc<McpToolAdapter>] {
         &self.adapters
     }
 
@@ -941,7 +950,7 @@ impl McpManager {
     }
 
     async fn relist_tools(&mut self, only: Option<&[String]>) {
-        let mut adapters: Vec<Arc<dyn Tool>> = Vec::new();
+        let mut adapters: Vec<Arc<McpToolAdapter>> = Vec::new();
         for client in &self.clients {
             let name = client.server_name();
             let listed = match only {
@@ -955,7 +964,11 @@ impl McpManager {
                 },
             };
             match listed {
-                Some(tools) => adapters.extend(server_adapters(client, tools, &self.output_cache)),
+                Some(tools) => adapters.extend(McpToolAdapter::for_server(
+                    client,
+                    tools,
+                    &self.output_cache,
+                )),
                 None => {
                     adapters.extend(
                         self.adapters
@@ -1035,32 +1048,6 @@ fn segment_taken(segment: &str, others: &[&str]) -> String {
     )
 }
 
-/// What a server's tools are offered as: one adapter per tool, named among
-/// the server's others by [`crate::naming::tool_names`]. A name the server
-/// lists twice is offered once, as its first listing.
-fn server_adapters(
-    client: &McpClientHandle,
-    tools: Vec<crate::client::McpToolMeta>,
-    cache: &Arc<Mutex<McpOutputCache>>,
-) -> Vec<Arc<dyn Tool>> {
-    let mut seen = std::collections::HashSet::new();
-    let tools: Vec<_> = tools
-        .into_iter()
-        .filter(|t| seen.insert(t.name.clone()))
-        .collect();
-    let names =
-        crate::naming::tool_names(client.server_name(), tools.iter().map(|t| t.name.as_str()));
-    tools
-        .into_iter()
-        .zip(names)
-        .map(|(meta, name)| {
-            let adapter =
-                McpToolAdapter::with_cache(client.clone(), meta, cache.clone()).named(name);
-            Arc::new(adapter) as Arc<dyn Tool>
-        })
-        .collect()
-}
-
 async fn prompts_of(client: &McpClientHandle) -> Vec<McpPromptEntry> {
     try_prompts_of(client).await.unwrap_or_default()
 }
@@ -1098,7 +1085,7 @@ struct ServerLink {
 
 struct Connected {
     client: McpClientHandle,
-    adapters: Vec<Arc<dyn Tool>>,
+    adapters: Vec<Arc<McpToolAdapter>>,
     prompts: Vec<McpPromptEntry>,
 }
 
@@ -1112,7 +1099,7 @@ enum Outcome {
     Connected {
         name: String,
         client: McpClientHandle,
-        adapters: Vec<Arc<dyn Tool>>,
+        adapters: Vec<Arc<McpToolAdapter>>,
         prompts: Vec<McpPromptEntry>,
     },
     NeedsSignIn {
@@ -1332,14 +1319,18 @@ mod tests {
         );
     }
 
-    fn adapters_of(client: &Arc<crate::client::MockMcpClient>, tool: &str) -> Vec<Arc<dyn Tool>> {
+    fn adapters_of(
+        client: &Arc<crate::client::MockMcpClient>,
+        tool: &str,
+    ) -> Vec<Arc<McpToolAdapter>> {
         let meta = crate::client::McpToolMeta {
             name: tool.into(),
             description: None,
             input_schema: serde_json::json!({"type": "object"}),
+            output_schema: None,
             hints: Default::default(),
         };
-        vec![Arc::new(McpToolAdapter::new(client.clone(), meta)) as Arc<dyn Tool>]
+        vec![Arc::new(McpToolAdapter::new(client.clone(), meta))]
     }
 
     #[tokio::test]
@@ -1360,7 +1351,7 @@ mod tests {
             .filter(|c| c.server_name() == "api")
             .collect();
         assert_eq!(api.len(), 1);
-        let names: Vec<&str> = m.tool_adapters().iter().map(|a| a.name()).collect();
+        let names: Vec<&str> = m.adapters().iter().map(|a| a.full_name()).collect();
         assert_eq!(names, vec!["mcp__docs__read", "mcp__api__new_tool"]);
     }
 
@@ -1771,6 +1762,7 @@ mod refresh_tests {
                     name: name.into(),
                     description: None,
                     input_schema: serde_json::json!({"type": "object"}),
+                    output_schema: None,
                     hints: Default::default(),
                 })
                 .collect())

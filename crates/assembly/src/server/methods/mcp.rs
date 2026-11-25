@@ -1,16 +1,19 @@
 //! `mcp.*`：属于 `mcp` 模块，没编进这个构建时答 `METHOD_NOT_FOUND` 加
-//! `data.module`。
+//! `data.module`。`mcp.callTool` 的 `run_id` 与 `plugin.call` 的同一张按连接的登记表，
+//! `mcp.cancel` 与 `plugin.cancel` 谁都取消得了哪一种。
 
 use super::*;
 use crate::rpc::methods::mcp::{
     McpAuthCancelParams, McpAuthCompleteParams, McpAuthLogoutParams, McpAuthStartParams,
-    McpPutServerParams, McpReconnectParams, McpRedirectKind, McpRemoveServerParams,
-    McpSetEnabledParams, McpSetIdentityParams,
+    McpCallToolParams, McpCancelParams, McpCancelled, McpPutServerParams, McpReconnectParams,
+    McpRedirectKind, McpRemoveServerParams, McpSetEnabledParams, McpSetIdentityParams,
+    McpToolsParams,
 };
 use crate::rpc::methods::ConfigTarget;
 use crate::session_pool::api::{
     McpAuthDone, McpAuthStarted, McpIdentity, McpReconnected, McpRedirect, McpServerReconnected,
-    McpServerRef, McpServerWritten, McpStatusList,
+    McpServerRef, McpServerWritten, McpStatusList, McpToolCall, McpToolCallResult,
+    McpToolCallTarget, McpToolList,
 };
 use crate::session_pool::MCP_COMPILED;
 
@@ -26,10 +29,72 @@ rpc_methods! {
     "mcp.auth.cancel" => auth_cancel(McpAuthCancelParams) -> McpServerRef ["mcp", MCP_COMPILED];
     "mcp.auth.logout" => auth_logout(McpAuthLogoutParams) -> McpServerRef ["mcp", MCP_COMPILED];
     "mcp.auth.setIdentity" => auth_set_identity(McpSetIdentityParams) -> McpReconnected ["mcp", MCP_COMPILED];
+    "mcp.tools" => tools(McpToolsParams) -> McpToolList ["mcp", MCP_COMPILED];
+    "mcp.callTool" => call_tool(McpCallToolParams) -> McpToolCallResult ["mcp", MCP_COMPILED];
+    "mcp.cancel" => cancel(McpCancelParams) -> McpCancelled ["mcp", MCP_COMPILED];
 }
 
 fn invalid(message: impl Into<String>) -> PoolError {
     PoolError::InvalidRequest(message.into())
+}
+
+/// The pair `target` names, or the session `session_id` names; not both.
+fn call_target_of(
+    s: &DaemonServer,
+    session_id: Option<String>,
+    target: ConfigTarget,
+) -> Result<McpToolCallTarget, PoolError> {
+    match session_id {
+        Some(_) if target.scene.is_some() || target.project_root.is_some() => Err(invalid(
+            "give `session_id` or `scene` / `project_root`, not both",
+        )),
+        Some(id) => Ok(McpToolCallTarget::Session(id)),
+        None => {
+            let (project_root, scene) = s.target_of(target);
+            Ok(McpToolCallTarget::Pair {
+                project_root,
+                scene,
+            })
+        }
+    }
+}
+
+async fn tools(
+    s: &DaemonServer,
+    _: &Call,
+    params: McpToolsParams,
+) -> Result<McpToolList, PoolError> {
+    let target = call_target_of(s, params.session_id, params.target)?;
+    s.pool.mcp_tools(params.server.as_deref(), &target).await
+}
+
+async fn call_tool(
+    s: &DaemonServer,
+    cx: &Call,
+    params: McpCallToolParams,
+) -> Result<McpToolCallResult, PoolError> {
+    let target = call_target_of(s, params.session_id, params.target)?;
+    if params.server.is_empty() || params.tool.is_empty() {
+        return Err(invalid("`server` and `tool` are not empty"));
+    }
+    let mut call = McpToolCall::new(params.server, params.tool, target);
+    call.arguments = params.arguments.unwrap_or_default();
+    call.timeout = params.timeout_ms.map(std::time::Duration::from_millis);
+    call.run_id = params.run_id.clone();
+    as_named_run(cx, params.run_id.as_deref(), |cancel| {
+        s.pool.call_mcp_tool(call, cancel)
+    })
+    .await
+}
+
+async fn cancel(
+    _: &DaemonServer,
+    cx: &Call,
+    params: McpCancelParams,
+) -> Result<McpCancelled, PoolError> {
+    Ok(McpCancelled {
+        cancelled: cx.client.cancel_run(&params.run_id),
+    })
 }
 
 async fn status(

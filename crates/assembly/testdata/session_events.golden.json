@@ -2886,6 +2886,34 @@
           "turn_id": null
         }
       }
+    },
+    {
+      "case": "mcp_call_hook_call",
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "agent_session_id": null,
+            "call_id": "hk_3",
+            "cwd": "/repo",
+            "depth": 0,
+            "hook_event": "PreToolUse",
+            "input": {
+              "tool_name": "mcp__feishu__approval_create"
+            },
+            "kind": "hook_call",
+            "mcp_call": {
+              "server": "feishu",
+              "tool": "approval_create"
+            },
+            "task_id": null,
+            "timeout_ms": 10000
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      }
     }
   ]
 }

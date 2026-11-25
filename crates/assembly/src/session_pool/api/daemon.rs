@@ -1,5 +1,5 @@
 //! 池级事件：不属于某个会话的通知（MCP 连接与登录、可导入配置、会话进出内存、
-//! 一轮的起止、项目信任变化）。server 把它们原样包成 `daemon.event` 推给订阅者。
+//! 一轮的起止、项目信任变化、宿主对 MCP 工具的调用）。server 把它们原样包成 `daemon.event` 推给订阅者。
 
 use super::Initiator;
 use std::path::PathBuf;
@@ -69,6 +69,22 @@ pub enum DaemonEvent {
         project_root: PathBuf,
         /// `none`, `trusted` or `untrusted`, as `project.status` reports it.
         trust: String,
+    },
+    /// A host called an MCP tool with `mcp.callTool`. Never its arguments
+    /// or its result.
+    McpToolCalled {
+        server: String,
+        tool: String,
+        /// `mcp__<server>__<tool>`.
+        tool_name: String,
+        scene: String,
+        project_root: Option<PathBuf>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+        outcome: super::McpToolCallOutcome,
+        duration_ms: u64,
     },
 }
 

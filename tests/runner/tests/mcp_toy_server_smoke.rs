@@ -58,7 +58,7 @@ async fn mcp_toy_server_connects_and_ping_round_trips() {
 
     let tool = manager
         .tool_adapters()
-        .iter()
+        .into_iter()
         .find(|t| base::tool::Tool::name(t.as_ref()) == "mcp__demo__ping")
         .unwrap_or_else(|| {
             panic!(

@@ -9,6 +9,7 @@ mod events;
 mod history;
 mod host_connections;
 mod mcp;
+mod mcp_call;
 mod options;
 mod plugin;
 mod plugin_call;
@@ -45,6 +46,11 @@ pub use mcp::{
     McpRedirect, McpServerReconnected, McpServerRef, McpServerState, McpServerStatus,
     McpServerWritten, McpStatusList,
 };
+pub use mcp_call::{
+    McpCallOrigin, McpServerTools, McpToolAnnotations, McpToolCall, McpToolCallError,
+    McpToolCallOutcome, McpToolCallResult, McpToolCallTarget, McpToolInfo, McpToolList,
+    MCP_CALL_DEFAULT_TIME, MCP_CALL_TIME_LIMIT,
+};
 pub(crate) use options::requested_permission_mode;
 pub use options::{
     ClampedOption, ClockOptions, HostToolOption, HostToolPermit, RecorderOptions, SessionOptions,
@@ -56,8 +62,8 @@ pub use plugin::{
     SkillConflict, SkillOrigin, VisibleText,
 };
 pub use plugin_call::{
-    PluginCall, PluginCallError, PluginCallOrigin, PluginCallResult, PluginCallTarget,
-    PluginFunctionInfo,
+    HostCallOrigin, PluginCall, PluginCallError, PluginCallOrigin, PluginCallResult,
+    PluginCallTarget, PluginFunctionInfo,
 };
 pub use rerun::{
     ArgDiffView, BlockSelector, RerunDiff, RerunEdits, RerunRequest, RerunResult, StopReasonDiff,

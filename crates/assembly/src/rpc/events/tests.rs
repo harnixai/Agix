@@ -444,16 +444,44 @@ fn daemon_frames() -> Vec<(&'static str, Value)> {
             from_plugin_call(json!({"kind": "host_hook_call_resolved", "call_id": "hk_2",
                 "resolution": "answered"})),
         ),
+        (
+            "mcp_call_hook_call",
+            from_mcp_call(json!({"kind": "host_hook_call", "call_id": "hk_3",
+                "hook_event": "PreToolUse", "input": {"tool_name": "mcp__feishu__approval_create"},
+                "timeout_ms": 10000, "cwd": "/repo", "depth": 0})),
+        ),
     ]
 }
 
 fn from_plugin_call(event: Value) -> Value {
-    let origin = Arc::new(crate::session_pool::api::PluginCallOrigin {
-        function: "xflow.check".into(),
-        run_id: Some("gate-7".into()),
-    });
+    from_host_call(
+        crate::session_pool::api::HostCallOrigin::Plugin(
+            crate::session_pool::api::PluginCallOrigin {
+                function: "xflow.check".into(),
+                run_id: Some("gate-7".into()),
+            },
+        ),
+        event,
+    )
+}
+
+fn from_mcp_call(event: Value) -> Value {
+    from_host_call(
+        crate::session_pool::api::HostCallOrigin::Mcp(crate::session_pool::api::McpCallOrigin {
+            server: "feishu".into(),
+            tool: "approval_create".into(),
+            run_id: None,
+        }),
+        event,
+    )
+}
+
+fn from_host_call(origin: crate::session_pool::api::HostCallOrigin, event: Value) -> Value {
     let event: AgentEvent = serde_json::from_value(event).unwrap();
-    on_wire(&frame(None, SessionEvent::FromPluginCall(origin, event)))
+    on_wire(&frame(
+        None,
+        SessionEvent::FromHostCall(Arc::new(origin), event),
+    ))
 }
 
 fn render() -> Value {

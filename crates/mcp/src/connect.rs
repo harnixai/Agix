@@ -347,23 +347,7 @@ impl StdioMcpClient {
                 svc.list_tools(Default::default()),
             )
             .await?;
-        let tools = list
-            .tools
-            .into_iter()
-            .map(|t| McpToolMeta {
-                name: t.name.to_string(),
-                description: t.description.map(|d| d.to_string()),
-                input_schema: serde_json::Value::Object((*t.input_schema).clone()),
-                hints: t
-                    .annotations
-                    .map(|a| crate::client::McpToolHints {
-                        read_only: a.read_only_hint,
-                        idempotent: a.idempotent_hint,
-                        destructive: a.destructive_hint,
-                    })
-                    .unwrap_or_default(),
-            })
-            .collect();
+        let tools = list.tools.into_iter().map(McpToolMeta::from).collect();
         let (tools, cut) = crate::limits::within(tools, &self.config.timeouts().offered());
         *self.tools_cut.lock().unwrap_or_else(|e| e.into_inner()) = cut;
         Ok(tools)

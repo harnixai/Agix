@@ -21,6 +21,12 @@ use base::interface::tool_selector::ToolSelector;
 /// deferred schema, and the way to hand back the output a host asked for.
 const STRUCTURAL: &[&str] = &["ToolSearch", "StructuredOutput"];
 
+/// Whether a session of `scene` that nobody delegated would have `tool`,
+/// when no plugin of its registered it.
+pub fn scene_permits(scene: &SceneSpec, tool: &dyn Tool) -> bool {
+    ToolPolicy::new(scene, ToolSelector::all(), Vec::new()).permits(tool)
+}
+
 pub(crate) struct ToolPolicy {
     scene: ToolSelector,
     scene_deny: ToolSelector,

@@ -120,6 +120,7 @@ async fn build_registers_mcp_tool_adapters_into_the_executable_tool_registry() {
             name: "do-thing".into(),
             description: Some("does a thing".into()),
             input_schema: serde_json::json!({"type": "object"}),
+            output_schema: None,
             hints: Default::default(),
         }],
     ));

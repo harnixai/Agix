@@ -7,6 +7,7 @@
 
 mod auth;
 mod cache;
+mod call;
 mod connect;
 mod manage;
 mod status;

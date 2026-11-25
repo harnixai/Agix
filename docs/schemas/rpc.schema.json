@@ -2406,6 +2406,64 @@
             "trust"
           ],
           "type": "object"
+        },
+        {
+          "description": "A host called an MCP tool with `mcp.callTool`. Never its arguments\nor its result.",
+          "properties": {
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "mcp_tool_called",
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/$defs/McpToolCallOutcome"
+            },
+            "project_root": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "run_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scene": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool": {
+              "type": "string"
+            },
+            "tool_name": {
+              "description": "`mcp__<server>__<tool>`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "server",
+            "tool",
+            "tool_name",
+            "scene",
+            "outcome",
+            "duration_ms"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -4254,6 +4312,95 @@
       ],
       "type": "object"
     },
+    "McpCallToolParams": {
+      "description": "The `(scene, project_root)` pair a configuration method acts on. Omitted\nmeans this daemon's own; a named `project_root` reaches another project\nthe daemon serves. `null` is refused: these methods act on the *project*\ntier, and a session with no project has none.",
+      "properties": {
+        "arguments": {
+          "additionalProperties": true,
+          "default": null,
+          "description": "Absent and `null` both mean `{}`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "project_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "default": null,
+          "description": "What `mcp.cancel` names this call by, on this connection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scene": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server": {
+          "description": "The server's key in settings, as `mcp.status` names it.",
+          "type": "string"
+        },
+        "session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "default": null,
+          "description": "Default 120000, at most 600000.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tool": {
+          "description": "The server's own name for the tool, not `mcp__…`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "tool"
+      ],
+      "type": "object"
+    },
+    "McpCancelParams": {
+      "properties": {
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "McpCancelled": {
+      "properties": {
+        "cancelled": {
+          "description": "`false`: no call of this connection is running under `run_id`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cancelled"
+      ],
+      "type": "object"
+    },
     "McpElicitationAnswer": {
       "description": "The answer to [`ElicitKind::McpServer`], as it goes back to the server.\n`decline` is a person saying no; `cancel` is nobody choosing.",
       "oneOf": [
@@ -4515,6 +4662,35 @@
       ],
       "type": "object"
     },
+    "McpServerTools": {
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/McpServerState"
+        },
+        "tools": {
+          "description": "Empty unless the server is connected (or was, and reconnects).",
+          "items": {
+            "$ref": "#/$defs/McpToolInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "state",
+        "tools"
+      ],
+      "type": "object"
+    },
     "McpServerWritten": {
       "description": "What `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer` /\n`mcp.setEnabled` wrote and what is connected now.",
       "properties": {
@@ -4626,6 +4802,188 @@
         "loaded",
         "servers"
       ],
+      "type": "object"
+    },
+    "McpToolAnnotations": {
+      "description": "The server's hints about a tool; one it says nothing about is absent.",
+      "properties": {
+        "destructive": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "idempotent": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "open_world": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "read_only": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "McpToolCallError": {
+      "properties": {
+        "code": {
+          "description": "`refused`, `timeout`, `cancelled` or `failed`; more may come.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "McpToolCallOutcome": {
+      "description": "How a host's call of an MCP tool ended, for `mcp_tool_called`.",
+      "enum": [
+        "ok",
+        "tool_error",
+        "refused",
+        "timeout",
+        "cancelled",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "McpToolCallResult": {
+      "description": "What a host's call of a tool came to. `ok` with `is_error` is the tool\nitself reporting a failure.",
+      "properties": {
+        "content": {
+          "description": "The result's blocks: `text` and `image` as in a message, any other\nkind as the server sent it.",
+          "items": true,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpToolCallError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_error": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "structured": {
+          "description": "The server's `structuredContent`, as it sent it."
+        },
+        "text": {
+          "description": "The text blocks joined with `\\n`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "type": "object"
+    },
+    "McpToolInfo": {
+      "properties": {
+        "annotations": {
+          "$ref": "#/$defs/McpToolAnnotations"
+        },
+        "description": {
+          "type": "string"
+        },
+        "input_schema": true,
+        "name": {
+          "description": "The server's own name, what `mcp.callTool` takes as `tool`.",
+          "type": "string"
+        },
+        "output_schema": true,
+        "tool_name": {
+          "description": "`mcp__<server>__<tool>`: the name permission rules and hooks match.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "input_schema",
+        "annotations",
+        "tool_name"
+      ],
+      "type": "object"
+    },
+    "McpToolList": {
+      "description": "The servers of a pair or a session and the tools each offers.",
+      "properties": {
+        "servers": {
+          "items": {
+            "$ref": "#/$defs/McpServerTools"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "servers"
+      ],
+      "type": "object"
+    },
+    "McpToolsParams": {
+      "description": "`scene` / `project_root` name a pair as for `mcp.status`; `session_id`\nnames a session instead, never both.",
+      "properties": {
+        "project_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scene": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server": {
+          "default": null,
+          "description": "Only this server, which must be configured.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "MessageDelivery": {
@@ -10380,6 +10738,10 @@
     {
       "code": -32028,
       "name": "SETTINGS_CONFLICT"
+    },
+    {
+      "code": -32029,
+      "name": "MCP_SERVER_UNAVAILABLE"
     }
   ],
   "frames": {
@@ -10604,6 +10966,24 @@
         "$ref": "#/$defs/McpAuthStarted"
       }
     },
+    "mcp.callTool": {
+      "module": "mcp",
+      "params": {
+        "$ref": "#/$defs/McpCallToolParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpToolCallResult"
+      }
+    },
+    "mcp.cancel": {
+      "module": "mcp",
+      "params": {
+        "$ref": "#/$defs/McpCancelParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpCancelled"
+      }
+    },
     "mcp.reconnect": {
       "module": "mcp",
       "params": {
@@ -10638,6 +11018,15 @@
       },
       "result": {
         "$ref": "#/$defs/McpStatusList"
+      }
+    },
+    "mcp.tools": {
+      "module": "mcp",
+      "params": {
+        "$ref": "#/$defs/McpToolsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpToolList"
       }
     },
     "mcp.updateServer": {
@@ -11339,6 +11728,64 @@
             "server",
             "transport",
             "tool_count"
+          ],
+          "type": "object"
+        },
+        "mcp_tool_called": {
+          "description": "A host called an MCP tool with `mcp.callTool`. Never its arguments\nor its result.",
+          "properties": {
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "mcp_tool_called",
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/$defs/McpToolCallOutcome"
+            },
+            "project_root": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "run_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scene": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool": {
+              "type": "string"
+            },
+            "tool_name": {
+              "description": "`mcp__<server>__<tool>`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "server",
+            "tool",
+            "tool_name",
+            "scene",
+            "outcome",
+            "duration_ms"
           ],
           "type": "object"
         },

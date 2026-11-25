@@ -55,6 +55,22 @@ impl SessionPool {
 
     pub fn connect_mcp_servers_in_background(self: &Arc<Self>) {}
 
+    pub async fn mcp_tools(
+        &self,
+        _server: Option<&str>,
+        _target: &api::McpToolCallTarget,
+    ) -> Result<api::McpToolList, PoolError> {
+        Err(not_compiled())
+    }
+
+    pub async fn call_mcp_tool(
+        &self,
+        _call: api::McpToolCall,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<api::McpToolCallResult, PoolError> {
+        Err(not_compiled())
+    }
+
     pub async fn add_mcp_server(
         &self,
         _project_root: Option<&Path>,

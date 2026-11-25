@@ -30,40 +30,22 @@ impl From<PoolError> for RpcError {
             PoolError::SceneNotFound { .. }
             | PoolError::SceneNotActive { .. }
             | PoolError::SceneNotRegistered { .. } => (codes::SCENE_NOT_FOUND, None),
-            PoolError::SceneMismatch {
-                session_id,
-                recorded,
-                requested,
-            } => (
-                codes::SCENE_MISMATCH,
-                Some(json!({
-                    "session_id": session_id,
-                    "recorded_scene": recorded,
-                    "requested_scene": requested,
-                })),
-            ),
+            PoolError::SceneMismatch { .. } | PoolError::SidechainTerminal { .. } => {
+                (resume_error(&e), resume_data(&e))
+            }
             PoolError::SceneHasActiveSessions { .. } => (codes::SCENE_HAS_ACTIVE_SESSIONS, None),
             PoolError::ProjectNotFound { .. } => (codes::PROJECT_NOT_FOUND, None),
             PoolError::ProjectRequired { .. } => (codes::PROJECT_REQUIRED, None),
             PoolError::ProjectUntrusted(_) => (codes::PROJECT_UNTRUSTED, None),
-            PoolError::SidechainTerminal {
-                session_id,
-                parent_session_id,
-                final_state,
-            } => (
-                codes::SIDECHAIN_TERMINAL,
-                Some(json!({
-                    "session_id": session_id,
-                    "parent_session_id": parent_session_id,
-                    "final_state": final_state,
-                })),
-            ),
             PoolError::TaskNotFound { .. } => (codes::TASK_NOT_FOUND, None),
             PoolError::TaskLimit(_) => (codes::TASK_LIMIT, None),
             PoolError::SpawnUnsupported(_) => (codes::INVALID_REQUEST, None),
             PoolError::Engine(failure) => (codes::ENGINE_ERROR, Some(engine_data(failure))),
             PoolError::McpServerDenied(_) => (codes::MCP_SERVER_DENIED, None),
             PoolError::McpAuthFailed(_) => (codes::MCP_AUTH_FAILED, None),
+            PoolError::McpServerUnavailable { .. } => {
+                (codes::MCP_SERVER_UNAVAILABLE, unavailable_data(&e))
+            }
             PoolError::PluginsDisabled { .. } => (codes::PLUGINS_DISABLED, None),
             PoolError::ModuleNotCompiled { module, .. } => {
                 (codes::METHOD_NOT_FOUND, Some(json!({ "module": module })))
@@ -87,6 +69,53 @@ impl From<PoolError> for RpcError {
             data,
         }
     }
+}
+
+/// The code of a session that cannot be resumed as asked.
+fn resume_error(e: &PoolError) -> i32 {
+    match e {
+        PoolError::SceneMismatch { .. } => codes::SCENE_MISMATCH,
+        _ => codes::SIDECHAIN_TERMINAL,
+    }
+}
+
+fn resume_data(e: &PoolError) -> Option<Value> {
+    match e {
+        PoolError::SceneMismatch {
+            session_id,
+            recorded,
+            requested,
+        } => Some(json!({
+            "session_id": session_id,
+            "recorded_scene": recorded,
+            "requested_scene": requested,
+        })),
+        PoolError::SidechainTerminal {
+            session_id,
+            parent_session_id,
+            final_state,
+        } => Some(json!({
+            "session_id": session_id,
+            "parent_session_id": parent_session_id,
+            "final_state": final_state,
+        })),
+        _ => None,
+    }
+}
+
+fn unavailable_data(e: &PoolError) -> Option<Value> {
+    let PoolError::McpServerUnavailable {
+        server,
+        state,
+        error,
+    } = e
+    else {
+        return None;
+    };
+    Some(match error {
+        Some(error) => json!({ "server": server, "state": state, "error": error }),
+        None => json!({ "server": server, "state": state }),
+    })
 }
 
 fn settings_write_error(e: &PoolError) -> (i32, Option<Value>) {

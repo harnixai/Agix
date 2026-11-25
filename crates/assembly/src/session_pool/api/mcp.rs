@@ -28,6 +28,23 @@ pub enum McpServerState {
     NotStarted,
 }
 
+impl McpServerState {
+    /// As the wire says it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Connected => "connected",
+            Self::Disconnected => "disconnected",
+            Self::Connecting => "connecting",
+            Self::AuthRequired => "auth_required",
+            Self::Failed => "failed",
+            Self::Denied => "denied",
+            Self::Untrusted => "untrusted",
+            Self::Disabled => "disabled",
+            Self::NotStarted => "not_started",
+        }
+    }
+}
+
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]

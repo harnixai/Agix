@@ -20,6 +20,7 @@ pub mod steering;
 pub mod streaming;
 mod tool_policy;
 pub use agent::turn;
+pub use tool_policy::scene_permits;
 
 /// Whether this build carries `RunCode` (the `ptc` feature).
 pub const PTC_ENABLED: bool = cfg!(feature = "ptc");

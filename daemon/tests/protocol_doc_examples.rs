@@ -692,6 +692,11 @@ const NOT_COMPARED: &[(&str, &str)] = &[
         "needs a call still running on the same connection; tests/blackbox/tests/plugin_calls.rs \
          cancels one",
     ),
+    (
+        "mcp.callTool",
+        "needs a connected MCP server to call; tests/blackbox/tests/mcp_calls.rs calls the toy \
+         server and checks both result shapes",
+    ),
 ];
 
 /// Documented methods without a `// ← result` example, and why.
@@ -1078,6 +1083,38 @@ async fn documented_mcp_management_results_are_real() {
         &shape_of(documented_result(&doc, "mcp.removeServer")),
         &removed,
     );
+
+    daemon.call("mcp.addServer", add("fs")).await;
+    let listed = daemon.call("mcp.tools", serde_json::json!({})).await;
+    assert_documented(
+        "mcp.tools",
+        &shape_of(documented_result(&doc, "mcp.tools")),
+        &listed,
+    );
+    let cancelled = daemon
+        .call("mcp.cancel", serde_json::json!({"run_id": "nothing-runs"}))
+        .await;
+    assert_documented(
+        "mcp.cancel",
+        &shape_of(documented_result(&doc, "mcp.cancel")),
+        &cancelled,
+    );
+    let errors = super::protocol_doc_wire::documented_error_data(&doc);
+    for (server, state) in [("fs", "failed"), ("github", "disabled")] {
+        let refused = daemon
+            .raw(
+                "mcp.callTool",
+                serde_json::json!({"server": server, "tool": "read"}),
+            )
+            .await;
+        assert_eq!(refused["error"]["code"], -32029, "{refused}");
+        assert_eq!(refused["error"]["data"]["state"], state, "{refused}");
+        super::protocol_doc_wire::assert_data_shape(
+            "MCP_SERVER_UNAVAILABLE",
+            &errors["MCP_SERVER_UNAVAILABLE"],
+            &refused,
+        );
+    }
 }
 
 /// Its own daemon: the example switches to a provider named `anthropic`, which

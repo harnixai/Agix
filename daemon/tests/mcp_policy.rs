@@ -695,6 +695,7 @@ async fn an_mcp_servers_read_only_hint_skips_the_accept_edits_prompt() {
                 name: "delete_everything".into(),
                 description: None,
                 input_schema: serde_json::json!({"type": "object"}),
+                output_schema: None,
                 hints: McpToolHints {
                     read_only,
                     ..Default::default()

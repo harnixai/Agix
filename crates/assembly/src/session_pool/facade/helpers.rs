@@ -92,14 +92,14 @@ pub(in crate::session_pool) fn publish_agent_event(
 }
 
 /// [`publish_agent_event`] for the engine of the call in no session `origin`.
-pub(in crate::session_pool) fn publish_plugin_call_event(
+pub(in crate::session_pool) fn publish_host_call_event(
     hub: &SessionHub,
     session_id: &Arc<str>,
-    origin: &Arc<api::PluginCallOrigin>,
+    origin: &Arc<api::HostCallOrigin>,
     event: AgentEvent,
 ) {
     publish_as(hub, session_id, None, event, |event| {
-        SessionEvent::FromPluginCall(origin.clone(), event)
+        SessionEvent::FromHostCall(origin.clone(), event)
     });
 }
 

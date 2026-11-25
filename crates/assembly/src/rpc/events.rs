@@ -4,7 +4,7 @@
 //! 用不带 `_` 的穷尽 match、按字段穷尽解构：内核加了变体或字段，这里编译不过，
 //! 逼着人决定它上不上线。
 
-use crate::session_pool::api::{PluginCallOrigin, SessionEvent, SessionFrame};
+use crate::session_pool::api::{McpCallOrigin, PluginCallOrigin, SessionEvent, SessionFrame};
 use base::context::goal::GoalView;
 use base::context::{TaskEvent, TaskInfo};
 use base::event::{
@@ -119,6 +119,8 @@ pub enum SessionEventPayload {
         depth: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
         plugin_call: Option<PluginCallOrigin>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mcp_call: Option<McpCallOrigin>,
     },
     HookCallResolved {
         call_id: String,
@@ -317,7 +319,7 @@ impl SessionEventPayload {
     pub fn project(event: &SessionEvent) -> Option<Self> {
         match event {
             SessionEvent::Agent(event) => Self::from_agent(event),
-            SessionEvent::FromPluginCall(origin, event) => {
+            SessionEvent::FromHostCall(origin, event) => {
                 Self::hook_call(event, Some(origin)).or_else(|| Self::from_agent(event))
             }
             SessionEvent::Task(event) => Self::from_task(event),

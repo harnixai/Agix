@@ -11,6 +11,7 @@ mod given_id;
 mod goal;
 pub(super) mod helpers;
 pub(super) mod history_rpc;
+pub(super) mod host_call;
 mod host_connections;
 mod import;
 mod listing;

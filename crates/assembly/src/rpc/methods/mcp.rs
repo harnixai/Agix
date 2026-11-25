@@ -82,6 +82,51 @@ pub struct McpAuthLogoutParams {
     pub server: String,
 }
 
+/// `scene` / `project_root` name a pair as for `mcp.status`; `session_id`
+/// names a session instead, never both.
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+pub struct McpToolsParams {
+    /// Only this server, which must be configured.
+    #[serde(default)]
+    pub server: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(flatten)]
+    pub target: ConfigTarget,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct McpCallToolParams {
+    /// The server's key in settings, as `mcp.status` names it.
+    pub server: String,
+    /// The server's own name for the tool, not `mcp__…`.
+    pub tool: String,
+    /// Absent and `null` both mean `{}`.
+    #[serde(default)]
+    pub arguments: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(flatten)]
+    pub target: ConfigTarget,
+    /// Default 120000, at most 600000.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    /// What `mcp.cancel` names this call by, on this connection.
+    #[serde(default)]
+    pub run_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct McpCancelParams {
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct McpCancelled {
+    /// `false`: no call of this connection is running under `run_id`.
+    pub cancelled: bool,
+}
+
 /// Exactly one of the two.
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct McpSetIdentityParams {
