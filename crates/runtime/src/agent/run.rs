@@ -136,6 +136,16 @@ impl Agent {
             .attach(self.session_end.attachment.clone());
     }
 
+    /// Take the host's answers to this engine's open asks — prompts,
+    /// questions, host and hook calls — without running [`Agent::run`]: for
+    /// an engine that only serves [`Agent::host_tool_runner`] calls. Call it
+    /// once, in place of `run`; anything else sent to the engine's input is
+    /// dropped. It stops once every sender of that input is gone.
+    pub fn serve_host_answers(&mut self) {
+        let (mut unrun, _) = self.spawn_input_demux(&CancellationToken::new());
+        tokio::spawn(async move { while unrun.recv().await.is_some() {} });
+    }
+
     /// Start the agent event loop. Runs until cancelled (caller calls `.cancel()` on the token)
     /// or the input channel closes. Does NOT consume self — the agent can be reused after stop.
     pub async fn run(&mut self, cancel: CancellationToken) {

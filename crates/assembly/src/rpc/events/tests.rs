@@ -433,7 +433,27 @@ fn daemon_frames() -> Vec<(&'static str, Value)> {
             "subscription_dropped",
             json_of(&SessionEventNotification::subscription_dropped(SID)),
         ),
+        (
+            "plugin_call_hook_call",
+            from_plugin_call(json!({"kind": "host_hook_call", "call_id": "hk_2",
+                "hook_event": "PreToolUse", "input": {"tool_name": "Read"}, "timeout_ms": 10000,
+                "cwd": "/repo", "depth": 0})),
+        ),
+        (
+            "plugin_call_hook_call_resolved",
+            from_plugin_call(json!({"kind": "host_hook_call_resolved", "call_id": "hk_2",
+                "resolution": "answered"})),
+        ),
     ]
+}
+
+fn from_plugin_call(event: Value) -> Value {
+    let origin = Arc::new(crate::session_pool::api::PluginCallOrigin {
+        function: "xflow.check".into(),
+        run_id: Some("gate-7".into()),
+    });
+    let event: AgentEvent = serde_json::from_value(event).unwrap();
+    on_wire(&frame(None, SessionEvent::FromPluginCall(origin, event)))
 }
 
 fn render() -> Value {

@@ -889,6 +889,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `runext` | 这个构建带插件命令:包的 `[[command]]` 经 `RunExt` 与 `/name args` 跑,`plugin.list` 带 `commands` / `command_conflicts`,`commands.list` 有 `kind:"ext"`,任务有 `kind:"ext"`(`docs/runext.md`) |
 | `runext_subcall_prompt` | 有人值守的会话里,模型或用户跑的插件命令的子调用要问时照常发 `permission` 提问,帧上带 `origin`(`docs/runext.md` §6);没有这一位的引擎上这类子调用直接失败 |
 | `plugin_functions` | 有 `plugin.functions` / `plugin.call` / `plugin.cancel`:宿主按名字调包的 `[[function]]`,拿回结构化结果(§6.5、`docs/runext.md` §12) |
+| `plugin_call_hooks` | 不带会话的 `plugin.call` 也问连接登记的 hook:`hook_call` 帧发给登记者,`session_id` 是这次调用的临时会话,帧带 `plugin_call:{function,run_id?}`,用 `session.respondHook` 回答(§6.1 `daemon.setHooks`、§6.5 `plugin.call`、§7.6) |
 
 #### `daemon.status`
 
@@ -1238,6 +1239,10 @@ hook 不限于哪个会话、哪个订阅者:`PreToolUse` 的 payload 带 `tool_
 - **帧只发给登记的那条连接**,不发给别的订阅者,也不在 `session.subscribe` 的待答列表里。
 - `PreToolUse` 在权限检查之前,所以 `bypassPermissions` 下一样能拦,也不会有人被询问。覆盖子
   Agent 的调用,和 skill 的内联命令(`` !`cmd` `` 是一次 `Bash` 调用)。
+- **也覆盖不带会话的 `plugin.call`**(哪条连接发起的都一样):它的临时引擎走到登记的事件,同样
+  发 `hook_call` 给登记者。帧外层的 `session_id` 是这次调用的临时会话 id,帧上多一个
+  `plugin_call:{function, run_id?}`(§7.6);用这个 `session_id` 回 `session.respondHook`。这个 id
+  只在调用跑着时认得,调用结束(答完、超时、取消)之后再回是 `SESSION_NOT_FOUND`。
 - 回答能做什么,见 `session.respondHook`。
 - 失败(超时、连接没了、帧发不出去、这条连接上同时悬着的 hook 调用超过 256 个)按 `on_error`:
   `allow` 让调用继续;`block` 拦下,模型读到 `` Hook `PreToolUse` #1 failed and its on_error is block. ``
@@ -3295,8 +3300,8 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 { "call_id": "hk_…" }
 ```
 
-`session_id` 用帧外层 `session.event` 的(根会话)。只有登记这条 hook 的连接能回答,别的连接 →
-`INVALID_PARAMS`。能起作用的字段只有三个,别的 hook 回答里的字段这里不收:
+`session_id` 用帧外层 `session.event` 的(根会话;不带会话的 `plugin.call` 发出的,是那次调用的
+临时会话 id,调用结束就不认了)。只有登记这条 hook 的连接能回答,别的连接 → `INVALID_PARAMS`。能起作用的字段只有三个,别的 hook 回答里的字段这里不收:
 
 - `decision:"block"`:拦下,`message` 是理由。`PreToolUse`:工具不执行,模型读到
   `` Blocked by PreToolUse hook: <message> ``(前缀与设置里的 hook 一致),不再问权限;
@@ -4160,7 +4165,12 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 会话正在重建或回滚时不起调用,报 `SESSION_BUSY`(`reason` 为 `rebuilding` / `rewinding`)。
 
 **不带 `session_id`**:在 `cwd` 下用 daemon 的场景、这个目录的工具与规则跑,引擎是临时的:
-不写日志、不进 `session.list`、不连 MCP、不发会话事件,调用结束(成功、失败或取消)就收掉。
+不写日志、不进 `session.list`、不连 MCP、不向订阅者发会话事件,调用结束(成功、失败或取消)就收掉。
+例外是连接用 `daemon.setHooks` 登记的 hook:临时引擎照样问它们(否则任何连接都能借不带会话的
+调用绕过别的宿主的 `PreToolUse` 闸门),`hook_call` 帧发给登记者,外层 `session_id` 是这次调用的
+临时会话 id,帧带 `plugin_call:{function, run_id?}`(`run_id` 是这次调用的,没给就省略;§7.6),
+登记者用这个 `session_id` 回 `session.respondHook`。登记者已不在、连接在调用中途断开、帧发不出去时,
+当场按 hook 的 `on_error` 了结(`allow` 继续,`block` 拦下,结果是 `refused`),不等 `timeout_ms`。
 
 与 `RunCode` / `RunExt` 共用同时运行脚本的名额;不带会话的调用先等到名额再建临时引擎,同时在的临时引擎
 因此不超过名额数。`code` 取值:
@@ -4407,7 +4417,7 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 | `prompt_resolved` | `{prompt_id,resolution,reason?}` | 那一帧 `prompt` 不再悬着:`resolution` 为 `answered`(引擎收下了一个回答,不论是哪条连接答的)或 `withdrawn`(引擎不再等)。`withdrawn` 时带 `reason`:`timed_out`(提问超时没人答)或 `cancelled`(这一轮被中断或结束、会话在关闭);`answered` 时没有这个字段。每个 `prompt` 至多一帧,推给全部订阅者,包括答题的那条连接;收到就把这个提问从界面上撤下 |
 | `host_tool_call` | `{call_id,tool_use_id,name,input,timeout_ms,task_id,agent_session_id,cwd,depth}` | 模型调用了宿主声明的工具,等宿主用 `session.respondToolCall` 回答(§7.4)。`call_id` 是 daemon 生成的,回答用它;`tool_use_id` 是引出它的那次 `tool_use`;`input` 已按声明的 schema 校验过;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null`;`cwd` 是发起调用的会话的工作目录(绝对路径),`depth` 是它的委派深度(根会话 0) |
 | `host_tool_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `host_tool_call` 不再悬着:`answered`(引擎收下了一个回答)或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`no_host`(发起时没有订阅者)、`host_gone`(订阅者走光了)。每个调用一帧,推给全部订阅者,连接提供的工具再加上提供者(§7.4) |
-| `hook_call` | `{call_id,hook_event,input,timeout_ms,task_id,agent_session_id,cwd,depth}` | 宿主经 `daemon.setHooks` 登记的 hook 触发了,等登记它的连接用 `session.respondHook` 回答(§7.6)。**只发给登记者**;`input` 是这一刻的 hook payload;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null`;`cwd`、`depth` 同 `host_tool_call`,与 `input` 里的同名字段一致 |
+| `hook_call` | `{call_id,hook_event,input,timeout_ms,task_id,agent_session_id,cwd,depth,plugin_call?}` | 宿主经 `daemon.setHooks` 登记的 hook 触发了,等登记它的连接用 `session.respondHook` 回答(§7.6)。**只发给登记者**;`input` 是这一刻的 hook payload;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null`;`cwd`、`depth` 同 `host_tool_call`,与 `input` 里的同名字段一致;`plugin_call` 只在不带会话的 `plugin.call` 发出时有 |
 | `hook_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `hook_call` 不再悬着:`answered` 或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`host_gone`、`no_host`。只发给登记者 |
 | `subagent_progress` | `{agent_label,agent_session_id,agent_type,parent_turn,parent_tool_use_id,task_id,event}` | 子 Agent 事件镜像,`event` 是嵌套的本表结构(同样不带 `turn_id`;子 Agent 的事件本表里没有的,整帧不发);`parent_tool_use_id` 是父会话里发起它的那次 `Agent` 调用,不知道时为 `null`;`task_id` 是它在 `session.tasks` 里的任务 |
 | `team_progress` | `{team,team_id,stage,stage_index,stage_count,status,members,failed}` | 团队阶段生命周期 |
@@ -4726,7 +4736,9 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
   "task_id":null,                 // 子 Agent 发起时为它的任务
   "agent_session_id":null,        // 子 Agent 发起时为它的侧链会话
   "cwd":"/work",                  // 同 input.cwd
-  "depth":0 }                     // 同 input.depth
+  "depth":0,                      // 同 input.depth
+  "plugin_call":{ "function":"xflow.check", "run_id":"gate-7" } }
+                                  // 只在不带会话的 plugin.call 发出时有;run_id 没给就省略
 
 { "kind":"hook_call_resolved", "call_id":"hk_01J…",
   "resolution":"withdrawn", "reason":"timed_out" }
@@ -4738,6 +4750,10 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 以及这个事件的 `tool_name`、`tool_input`、`tool_use_id` 等。外层 `session.event` 的 `session_id`
 是根会话;子 Agent 的调用带 `agent_session_id`,而 `input.session_id`、`input.cwd` 与
 `input.depth` 都是子 Agent 自己的,帧上的 `cwd`、`depth` 同它们(§7.4「工作目录与深度」)。
+
+不带会话的 `plugin.call`(§6.5)发出的帧多一个 `plugin_call`:`function` 是调用的函数名,
+`run_id` 是那次调用给的(没给就省略);外层 `session_id` 与 `input.session_id` 都是这次调用的临时
+会话 id,回答用它,调用结束就不认了。别的帧没有这个字段。
 
 **只发给登记的那条连接**(哪怕它没有订阅这个会话),不发给别的订阅者,`session.subscribe` 的
 待答列表里也没有。一条连接登记了 hook,就等于被交出了这个 daemon 里每个会话的每次相应工具

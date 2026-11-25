@@ -691,6 +691,19 @@ impl LiveSessions {
             .admit(core, stop, || self.refuse_while_shutting_down())
     }
 
+    /// The input and hub of the engine a host call in no session runs on,
+    /// standing in session `sid`.
+    pub(in crate::session_pool) fn one_call_answerer(
+        &self,
+        sid: &str,
+    ) -> Option<(InputSender, Arc<SessionHub>)> {
+        self.one_call.answerer(sid)
+    }
+
+    pub(in crate::session_pool) fn one_call_hubs(&self) -> Vec<Arc<SessionHub>> {
+        self.one_call.hubs()
+    }
+
     /// Stop the host calls running on engines of their own: what says each
     /// has ended, and each one's session.
     pub(in crate::session_pool) fn stop_one_calls(

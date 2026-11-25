@@ -118,6 +118,9 @@ impl SessionPool {
             hub.end_calls_of(host);
             hub.unsubscribe(watcher);
         }
+        for hub in self.live.one_call_hubs() {
+            hub.end_calls_of(host);
+        }
     }
 
     /// How many messages this session's transcript holds — its watermark, in

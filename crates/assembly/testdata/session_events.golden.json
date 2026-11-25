@@ -2842,6 +2842,50 @@
           "turn_id": null
         }
       }
+    },
+    {
+      "case": "plugin_call_hook_call",
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "agent_session_id": null,
+            "call_id": "hk_2",
+            "cwd": "/repo",
+            "depth": 0,
+            "hook_event": "PreToolUse",
+            "input": {
+              "tool_name": "Read"
+            },
+            "kind": "hook_call",
+            "plugin_call": {
+              "function": "xflow.check",
+              "run_id": "gate-7"
+            },
+            "task_id": null,
+            "timeout_ms": 10000
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      }
+    },
+    {
+      "case": "plugin_call_hook_call_resolved",
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "call_id": "hk_2",
+            "kind": "hook_call_resolved",
+            "resolution": "answered"
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      }
     }
   ]
 }

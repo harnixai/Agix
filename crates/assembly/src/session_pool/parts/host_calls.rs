@@ -1,8 +1,12 @@
 //! 宿主调用插件函数时池要记着的东西：一个会话里正在跑几个宿主调用（`HostCalls`，
 //! 有就不算空闲，不被重建、回滚、驱逐），以及不带会话的调用各自建的临时引擎
-//! （`OneCallEngines`），整池关闭时由它停掉这些调用、等它们收尾、回收它们的进程组。
+//! （`OneCallEngines`）。临时引擎按它的会话 id 登记，调用在跑时它向宿主连接发出的
+//! hook 调用经这张表找得到、答得了；整池关闭时由它停掉这些调用、等它们收尾、回收
+//! 它们的进程组。
 
+use crate::session_pool::parts::hub::SessionHub;
 use crate::session_pool::parts::live::SessionCore;
+use runtime::agent::InputSender;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -37,6 +41,8 @@ struct OneCallEngine {
     stop: CancellationToken,
     ended: CancellationToken,
     core: Arc<SessionCore>,
+    /// Where the host's answers to the engine's calls go, once it is built.
+    input: Option<InputSender>,
 }
 
 /// The engines built for one host call each, outside the session table, by
@@ -66,6 +72,7 @@ impl OneCallEngines {
                 stop,
                 ended: ended.clone(),
                 core: core.clone(),
+                input: None,
             },
         );
         Ok(OneCallGuard {
@@ -73,6 +80,22 @@ impl OneCallEngines {
             engines: self.engines.clone(),
             _ended: ended.drop_guard(),
         })
+    }
+
+    /// The input and hub of the engine standing in session `id`, once it
+    /// takes answers.
+    pub(in crate::session_pool) fn answerer(
+        &self,
+        id: &str,
+    ) -> Option<(InputSender, Arc<SessionHub>)> {
+        let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+        let engine = engines.get(id)?;
+        Some((engine.input.clone()?, engine.core.hub().clone()))
+    }
+
+    pub(in crate::session_pool) fn hubs(&self) -> Vec<Arc<SessionHub>> {
+        let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+        engines.values().map(|e| e.core.hub().clone()).collect()
     }
 
     /// Stop every call still running on an engine of its own, handing back
@@ -95,6 +118,16 @@ pub(in crate::session_pool) struct OneCallGuard {
     core: Arc<SessionCore>,
     engines: Arc<Mutex<HashMap<String, OneCallEngine>>>,
     _ended: DropGuard,
+}
+
+impl OneCallGuard {
+    /// The host's answers to the engine's calls go to `input` from now on.
+    pub(in crate::session_pool) fn answer_through(&self, input: InputSender) {
+        let mut engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(engine) = engines.get_mut(self.core.id()) {
+            engine.input = Some(input);
+        }
+    }
 }
 
 impl Drop for OneCallGuard {

@@ -28,6 +28,9 @@ pub struct PluginCall {
     pub permission_rules: Vec<base::permission::PermissionRule>,
     /// At most a plugin command's limit, which `None` is.
     pub timeout: Option<Duration>,
+    /// What the caller names the call by; a call in no session carries it on
+    /// the hook calls it puts to host connections.
+    pub run_id: Option<String>,
 }
 
 impl PluginCall {
@@ -45,8 +48,18 @@ impl PluginCall {
             writes: false,
             permission_rules: Vec::new(),
             timeout: None,
+            run_id: None,
         }
     }
+}
+
+/// The call in no session a hook call comes from: what its frame carries
+/// as `plugin_call`, its `session_id` being the call's own engine's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+pub struct PluginCallOrigin {
+    pub function: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]

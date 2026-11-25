@@ -4,7 +4,7 @@
 //! 用不带 `_` 的穷尽 match、按字段穷尽解构：内核加了变体或字段，这里编译不过，
 //! 逼着人决定它上不上线。
 
-use crate::session_pool::api::{SessionEvent, SessionFrame};
+use crate::session_pool::api::{PluginCallOrigin, SessionEvent, SessionFrame};
 use base::context::goal::GoalView;
 use base::context::{TaskEvent, TaskInfo};
 use base::event::{
@@ -117,6 +117,8 @@ pub enum SessionEventPayload {
         agent_session_id: Option<String>,
         cwd: String,
         depth: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        plugin_call: Option<PluginCallOrigin>,
     },
     HookCallResolved {
         call_id: String,
@@ -315,6 +317,9 @@ impl SessionEventPayload {
     pub fn project(event: &SessionEvent) -> Option<Self> {
         match event {
             SessionEvent::Agent(event) => Self::from_agent(event),
+            SessionEvent::FromPluginCall(origin, event) => {
+                Self::hook_call(event, Some(origin)).or_else(|| Self::from_agent(event))
+            }
             SessionEvent::Task(event) => Self::from_task(event),
             SessionEvent::GoalChanged(goal) => Some(Self::GoalChanged { goal: goal.clone() }),
             SessionEvent::ExtensionEntry(entry) => Some(Self::ExtensionEntry {
@@ -567,26 +572,7 @@ impl SessionEventPayload {
                 resolution: *resolution,
                 reason: *reason,
             },
-            AgentEvent::HostHookCall {
-                call_id,
-                hook_event,
-                input,
-                timeout_ms,
-                task_id,
-                agent_session_id,
-                cwd,
-                depth,
-                host: _,
-            } => Self::HookCall {
-                call_id: call_id.clone(),
-                hook_event: hook_event.clone(),
-                input: input.clone(),
-                timeout_ms: *timeout_ms,
-                task_id: task_id.clone(),
-                agent_session_id: agent_session_id.clone(),
-                cwd: cwd.display().to_string(),
-                depth: *depth,
-            },
+            AgentEvent::HostHookCall { .. } => return Self::hook_call(event, None),
             AgentEvent::HostHookCallResolved {
                 call_id,
                 resolution,
@@ -717,5 +703,6 @@ impl<'a> SessionEventNotification<'a> {
 }
 
 mod compact;
+mod hook_call;
 #[cfg(test)]
 mod tests;

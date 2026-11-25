@@ -388,7 +388,9 @@ impl HostCalls for ChannelHostCalls {
             .progress
             .clone()
             .map(|sender| ProgressRoute::open(&call.call_id, &self.progress, sender));
-        let _ = self.events.send(announced);
+        if self.events.send(announced).is_err() {
+            return HostCallEnd::NoHost;
+        }
         let waited = tokio::select! {
             biased;
             _ = cancel.cancelled() => return HostCallEnd::Cancelled,
@@ -721,6 +723,22 @@ mod tests {
                 Some(HostCallWithdrawal::Cancelled)
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn a_call_nobody_reads_the_stream_of_ends_at_once_as_no_host() {
+        let (events, rx) = bus();
+        drop(rx);
+        let pending = PendingHostCalls::default();
+        let host = ChannelHostCalls::new(events, pending.clone(), PendingHostProgress::default());
+        let end = host
+            .call(
+                call("hc_unread", Duration::from_secs(600)),
+                &CancellationToken::new(),
+            )
+            .await;
+        assert!(matches!(end, End::NoHost));
+        assert!(pending.lock().unwrap().is_empty());
     }
 
     #[test]

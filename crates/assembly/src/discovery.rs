@@ -301,6 +301,7 @@ pub fn capabilities() -> Vec<&'static str> {
         out.push("runext_subcall_prompt");
         out.push("plugin_functions");
         out.push("plugin_call_long");
+        out.push("plugin_call_hooks");
     }
     out
 }

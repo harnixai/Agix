@@ -218,7 +218,8 @@ impl SessionPool {
         Ok(())
     }
 
-    /// The input of live `session_id`, when `from` may answer `call_id` as
+    /// The input of live `session_id` — or of the engine a host call in no
+    /// session runs on under that id — when `from` may answer `call_id` as
     /// an ask of `kind`: one of another kind is refused, and so is one a
     /// host connection provides when `from` is not that connection.
     pub(in crate::session_pool) async fn answerable(
@@ -228,12 +229,14 @@ impl SessionPool {
         kind: AskKind,
         from: Option<WatcherId>,
     ) -> Result<InputSender, PoolError> {
-        let (input_tx, hub) = self
+        let live = self
             .live
             .with_live(session_id, |live| {
                 (live.engine.input_tx.clone(), live.core.hub().clone())
             })
-            .await
+            .await;
+        let (input_tx, hub) = live
+            .or_else(|| self.live.one_call_answerer(session_id))
             .ok_or_else(|| PoolError::session_not_found(session_id))?;
         match hub.ask_host(call_id) {
             Some((asked, _)) if asked != kind => Err(PoolError::InvalidRequest(format!(

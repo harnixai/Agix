@@ -65,6 +65,7 @@ async fn call(
     request.writes = params.writes;
     request.permission_rules = params.permission_rules;
     request.timeout = params.timeout_ms.map(std::time::Duration::from_millis);
+    request.run_id = params.run_id.clone();
     let cancel = CancellationToken::new();
     let _named = match &params.run_id {
         Some(run_id) => Some(cx.client.name_run(run_id, cancel.clone()).ok_or_else(|| {

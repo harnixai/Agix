@@ -156,7 +156,7 @@ fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
         })
 }
 
-async fn with_xflow(name: &str, stub: &ProviderStub) -> anyhow::Result<LiveRun> {
+pub(crate) async fn with_xflow(name: &str, stub: &ProviderStub) -> anyhow::Result<LiveRun> {
     with_xflow_settings(name, stub, json!({})).await
 }
 
@@ -196,7 +196,7 @@ async fn call(run: &mut LiveRun, params: Value) -> anyhow::Result<Value> {
     ok(run.client.call("plugin.call", params).await?)
 }
 
-fn in_dir(run: &LiveRun, function: &str, extra: Value) -> Value {
+pub(crate) fn in_dir(run: &LiveRun, function: &str, extra: Value) -> Value {
     let mut params = json!({ "function": function, "cwd": run.project });
     if let (Some(p), Some(e)) = (params.as_object_mut(), extra.as_object()) {
         p.extend(e.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -204,7 +204,7 @@ fn in_dir(run: &LiveRun, function: &str, extra: Value) -> Value {
     params
 }
 
-fn error_of(result: &Value) -> (String, String) {
+pub(crate) fn error_of(result: &Value) -> (String, String) {
     assert_eq!(result["ok"], false, "{result}");
     (
         result["error"]["code"].as_str().unwrap_or_default().into(),

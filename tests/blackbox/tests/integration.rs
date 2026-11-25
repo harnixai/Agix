@@ -36,6 +36,7 @@ mod openai_responses;
 mod other_instances;
 mod package_trust;
 mod permission_bounds;
+mod plugin_call_hooks;
 mod plugin_calls;
 mod plugin_command_prompts;
 mod plugin_commands;

@@ -88,6 +88,28 @@ pub(in crate::session_pool) fn publish_agent_event(
     turn_id: Option<&Arc<str>>,
     event: AgentEvent,
 ) {
+    publish_as(hub, session_id, turn_id, event, SessionEvent::Agent);
+}
+
+/// [`publish_agent_event`] for the engine of the call in no session `origin`.
+pub(in crate::session_pool) fn publish_plugin_call_event(
+    hub: &SessionHub,
+    session_id: &Arc<str>,
+    origin: &Arc<api::PluginCallOrigin>,
+    event: AgentEvent,
+) {
+    publish_as(hub, session_id, None, event, |event| {
+        SessionEvent::FromPluginCall(origin.clone(), event)
+    });
+}
+
+fn publish_as(
+    hub: &SessionHub,
+    session_id: &Arc<str>,
+    turn_id: Option<&Arc<str>>,
+    event: AgentEvent,
+    wrap: impl FnOnce(AgentEvent) -> SessionEvent,
+) {
     let ask = ask_of(&event);
     let resolved = match &event {
         AgentEvent::PromptResolved { prompt_id, .. } => {
@@ -104,7 +126,7 @@ pub(in crate::session_pool) fn publish_agent_event(
     let frame = SessionFrame {
         session_id: session_id.clone(),
         turn_id: turn_id.cloned(),
-        event: SessionEvent::Agent(event),
+        event: wrap(event),
     };
     match (ask, resolved) {
         (Some((prompt_id, task_id, kind, host)), _) => {

@@ -56,7 +56,8 @@ pub use plugin::{
     SkillConflict, SkillOrigin, VisibleText,
 };
 pub use plugin_call::{
-    PluginCall, PluginCallError, PluginCallResult, PluginCallTarget, PluginFunctionInfo,
+    PluginCall, PluginCallError, PluginCallOrigin, PluginCallResult, PluginCallTarget,
+    PluginFunctionInfo,
 };
 pub use rerun::{
     ArgDiffView, BlockSelector, RerunDiff, RerunEdits, RerunRequest, RerunResult, StopReasonDiff,

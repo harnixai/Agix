@@ -37,6 +37,9 @@ pub struct SessionFrame {
 pub enum SessionEvent {
     /// What the engine said, unfiltered.
     Agent(AgentEvent),
+    /// What the engine of a call in no session said, and that call. Only
+    /// its hook calls reach anyone: the connections that registered them.
+    FromPluginCall(Arc<super::PluginCallOrigin>, AgentEvent),
     /// A task of the session started, changed, printed or finished
     /// (`SessionState::subscribe_tasks`).
     Task(base::context::TaskEvent),

@@ -5,6 +5,7 @@ pub use ::assembly::rpc::methods::turn::CompactParams;
 pub use ::assembly::session_pool::api::Initiator;
 pub use ::assembly::session_pool::api::PluginCall;
 pub use ::assembly::session_pool::api::PluginCallError;
+pub use ::assembly::session_pool::api::PluginCallOrigin;
 pub use ::assembly::session_pool::api::PluginCallResult;
 pub use ::assembly::session_pool::api::PluginCallTarget;
 pub use ::assembly::session_pool::api::PluginFunctionInfo;
