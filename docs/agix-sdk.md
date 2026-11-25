@@ -847,6 +847,7 @@ engine.shutdown().await;
   - **子 Agent 的预算。** `Scope::Task` 与 `SpendNode::task(limit, session)`；`SessionPool::start_agent` 多第三个参数 `token_budget: Option<u64>`。
   - **插件函数的时限。** `ptc::PluginCallTool::time_limit()` 是宿主调用的上限（600 秒），新增 `default_time()`（120 秒）。
   - **提示词分块。** `settings::PromptAppend` / `AppendBlock`（`agix::contracts::prompt` 导出）；`PromptChange.append` 是 `Option<Option<PromptAppend>>`，`PromptChoice.append` 是 `Option<PromptAppend>`；`AssemblyRequest.prompt_append` 与 `managed_append` 改为拼好的 `&[PromptBlock]`；`BlockOrigin::Host`；`SystemPromptSettings` 删掉 `append` 与 `override_text`。
+  - **重跑录像。** `SessionPool::rerun_call`（即 `session.rerunCall`）；`telemetry::recorder::rerun::rerun_one` 总是返回结果（收到的事件、实际的 provider、错误、时间与差异），新增 `request_in`。
 - **0.4.3**（相对 0.4.2；协议版本 5）
   - **agent 类型的检查。** `base::interface::delegate::Delegator` 多一个有缺省实现的 `check_agent_type(name) -> Result<(), DelegateError>`，包装别的 `Delegator` 的要转发它。
 - **0.4.2**（相对 0.4.1；协议版本 5；详见 `upgrading-0.4.md`「0.4.2」）

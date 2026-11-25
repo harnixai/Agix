@@ -384,6 +384,21 @@ strategy?}`,`trigger` 是 `threshold`、`manual`(`/compact`、`session.compact`)
 - 给字符串的照旧是一块 `config.prompt_append`。分层照旧是上层整体替换下层,不按项合并;managed 层也可以写数组。
 - 脚本贡献的提示块不能再用 `host.` 开头的名字。
 
+### 经 daemon 重跑录像里的一次调用(#108,`session_rerun`)
+
+新方法 `session.rerunCall {session_id, index, generation?, edits?, provider?, model?}`:取会话录像里第 `index` 次调用的请求,
+套上 `edits`(`system: [{index | source, text | null}]` 换或删系统块,`drop_messages: [n]` 删消息;位置都按录下的请求算)
+发给真实 provider,答 `{session_id, index, generation, provider, model, response, diff}`。`response` 同 `session.call`
+的形状;`diff` 分 `text`、`tool_uses`、`stop_reason`、`usage` 报与录下回答的差别。
+
+- 只读录像:不写录像、不改会话、不计入会话的花费;会话不在内存里也能跑。经会话自己的 provider 路由(从 `provider`
+  起,缺省是录下那次的 provider),健康与配额照常记。
+- 一个录像目录只有一代;`generation` 是用来确认录像在这之后没有被重写的,对不上时以 `INVALID_PARAMS` 失败并在
+  `data.generation` 给出现在的值(同 `session.call`)。
+- 没有录像、编辑指不到(越界、重名或不存在的 `source`、`index` 与 `source` 同给或都不给、同一块编辑两次、删光所有消息)、
+  录像里的 provider 已不在设置里且没给 `provider`:`INVALID_PARAMS`,什么都不发。provider 报错时照常返回,
+  `response.status` 为 `"error"`。
+
 ### 嵌入(`agix` crate)
 
 - `AgentEvent` 多 `CompactStarted { turn_id, trigger: CompactCause, tokens_before, strategy }` 与
@@ -396,3 +411,5 @@ strategy?}`,`trigger` 是 `threshold`、`manual`(`/compact`、`session.compact`)
   `Option<Option<PromptAppend>>`,`PromptChoice.append` 是 `Option<PromptAppend>`;自己实现装配器的,
   `AssemblyRequest.prompt_append` 与 `managed_append` 由 `Option<&str>` 改为拼好的 `&[PromptBlock]`;`BlockOrigin` 多
   `Host`(算本地来源)。`SystemPromptSettings` 删掉没人读的 `append` 与 `override_text`。
+- `SessionPool::rerun_call`;`telemetry::recorder::rerun::rerun_one` 总是返回一份结果(收到的事件、实际的 provider、
+  错误、首个事件的时间、时长与差异),中途出错时不再丢掉已收到的事件;新增 `request_in`。
