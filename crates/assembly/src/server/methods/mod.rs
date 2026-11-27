@@ -7,6 +7,7 @@ use crate::session_pool::api::PoolError;
 
 pub(super) mod config;
 pub(super) mod daemon;
+pub(super) mod exec;
 pub(super) mod goal;
 pub(super) mod history;
 pub(super) mod import;

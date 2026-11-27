@@ -148,11 +148,18 @@ const MAY_SPAWN: &[(&str, &str)] = &[
     ),
 ];
 
-const MAY_BUILD_LOCAL_PROCESS: &[(&str, &str)] = &[(
-    "crates/runtime/src/exec.rs",
-    "the session's default providers when the host gives none; everything else, hooks \
-     included, runs on the providers that session ended up with",
-)];
+const MAY_BUILD_LOCAL_PROCESS: &[(&str, &str)] = &[
+    (
+        "crates/runtime/src/exec.rs",
+        "the session's default providers when the host gives none; everything else, hooks \
+         included, runs on the providers that session ended up with",
+    ),
+    (
+        "crates/assembly/src/session_pool/facade/host_exec.rs",
+        "`exec.run`: the embedder's own command, which runs in the embedder's process on \
+         this machine; no session's providers are involved",
+    ),
+];
 
 /// Crates that still start one themselves, each with what takes it away.
 const NOT_YET: &[(&str, &str)] = &[];

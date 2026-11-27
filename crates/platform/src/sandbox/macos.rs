@@ -11,6 +11,10 @@ use super::{
 use base::paths::STATE_ROOT_WORKING_DIRS;
 use std::path::{Path, PathBuf};
 
+/// By its path: the command's own environment reaches the wrapper's spawn,
+/// and a `PATH` there would choose which `sandbox-exec` runs.
+pub(super) const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+
 pub(super) fn mac_wrap(
     inner: ProcessSpec,
     cwd: &Path,
@@ -25,7 +29,7 @@ pub(super) fn mac_wrap(
         &read_scope::UserDirs::of(env),
     );
     let mut unmet = domains_sandbox_exec_cannot_allow(policy);
-    let mut spec = ProcessSpec::new("sandbox-exec", &inner.cwd)
+    let mut spec = ProcessSpec::new(SANDBOX_EXEC, &inner.cwd)
         .arg("-p")
         .arg(profile)
         .arg(inner.program)

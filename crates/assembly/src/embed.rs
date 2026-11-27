@@ -109,6 +109,12 @@ pub struct EmbedConfig {
     /// Keys for the providers whose `api_key_env` names no variable the
     /// process has — for a host that keeps them in a vault or keychain.
     pub credentials: Option<HostCredentials>,
+    /// Offer `exec.run` / `exec.cancel` on the connections
+    /// [`Embedded::serve_stream`] serves: the host's own commands, run in the
+    /// engine's sandbox without a model, a permission prompt or a session.
+    /// Never on [`Embedded::serve_unix`]'s socket, and no settings file
+    /// turns it on. Off by default.
+    pub host_exec: bool,
 }
 
 /// The host's credential source, as [`EmbedConfig::credentials`] holds it.
@@ -142,6 +148,7 @@ impl EmbedConfig {
             plugins: Vec::new(),
             js_libs: Vec::new(),
             credentials: None,
+            host_exec: false,
         }
     }
 
@@ -325,6 +332,9 @@ impl Embedded {
         record_startup(&pool, &startup, config_loaded, pool_built);
 
         let server = Arc::new(DaemonServer::new(pool.clone(), CancellationToken::new()));
+        if config.host_exec {
+            server.enable_host_exec();
+        }
         Ok(Embedded {
             server,
             pool,
@@ -347,7 +357,7 @@ impl Embedded {
         tokio::spawn(self.server.clone().serve_byte_stream(
             Box::new(reader),
             Box::new(writer),
-            false,
+            crate::server::Peer::Embedder,
         ))
     }
 

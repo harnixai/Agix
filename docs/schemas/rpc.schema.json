@@ -2824,6 +2824,123 @@
         }
       ]
     },
+    "ExecCancelParams": {
+      "properties": {
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "ExecCancelled": {
+      "properties": {
+        "cancelled": {
+          "description": "`false`: no call of this connection is running under `run_id`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cancelled"
+      ],
+      "type": "object"
+    },
+    "ExecRunParams": {
+      "additionalProperties": false,
+      "description": "A field this does not know fails the call: a misspelled `deny_read`\nmust not run the command with less held than the host asked for.",
+      "properties": {
+        "allow_unconfined": {
+          "default": false,
+          "description": "Run unconfined when the sandbox cannot hold the command at all.",
+          "type": "boolean"
+        },
+        "argv": {
+          "description": "The program and its arguments; no shell reads them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cwd": {
+          "description": "An absolute path to a directory.",
+          "type": "string"
+        },
+        "deny_read": {
+          "default": [],
+          "description": "Absolute paths kept from being read, on top of the credential list.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Over the minimal environment (`PATH`, `HOME`, `USER`, the locale,\n`TZ`); `TMPDIR` is the call's own. No `LD_*` / `DYLD_*`.",
+          "type": "object"
+        },
+        "max_output_bytes": {
+          "default": null,
+          "description": "Of each stream. Default 1048576, at most 4194304.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "network": {
+          "default": false,
+          "type": "boolean"
+        },
+        "profile": {
+          "$ref": "#/$defs/HostExecProfile",
+          "description": "`read` writes only the call's own `TMPDIR`; `write` also `writable`."
+        },
+        "run_id": {
+          "default": null,
+          "description": "What `exec.cancel` names this call by, on this connection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdin": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "default": null,
+          "description": "Default 60000, at most 1800000.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "writable": {
+          "default": [],
+          "description": "Absolute paths that exist; only with `profile: \"write\"`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "argv",
+        "cwd"
+      ],
+      "type": "object"
+    },
     "ExportParams": {
       "properties": {
         "format": {
@@ -3526,6 +3643,94 @@
           "type": "object"
         }
       ]
+    },
+    "HostExecEnforcement": {
+      "description": "How much of the policy held the command.",
+      "enum": [
+        "full",
+        "partial",
+        "none"
+      ],
+      "type": "string"
+    },
+    "HostExecProfile": {
+      "description": "What a host command may write besides its own temporary directory.",
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "Nothing but the call's temporary directory.",
+          "type": "string"
+        },
+        {
+          "const": "write",
+          "description": "Also the request's `writable`.",
+          "type": "string"
+        }
+      ]
+    },
+    "HostExecResult": {
+      "properties": {
+        "cancelled": {
+          "description": "Stopped by `exec.cancel` or the connection closing.",
+          "type": "boolean"
+        },
+        "code": {
+          "description": "`None` when a signal ended it.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "enforcement": {
+          "$ref": "#/$defs/HostExecEnforcement"
+        },
+        "ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "signal": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stderr": {
+          "type": "string"
+        },
+        "stdout": {
+          "description": "Lossy UTF-8.",
+          "type": "string"
+        },
+        "timed_out": {
+          "description": "Stopped, with its process group, at the time limit.",
+          "type": "boolean"
+        },
+        "truncated": {
+          "description": "Either stream went past `max_output_bytes`; the rest was dropped.",
+          "type": "boolean"
+        },
+        "unmet": {
+          "description": "What of the policy did not hold, one line each; empty under `full`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "stdout",
+        "stderr",
+        "truncated",
+        "timed_out",
+        "cancelled",
+        "ms",
+        "enforcement",
+        "unmet"
+      ],
+      "type": "object"
     },
     "HostHookSet": {
       "properties": {
@@ -10742,6 +10947,10 @@
     {
       "code": -32029,
       "name": "MCP_SERVER_UNAVAILABLE"
+    },
+    {
+      "code": -32030,
+      "name": "EXEC_REFUSED"
     }
   ],
   "frames": {
@@ -10894,6 +11103,22 @@
       },
       "result": {
         "$ref": "#/$defs/EventsSubscribed"
+      }
+    },
+    "exec.cancel": {
+      "params": {
+        "$ref": "#/$defs/ExecCancelParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ExecCancelled"
+      }
+    },
+    "exec.run": {
+      "params": {
+        "$ref": "#/$defs/ExecRunParams"
+      },
+      "result": {
+        "$ref": "#/$defs/HostExecResult"
       }
     },
     "import.list": {

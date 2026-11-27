@@ -5,6 +5,7 @@
 //! `base` defines the contracts and never names this crate; whatever runs
 //! tools on a real machine depends on both.
 
+mod bounded;
 pub mod crash;
 pub mod env;
 pub mod filesystem;
@@ -19,6 +20,7 @@ pub mod sandbox;
 #[cfg(all(unix, feature = "testing"))]
 pub mod testing;
 
+pub use bounded::{capture_bounded, drain_bounded, BoundedCapture};
 pub use env::apply_subprocess_env;
 pub use filesystem::LocalFileSystem;
 #[cfg(feature = "http")]

@@ -116,6 +116,23 @@ fn sh_quoted(path: &Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', r"'\''"))
 }
 
+/// `bwrap` as this process's own `PATH` finds it, by its path: the command's
+/// environment reaches the wrapper's spawn, and a `PATH` there would choose
+/// which `bwrap` runs.
+pub(in crate::sandbox) fn bwrap_program() -> &'static str {
+    static PROGRAM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PROGRAM.get_or_init(|| {
+        std::env::var_os("PATH")
+            .and_then(|path| {
+                std::env::split_paths(&path)
+                    .map(|dir| dir.join("bwrap"))
+                    .find(|p| p.is_absolute() && p.is_file())
+            })
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "bwrap".to_string())
+    })
+}
+
 /// The absolute path of a core utility `name`, looked up in the system
 /// directories rather than `PATH` (which a command could have planted a
 /// writable entry on). Falls back to the bare name where none is found, so a

@@ -305,6 +305,10 @@ const CONFINES: &[(&str, &str)] = &[
         "the engine's own git and helpers",
     ),
     (
+        "crates/assembly/src/session_pool/facade/host_exec.rs::SessionPool::host_exec",
+        "`exec.run`: the embedder's own command, under the policy its request names",
+    ),
+    (
         "crates/core/src/interface/exec/sandbox.rs::ConfinementReport::probe",
         "what the session's sandbox holds a command to, found once",
     ),

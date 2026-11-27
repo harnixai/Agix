@@ -3,6 +3,7 @@
 
 pub mod config;
 pub mod daemon;
+pub mod exec;
 pub mod goal;
 pub mod history;
 pub mod import;

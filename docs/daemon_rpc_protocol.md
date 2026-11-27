@@ -892,6 +892,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `runext` | 这个构建带插件命令:包的 `[[command]]` 经 `RunExt` 与 `/name args` 跑,`plugin.list` 带 `commands` / `command_conflicts`,`commands.list` 有 `kind:"ext"`,任务有 `kind:"ext"`(`docs/runext.md`) |
 | `runext_subcall_prompt` | 有人值守的会话里,模型或用户跑的插件命令的子调用要问时照常发 `permission` 提问,帧上带 `origin`(`docs/runext.md` §6);没有这一位的引擎上这类子调用直接失败 |
 | `plugin_functions` | 有 `plugin.functions` / `plugin.call` / `plugin.cancel`:宿主按名字调包的 `[[function]]`,拿回结构化结果(§6.5、`docs/runext.md` §12) |
+| `host_exec` | 有 `exec.run` / `exec.cancel`:宿主自己的命令在引擎的沙箱里跑,不经模型、不问权限、不进会话(§6.9)。**只在嵌入方经 `Embedded::serve_stream` 交来的连接上、且装配时打开了 `EmbedConfig.host_exec` 才报**;别的连接上没有这一项,也没有这两个方法 |
 | `plugin_call_hooks` | 不带会话的 `plugin.call` 也问连接登记的 hook:`hook_call` 帧发给登记者,`session_id` 是这次调用的临时会话,帧带 `plugin_call:{function,run_id?}`,用 `session.respondHook` 回答(§6.1 `daemon.setHooks`、§6.5 `plugin.call`、§7.6) |
 
 #### `daemon.status`
@@ -4553,6 +4554,91 @@ job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次�
 写完之后这个项目的会话在下一轮之前按新的信任状态重建,它的 MCP 连接重连,并发一条
 `project_trust_changed`(§8)。
 
+### 6.9 `exec.*`
+
+嵌入方自己要跑的命令(门禁里的单测与 lint、读 `git log` 出报告、体检)放进引擎的沙箱里跑:与
+`Bash` 同一套沙箱策略,但**不经模型、不问权限、不进任何会话**——跑什么由宿主拿主意,会话的
+allow / ask 规则与权限模式不看它。
+
+**只给嵌入方。** 这两个方法只在 `Embedded::serve_stream` 交来的连接上有,而且要嵌入方在装配时
+设 `EmbedConfig.host_exec = true`(缺省 `false`,`docs/agix-sdk.md` §10);unix socket、TCP、
+WebSocket 上的连接,以及没打开它的嵌入方的连接,调它们(参数怎么写都一样)得到 `METHOD_NOT_FOUND`,`daemon.ping` /
+`daemon.status` 的 `capabilities` 里也没有 `host_exec`。它不是设置键:`agixd --set`、
+`EmbedConfig.settings` 与任何设置文件都打不开它。
+
+#### `exec.run`
+
+```jsonc
+// → params
+{ "argv": ["git", "log", "--numstat", "--format=%H%x1f%an%x1f%at%x1f%s"],  // 程序与参数,不经 shell
+  "cwd": "/abs/repo",              // 绝对路径,必须是目录
+  "profile": "read",               // read(缺省):只写得了这次调用自己的 TMPDIR;write:另加 writable
+  "writable": [],                  // 只在 profile 为 write 时给;绝对路径,必须存在(见下)
+  "network": false,                // 缺省 false
+  "env": { "LC_ALL": "C" },        // 叠在最小环境上;不收会作用到沙箱包装程序本身的变量(见下)
+  "deny_read": ["/abs/repo/.wkts/other"],  // 可选,追加在凭据拒读名单之后;绝对路径
+  "stdin": null,                   // 可选,字符串
+  "timeout_ms": 60000,             // 缺省 60000,至多 1800000
+  "max_output_bytes": 1048576,     // stdout、stderr 各自的上限;缺省 1048576,至多 4194304
+  "allow_unconfined": false,       // 沙箱完全兜不住时是否照样跑(缺省拒绝)
+  "run_id": "gate-3" }             // 可选:exec.cancel 用它指这次调用,同一连接内唯一
+// ← result
+{ "code": 0, "signal": null,
+  "stdout": "…", "stderr": "",     // 有损 UTF-8
+  "truncated": false,              // 有一路超过 max_output_bytes,超出的读掉丢弃
+  "timed_out": false,              // 到时限,连同进程组一起停了
+  "cancelled": false,              // exec.cancel 或连接断开
+  "ms": 120,
+  "enforcement": "full",           // full | partial | none:这次实际做到了几成
+  "unmet": [] }                    // 没做到的部分,一条一行;full 时为空
+```
+
+参数里有不认识的字段时整个请求以 `INVALID_PARAMS` 失败:拼错的 `deny_read` 不能让命令少受约束。
+
+**策略。**
+
+| | 怎么定 |
+|---|---|
+| 读 | 什么都读得到,除了内建的凭据名单(`~/.ssh`、`~/.aws`、`~/.npmrc`……)、各层设置的 `sandbox.deny_read`(含 managed)、managed 层 `Read(...)` deny 规则点名的路径与请求的 `deny_read`。**任何一层的 `sandbox.allow_read` 都不读**:项目或用户的设置放不开宿主命令的拒读 |
+| 写 | `read`:只有这次调用自己的临时目录(在状态根下,0700,`TMPDIR` 指着它,调用结束删掉)与 `/dev`;`cwd` 也不可写。`write`:另加 `writable`。`cwd` 里 `.git` 的控制文件与钩子、引擎的配置与状态目录照样不可写,宿主的 skill 与包目录在哪里都不可写,同 `Bash`。这份保护是按 `cwd` 算的,所以 `writable` 的每一项要么在 `cwd` 里,要么在 `cwd` 之外且它本身不是项目(根上没有 `.git` 与引擎的配置目录);装着 `cwd` 的目录、别的项目的根 → `INVALID_PARAMS`,要写它就把它设为 `cwd` |
+| 网络 | `false`:断网(macOS 上连名字解析一起)。`true`:不限;managed 层定了 `sandbox.network` 时按它的来 |
+| 环境 | 不继承宿主进程的环境,只有 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、`LC_*`、`TZ`,加 `env` 给的,`TMPDIR` 是这次调用的。`env` 也落在沙箱的包装程序上(Linux 上外层是一个 shell),所以动态链接器的 `LD_*` / `DYLD_*` 与 shell 自己读的 `BASH_FUNC_*`、`BASH_ENV`、`ENV`、`IFS`、`SHELLOPTS`、`BASHOPTS` → `INVALID_PARAMS`;包装程序(`sandbox-exec`、外层 `sh`、`bwrap`)按绝对路径启动,`env` 里的 `PATH` 只决定沙箱里找哪个程序 |
+| 其余 | 与无人值守的 `Bash` 一样拒绝经别的进程代办的路(macOS 的 Apple events、LaunchServices、`cfprefsd`;Linux 的宿主 IPC 命名空间与会话总线),连不上本进程在服务的 unix socket 与(macOS 上)端口 |
+
+`sandbox.enabled: false` 不影响它:宿主要进沙箱,就进沙箱。
+
+**沙箱兜不住时。** `enforcement` 照实报这次做到了几成。`none`(Linux 上没有 `bwrap`、平台没有
+后端、构建没编进 `sandbox`)时不跑,答 `EXEC_REFUSED`,`message` 说缺了什么;请求带
+`allow_unconfined: true` 才在沙箱外跑,结果的 `enforcement` 为 `none`——除非 managed 层把
+`sandbox.require` 设为 `true`,这时 `allow_unconfined` 不起作用。`partial`(后端做不到策略的一部分,
+如 Linux 只挡得住启动时已存在的 `deny_write` 路径)照跑,`unmet` 列出差在哪,由宿主判断。
+
+**managed 层。** 照样生效:它读不了时什么都不跑;它的 `deny` 规则里 `Bash(...)` 那些拿 argv 按
+shell 引用规则拼成的命令行去匹配,命中就 `EXEC_REFUSED`(`Bash(curl:*)` 挡得住
+`["/usr/bin/curl", …]`),`Read(...)` 那些点名的路径读不到(装着 `cwd`、可写根或系统程序目录的
+除外,同 `Bash`)。它的 `allow` / `ask` 规则、用户与项目的规则都不看。
+
+**时限、取消、输出。** 时限从进程起来算到它退出:到 `timeout_ms` 时整个进程组先 `SIGTERM`、再
+`SIGKILL`,结果带 `timed_out: true`;`exec.cancel`、连接断开或引擎关停同样停掉它,带
+`cancelled: true`。进程退出后它留在后台、还握着输出管道的子进程最多再读 1 秒,然后连同进程组一起
+停掉。自己 `setsid` 出了进程组的后代不在其列:Linux 上它们在沙箱的 PID 命名空间里随之结束,macOS
+上没有这一层,它们仍在沙箱里,但会活过这次调用(`Bash` 一样)。进程组记进嵌入方的 `groups_file`,
+宿主崩了之后下一次启动会把它们收掉。`run_id` 与同一连接上 `plugin.call`、`mcp.callTool` 的共用
+一个名字空间。程序起不来(不在 `PATH`
+上)时在沙箱里是沙箱包装程序的非零退出码与它的 stderr,在沙箱外是 `INVALID_PARAMS`;起来之后读它
+的输出失败是 `INTERNAL_ERROR`。其余参数不成立(`argv` 为空、
+`cwd` 不是绝对路径的目录、`profile` 为 `read` 却给了 `writable`、`writable` 不存在、`timeout_ms`
+或 `max_output_bytes` 为 0 或超上限)→ `INVALID_PARAMS`,什么都没跑。
+
+#### `exec.cancel`
+
+```jsonc
+// → params
+{ "run_id": "gate-3" }
+// ← result
+{ "cancelled": true }    // false:这条连接上没有以它为名在跑的调用
+```
+
 ---
 
 ## 7. 流式帧:`session.event`
@@ -5011,6 +5097,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32027 | MODELS_UNSUPPORTED | `config.listModels`:provider 的端点不列模型(回 404 / 405 / 501,或回的不是模型列表),或它的 `api` 没有引擎知道的列法(§6.4) |
 | -32028 | SETTINGS_CONFLICT | `config.set` 带 `if_revision`:这一层在那之后被改过,什么都没写;`data.revision` 是现在的 revision(§6.4、§9.1) |
 | -32029 | MCP_SERVER_UNAVAILABLE | `mcp.callTool`:server 现在调不了——项目未受信、被关掉、被策略拒绝、等登录、没连上或还在连,什么都没调;`data` 为 `{server, state, error?}`(§6.5、§9.1) |
+| -32030 | EXEC_REFUSED | `exec.run`:命令没有起——沙箱在这里兜不住它而请求没带 `allow_unconfined`(或 managed 层的 `sandbox.require` 为真),managed 层的 `deny` 规则点了它,或 managed 层读不了(§6.9) |
 
 `PARSE_ERROR (-32700)` 只在一行不是合法 JSON 时回,`id` 为 `null`。`-32001` 保留不用:会话数到顶时驱逐最久未用的空闲会话,不拒绝新建。
 

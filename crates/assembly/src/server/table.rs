@@ -131,13 +131,20 @@ macro_rules! namespaces {
 
 namespaces!(
     daemon, config, project, import, scene, mcp, plugin, schedule, session, history, goal, turn,
-    tasks,
+    tasks, exec,
 );
 
 impl DaemonServer {
     pub(super) async fn dispatch(&self, req: RpcRequest, client: Arc<Client>) -> RpcResponse {
         let id = req.id.unwrap_or(Value::Null);
-        let Some(info) = methods().find(|m| m.name == req.method) else {
+        let offered = |m: &&MethodInfo| {
+            m.name == req.method
+                && (self.host_exec_for(&client)
+                    || !super::methods::exec::METHODS
+                        .iter()
+                        .any(|e| e.name == m.name))
+        };
+        let Some(info) = methods().find(offered) else {
             return RpcResponse::err(
                 id,
                 codes::METHOD_NOT_FOUND,

@@ -721,6 +721,7 @@ engine.shutdown().await;
 | `plugins` | 无（agixd 不带宿主包） | 空：宿主自带的插件包目录，即 `Assembly::host_plugins`（§2）；有一个加载不了 `start` 返回 `EmbedError::Startup` |
 | `js_libs` | 无（agixd 不带宿主库） | 空：给插件代码的宿主 JS 库，即 `Assembly::js_libs`；不合规时 `start` 返回 `EmbedError::InvalidHostLibrary`（见「宿主 JS 库」） |
 | `credentials` | 无（agixd 只读环境变量） | `None`：给 `api_key_env` 指名的变量在环境里没有的 provider 提供密钥的来源，即 `Assembly::credentials`（`agix::embed::HostCredentials`，包一个 `Arc<dyn CredentialSource>`）；环境里有的变量照用，没有的才问它，宿主可以把密钥放在密钥库或钥匙串里 |
+| `host_exec` | 无（agixd 不提供） | `false`：`true` 时 `serve_stream` 交来的连接上有 `exec.run` / `exec.cancel`，宿主自己的命令在引擎的沙箱里跑，不经模型、不问权限、不进会话（协议 §6.9）；`serve_unix` 的 socket 上永远没有，设置文件也打不开它 |
 
 数据根、套接字和两个策略文件只从这里来，不看本进程的 `AGIX_CONFIG_HOME` 或 `HOME`，所以一个进程里起两个不同 `data_root` 的 `Embedded`，会话互不可见。凭据照旧：`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`，以及设置里 `providers` 的 `api_key_env` 指名的环境变量，或 `credentials` 给的密钥来源。一个也没有时照样起来，记一条 warn；走缺省 provider 的模型调用不发请求，那一轮以 `no_credentials` 失败（agixd 同样）。
 
@@ -846,6 +847,9 @@ engine.shutdown().await;
 
 守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
 
+- **0.4.5**（相对 0.4.4；协议版本 5）
+  - **嵌入方的沙箱执行（#112）。** 新增 `EmbedConfig.host_exec: bool`（缺省 `false`）；打开后 `serve_stream` 的连接上有 `exec.run` / `exec.cancel` 与能力位 `host_exec`（协议 §6.9、错误码 `EXEC_REFUSED`）。库式用法：`SessionPool::host_exec(HostExec, CancellationToken) -> Result<HostExecResult, PoolError>`，`PoolError::ExecRefused`。`base::interface::exec::ExitStatus` 多公有字段 `signal: Option<i32>`，按字段构造的要补；新增 `platform::{capture_bounded, drain_bounded, BoundedCapture}`。
+  - **沙箱包装程序按绝对路径启动。** `Bash`、监视器、引擎自己的 git 与 `exec.run` 一样：macOS 是 `/usr/bin/sandbox-exec`，Linux 的外层 `sh` 取系统目录里的那个、`bwrap` 取本进程 `PATH` 上找到的绝对路径，命令自己的环境里的 `PATH` 不再决定跑哪个包装程序；比对 `Confined::spec.program` 的要改。
 - **0.4.4**（相对 0.4.3；协议版本 5；详见 `upgrading-0.4.md`「0.4.4」）
   - **事件。** `AgentEvent` 多 `CompactStarted { turn_id, trigger: CompactCause, tokens_before, strategy }` 与 `CompactEnded { turn_id, outcome: CompactOutcome, reason }`（压缩的首尾两帧）；`PermissionPrompt`、`QuestionPrompt`、`McpElicitationPrompt` 多 `agent_session_id: Option<String>`。对它们穷举或按字段构造的要补。
   - **子 Agent 的预算。** `Scope::Task` 与 `SpendNode::task(limit, session)`；`SessionPool::start_agent` 多第三个参数 `token_budget: Option<u64>`。`DelegateEnd::CutShort` 多第二个字段 `Option<String>`（那一轮的停止原因），即 `CutShort(&'static str, Option<String>)`。

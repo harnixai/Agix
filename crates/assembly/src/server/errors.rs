@@ -57,6 +57,7 @@ impl From<PoolError> for RpcError {
             PoolError::RewindFailed(failure) => (codes::REWIND_FAILED, Some(json!(failure))),
             PoolError::SessionExists { .. } => (codes::SESSION_EXISTS, exists_data(&e)),
             PoolError::SettingsLocked(_) => (codes::SETTINGS_LOCKED, None),
+            PoolError::ExecRefused(_) => (codes::EXEC_REFUSED, None),
             PoolError::SettingsConflict { .. } | PoolError::SettingsRejected { .. } => {
                 settings_write_error(&e)
             }

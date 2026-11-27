@@ -693,6 +693,15 @@ const NOT_COMPARED: &[(&str, &str)] = &[
          cancels one",
     ),
     (
+        "exec.run",
+        "only on a connection the embedder hands over; tests/blackbox/tests/embed_host_exec.rs \
+         runs commands through one and checks the fields",
+    ),
+    (
+        "exec.cancel",
+        "the same as exec.run; tests/blackbox/tests/embed_host_exec.rs cancels a running call",
+    ),
+    (
         "mcp.callTool",
         "needs a connected MCP server to call; tests/blackbox/tests/mcp_calls.rs calls the toy \
          server and checks both result shapes",

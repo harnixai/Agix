@@ -129,6 +129,10 @@ error_codes! {
     /// trusted, turned off, denied, waiting for a sign-in, failed or still
     /// connecting. Nothing was called; `data` is `{server, state, error?}`.
     McpServerUnavailable = -32029, MCP_SERVER_UNAVAILABLE;
+    /// `exec.run`: the command was not started — the sandbox cannot hold it
+    /// and `allow_unconfined` is not given (or the managed layer requires the
+    /// sandbox), or a managed `deny` rule names it.
+    ExecRefused = -32030, EXEC_REFUSED;
 }
 
 #[cfg(test)]

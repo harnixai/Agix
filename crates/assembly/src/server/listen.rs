@@ -128,10 +128,11 @@ impl DaemonServer {
         {
             debug!(peer=%peer);
             let (r, w) = stream.into_split();
-            tokio::spawn(
-                self.clone()
-                    .serve_byte_stream(Box::new(r), Box::new(w), true),
-            );
+            tokio::spawn(self.clone().serve_byte_stream(
+                Box::new(r),
+                Box::new(w),
+                Peer::Accepted { needs_auth: true },
+            ));
         }
         Ok(())
     }
@@ -223,7 +224,7 @@ impl DaemonServer {
                     .unix_socket_auth
                     .load(std::sync::atomic::Ordering::SeqCst);
                 let (r, w) = stream.into_split();
-                this.serve_byte_stream(Box::new(r), Box::new(w), needs_auth)
+                this.serve_byte_stream(Box::new(r), Box::new(w), Peer::Accepted { needs_auth })
                     .await;
             });
         }
@@ -237,11 +238,11 @@ impl DaemonServer {
         self: Arc<Self>,
         reader: Reader,
         writer: Box<dyn AsyncWrite + Send + Unpin + 'static>,
-        needs_auth: bool,
+        peer: Peer,
     ) {
         let writer: ByteWriter = Arc::new(AsyncMutex::new(writer));
         let sink: Sink = Arc::new(LineSink(writer));
-        if let Err(e) = self.handle_connection(reader, sink, needs_auth).await {
+        if let Err(e) = self.handle_connection(reader, sink, peer).await {
             warn!(error=%e);
         }
     }

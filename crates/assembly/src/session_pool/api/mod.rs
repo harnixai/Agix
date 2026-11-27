@@ -8,6 +8,7 @@ mod error;
 mod events;
 mod history;
 mod host_connections;
+mod host_exec;
 mod mcp;
 mod mcp_call;
 mod options;
@@ -40,6 +41,10 @@ pub use history::{
 };
 pub use host_connections::{
     HookAnswer, HooksSet, HostHookOnError, HostHookOption, HostHookSet, HostToolsSet, RefusedEntry,
+};
+pub use host_exec::{
+    HostExec, HostExecEnforcement, HostExecProfile, HostExecResult, HOST_EXEC_DEFAULT_OUTPUT,
+    HOST_EXEC_DEFAULT_TIME, HOST_EXEC_OUTPUT_LIMIT, HOST_EXEC_TIME_LIMIT,
 };
 pub use mcp::{
     McpAuthDone, McpAuthStarted, McpAuthState, McpAuthStatus, McpIdentity, McpReconnected,

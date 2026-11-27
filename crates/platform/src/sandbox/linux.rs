@@ -22,7 +22,9 @@ mod stdio;
 mod worktrees;
 
 use stdio::BWRAP_STDIO_INSIDE;
-pub(super) use stdio::{bwrap_stdio_outside, find_trusted_bin, trusted_bin, Cleanup};
+pub(super) use stdio::{
+    bwrap_program, bwrap_stdio_outside, find_trusted_bin, trusted_bin, Cleanup,
+};
 
 pub(super) fn bind(args: &mut Vec<String>, how: &str, path: &Path) {
     let p = path.display().to_string();
@@ -612,7 +614,7 @@ pub(super) fn linux_wrap(
             made,
         }),
         "sh".into(),
-        "bwrap".into(),
+        bwrap_program().to_string(),
     ];
     Confined {
         enforcement: if unmet.is_empty() {
@@ -623,7 +625,7 @@ pub(super) fn linux_wrap(
         unmet,
         spec: ProcessSpec {
             env,
-            ..ProcessSpec::new("sh", &inner.cwd).args(outside.into_iter().chain(args))
+            ..ProcessSpec::new(trusted_bin("sh"), &inner.cwd).args(outside.into_iter().chain(args))
         },
         mode: SandboxMode::LinuxBwrap,
     }
@@ -837,10 +839,9 @@ fn network_args(args: &mut Vec<String>, policy: &SandboxPolicy) -> Option<egress
 }
 
 pub(super) fn bwrap_available() -> bool {
-    // 一次性探测；用 sync std::process::Command 走 PATH lookup
     static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *AVAILABLE.get_or_init(|| {
-        std::process::Command::new("bwrap")
+        std::process::Command::new(bwrap_program())
             .arg("--version")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

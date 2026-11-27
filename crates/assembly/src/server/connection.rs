@@ -19,10 +19,16 @@ impl DaemonServer {
         self: Arc<Self>,
         reader: Reader,
         sink: Sink,
-        needs_auth: bool,
+        peer: Peer,
     ) -> anyhow::Result<()> {
         let mut lines = FrameReader::new(reader);
-        let client = self.accept_connection(sink);
+        let (client, needs_auth) = match peer {
+            Peer::Accepted { needs_auth } => (self.accept_connection(sink), needs_auth),
+            Peer::Embedder => (
+                Arc::new(Client::embedder(self.next_connection_id(), sink)),
+                false,
+            ),
+        };
         let in_flight = Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT_PER_CONNECTION));
 
         // The handshake stays serial on purpose: nothing may be dispatched

@@ -148,6 +148,7 @@ impl ProcessHandle for ScriptedHandle {
         Box::pin(async move {
             Ok(ExitStatus {
                 code: Some(code),
+                signal: None,
                 success: code == 0,
             })
         })

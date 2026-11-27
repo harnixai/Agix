@@ -4,7 +4,7 @@ use super::*;
 #[test]
 fn macos_wraps_with_sandbox_exec_and_profile_includes_cwd() {
     let cmd = wrap(opts("ls", Path::new("/tmp/work")));
-    assert_eq!(cmd.spec.program, "sandbox-exec");
+    assert_eq!(cmd.spec.program, "/usr/bin/sandbox-exec");
     assert_eq!(cmd.spec.args[0], "-p");
     assert!(cmd.spec.args[1].contains("(deny file-write*)"));
     assert!(cmd.spec.args[1].contains("(subpath \"/private/tmp/work\")"));

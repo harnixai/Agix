@@ -18,17 +18,17 @@ rpc_methods! {
     "commands.list" => commands_list(CommandsListParams) -> CommandList;
 }
 
-async fn status(s: &DaemonServer, _: &Call, _: NoParams) -> Result<DaemonStatus, PoolError> {
+async fn status(s: &DaemonServer, cx: &Call, _: NoParams) -> Result<DaemonStatus, PoolError> {
     Ok(DaemonStatus {
-        identity: crate::discovery::identity(),
+        identity: s.identity_for(&cx.client),
         uptime_secs: s.started_at.elapsed().as_secs(),
         sessions: s.pool.active_count().await,
     })
 }
 
-async fn ping(_: &DaemonServer, _: &Call, _: NoParams) -> Result<Pong, PoolError> {
+async fn ping(s: &DaemonServer, cx: &Call, _: NoParams) -> Result<Pong, PoolError> {
     Ok(Pong {
-        identity: crate::discovery::identity(),
+        identity: s.identity_for(&cx.client),
         pong: true,
     })
 }

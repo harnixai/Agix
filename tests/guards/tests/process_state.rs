@@ -50,6 +50,7 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/platform/src/network.rs", "DIRECT", SharedCache, "an HTTP client with no per-pool configuration"),
     ("crates/platform/src/network.rs", "PUBLIC_ONLY", SharedCache, "an HTTP client whose resolver refuses internal addresses; the only thing it reads is the process environment's proxy"),
     ("crates/platform/src/sandbox/linux.rs", "AVAILABLE", Constant, "whether this machine can sandbox at all"),
+    ("crates/platform/src/sandbox/linux/stdio.rs", "PROGRAM", Constant, "where this process's own PATH finds bwrap, fixed at first use so no command can move it"),
     ("crates/platform/src/sandbox/fence.rs", "SERVED", OsResource, "the sockets and ports this process serves clients on, which no sandboxed child of any pool may reach, and the token files it writes for them, which none may read"),
     ("crates/core/src/interface/exec/env.rs", "NAMED_CREDENTIALS", ProcessEnv, "variables holding a provider key, kept out of every child's environment: the environment children inherit is the process's, which every pool shares"),
     ("crates/platform/src/orphans.rs", "ORPHANS", OsResource, "the process groups this process leads: an OS resource of the process, which an aborting panic hook must reach in full"),

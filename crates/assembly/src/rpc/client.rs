@@ -62,6 +62,7 @@ pub struct Client {
     daemon_events: std::sync::atomic::AtomicBool,
     gone: tokio_util::sync::CancellationToken,
     runs: std::sync::Mutex<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    embedder: bool,
 }
 
 /// A request of this connection that `run_id` names until it is dropped.
@@ -144,7 +145,21 @@ impl Client {
             daemon_events: std::sync::atomic::AtomicBool::new(false),
             gone: tokio_util::sync::CancellationToken::new(),
             runs: Default::default(),
+            embedder: false,
         }
+    }
+
+    /// [`Self::new`] for a connection the embedder handed over itself
+    /// (`Embedded::serve_stream`), rather than one a listener accepted.
+    pub(crate) fn embedder(id: ConnectionId, sink: Sink) -> Self {
+        Self {
+            embedder: true,
+            ..Self::new(id, sink)
+        }
+    }
+
+    pub fn is_embedder(&self) -> bool {
+        self.embedder
     }
 
     /// Name a request of this connection `run_id`, so [`Self::cancel_run`]

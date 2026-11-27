@@ -99,6 +99,10 @@ pub enum PoolError {
         session_id: String,
         existing: Option<super::ExistingSession>,
     },
+    /// `exec.run`: the command was not started — the sandbox cannot hold it
+    /// and the request does not allow that, or the managed layer refuses it.
+    #[error("{0}")]
+    ExecRefused(String),
     /// A settings directory another process held for as long as the engine
     /// waits; nothing was written.
     #[error("{0}")]

@@ -89,6 +89,16 @@ pub struct DaemonServer {
     shutdown_token: CancellationToken,
     tcp_token: tokio::sync::RwLock<Option<String>>,
     unix_socket_auth: std::sync::atomic::AtomicBool,
+    host_exec: std::sync::atomic::AtomicBool,
+}
+
+/// Who is on the other end of a byte stream.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Peer {
+    /// Accepted on a listener; `needs_auth` before anything else.
+    Accepted { needs_auth: bool },
+    /// Handed over by the embedder.
+    Embedder,
 }
 
 impl DaemonServer {
@@ -100,17 +110,46 @@ impl DaemonServer {
             shutdown_token,
             tcp_token: tokio::sync::RwLock::new(None),
             unix_socket_auth: std::sync::atomic::AtomicBool::new(false),
+            host_exec: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
     /// Wrap a freshly accepted connection: a new id, and the queue in front
     /// of its sink. Public so a transport in another module can mint one.
     pub fn accept_connection(&self, sink: Sink) -> Arc<Client> {
-        let id = crate::rpc::ConnectionId(
+        Arc::new(Client::new(self.next_connection_id(), sink))
+    }
+
+    fn next_connection_id(&self) -> crate::rpc::ConnectionId {
+        crate::rpc::ConnectionId(
             self.next_connection
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        );
-        Arc::new(Client::new(id, sink))
+        )
+    }
+
+    /// Offer `exec.*` on the connections the embedder hands over.
+    pub(crate) fn enable_host_exec(&self) {
+        self.host_exec
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// `exec.*` is offered to `client`.
+    pub(crate) fn host_exec_for(&self, client: &Client) -> bool {
+        client.is_embedder() && self.host_exec.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// What `daemon.ping` / `daemon.status` report to `client`: the
+    /// daemon's identity, with the capabilities only its connection has.
+    pub(crate) fn identity_for(&self, client: &Client) -> crate::discovery::DaemonIdentity {
+        let mut identity = crate::discovery::identity();
+        if self.host_exec_for(client) {
+            identity.capabilities.extend(
+                crate::discovery::EMBEDDER_CAPABILITIES
+                    .iter()
+                    .map(|c| c.to_string()),
+            );
+        }
+        identity
     }
 
     pub async fn set_tcp_token(&self, token: String) {

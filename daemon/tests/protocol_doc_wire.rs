@@ -459,6 +459,12 @@ fn documented_requests(doc: &str) -> Vec<RequestExample> {
 /// Keyed by the method and the example's position among that method's.
 const NOT_SENT: &[(&str, &str)] = &[
     (
+        "exec.run#0",
+        "only on a connection the embedder hands over; tests/blackbox/tests/embed_host_exec.rs \
+         sends it over one",
+    ),
+    ("exec.cancel#0", "the same as exec.run#0"),
+    (
         "mcp.auth.complete#0",
         "needs a sign-in in progress, and only a real authorization server starts one",
     ),

@@ -277,6 +277,10 @@ pub const CAPABILITIES: &[&str] = &[
     "prompt_append_blocks",
 ];
 
+/// Reported only on a connection the embedder handed over, when it opened
+/// them: `host_exec` is `exec.*` (`EmbedConfig::host_exec`).
+pub const EMBEDDER_CAPABILITIES: &[&str] = &["host_exec"];
+
 /// [`CAPABILITIES`], plus those of the modules this build carries.
 pub fn capabilities() -> Vec<&'static str> {
     let mut out = CAPABILITIES.to_vec();

@@ -81,6 +81,8 @@ pub struct OutputChunk {
 pub struct ExitStatus {
     /// `None` when the process was killed by a signal.
     pub code: Option<i32>,
+    /// The signal that killed it, where the provider can tell.
+    pub signal: Option<i32>,
     pub success: bool,
 }
 

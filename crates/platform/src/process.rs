@@ -343,8 +343,13 @@ impl ProcessHandle for LocalHandle {
             if self.group.is_some_and(|group| !group_alive(group)) {
                 self.cancel_watch = None;
             }
+            #[cfg(unix)]
+            let signal = std::os::unix::process::ExitStatusExt::signal(&s);
+            #[cfg(not(unix))]
+            let signal = None;
             Ok(ExitStatus {
                 code: s.code(),
+                signal,
                 success: s.success(),
             })
         })
@@ -638,5 +643,33 @@ mod tests {
             unsafe { libc::kill(pid, libc::SIGKILL) };
         }
         assert!(stopped, "the background sleep outlived the cancellation");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_process_killed_by_a_signal_reports_it() {
+        let (_, _, status) = run(sh("kill -TERM $$")).await;
+        assert_eq!(status.code, None);
+        assert_eq!(status.signal, Some(libc::SIGTERM));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_bounded_capture_ends_with_the_process_and_stops_what_it_left_running() {
+        let out = crate::capture_bounded(
+            &LocalProcess::default(),
+            sh("sleep 300 & echo $!"),
+            CancellationToken::new(),
+            1024,
+        )
+        .await
+        .unwrap();
+        assert!(out.status.success);
+        let pid: libc::pid_t = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+        let stopped = gone_within(pid, std::time::Duration::from_secs(3)).await;
+        if !stopped {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+        assert!(stopped, "the background sleep outlived the capture");
     }
 }

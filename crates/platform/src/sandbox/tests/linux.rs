@@ -6,8 +6,8 @@ fn linux_wrap_either_uses_bwrap_or_falls_back() {
     let cmd = wrap(opts("ls", Path::new("/tmp/work")));
     match cmd.mode {
         SandboxMode::LinuxBwrap => {
-            assert_eq!(cmd.spec.program, "sh");
-            assert_eq!(cmd.spec.args[3], "bwrap");
+            assert_eq!(Path::new(&cmd.spec.program).file_name().unwrap(), "sh");
+            assert_eq!(Path::new(&cmd.spec.args[3]).file_name().unwrap(), "bwrap");
             assert!(cmd.spec.args.iter().any(|a| a == "--ro-bind"));
             assert!(cmd.spec.args.iter().any(|a| a == "/tmp/work"));
             let bash_pos = cmd
@@ -78,7 +78,7 @@ fn the_outer_wrapper_keeps_its_scratch_file_off_every_writable_root() {
     assert_eq!(cmd.spec.args[0], "-c");
     let script = &cmd.spec.args[1];
     assert_eq!(cmd.spec.args[2], "sh");
-    assert_eq!(cmd.spec.args[3], "bwrap");
+    assert_eq!(Path::new(&cmd.spec.args[3]).file_name().unwrap(), "bwrap");
 
     assert!(
         script.contains("-p /tmp"),

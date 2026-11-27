@@ -363,6 +363,7 @@ fn the_capability_table_lists_what_the_daemon_reports() {
     let mut documented = documented_capabilities(&doc);
     let mut reported: Vec<String> = daemon::discovery::capabilities()
         .into_iter()
+        .chain(daemon::discovery::EMBEDDER_CAPABILITIES.iter().copied())
         .map(str::to_string)
         .collect();
     if !cfg!(feature = "mcp-oauth-jwt") {

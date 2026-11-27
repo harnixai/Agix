@@ -38,12 +38,12 @@ fn enforcement_agrees_with_the_selected_backend() {
         }
         SandboxMode::MacOSSandboxExec => {
             assert_eq!(w.enforcement, Enforcement::Full);
-            assert_eq!(w.spec.program, "sandbox-exec");
+            assert_eq!(w.spec.program, "/usr/bin/sandbox-exec");
         }
         SandboxMode::LinuxBwrap => {
             assert_eq!(w.enforcement, Enforcement::Full);
-            assert_eq!(w.spec.program, "sh");
-            assert_eq!(w.spec.args[3], "bwrap");
+            assert_eq!(Path::new(&w.spec.program).file_name().unwrap(), "sh");
+            assert_eq!(Path::new(&w.spec.args[3]).file_name().unwrap(), "bwrap");
         }
     }
 }
